@@ -16,11 +16,11 @@ En el panel del sitio independiente de `app.swiftportlogistic.com`:
 
 En el repositorio, abre **Settings → Secrets and variables → Actions** y crea:
 
-- `FTP_HOST`: servidor FTP mostrado por Hostinger.
 - `FTP_USER`: usuario de la cuenta FTP aislada.
 - `FTP_PASSWORD`: contraseña de esa cuenta.
 
 No guardes estos datos en archivos del repositorio.
+El servidor FTP público de Hostinger está configurado directamente en el flujo.
 
 ## 3. Publicar
 
