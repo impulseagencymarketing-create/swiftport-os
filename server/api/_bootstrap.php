@@ -154,6 +154,14 @@ function ensure_schema(): void
             due_date VARCHAR(40) NOT NULL
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
     );
+    $pdo->exec(
+        "CREATE TABLE IF NOT EXISTS app_operational_state (
+            id TINYINT UNSIGNED PRIMARY KEY,
+            data JSON NOT NULL,
+            updated_by BIGINT UNSIGNED NULL,
+            updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+    );
     seed_demo_finance_data($pdo);
 }
 
