@@ -40,13 +40,33 @@ jobs:
           sudo apt-get update
           sudo apt-get install --yes lftp
 
+      - name: Validar configuración FTP
+        env:
+          FTP_HOST: ${{ secrets.FTP_HOST }}
+          FTP_USER: ${{ secrets.FTP_USER }}
+          FTP_PASSWORD: ${{ secrets.FTP_PASSWORD }}
+        run: |
+          if [ -z "$FTP_HOST" ]; then
+            echo "::error::El secreto FTP_HOST está vacío o no existe."
+            exit 1
+          fi
+          if [ -z "$FTP_USER" ]; then
+            echo "::error::El secreto FTP_USER está vacío o no existe."
+            exit 1
+          fi
+          if [ -z "$FTP_PASSWORD" ]; then
+            echo "::error::El secreto FTP_PASSWORD está vacío o no existe."
+            exit 1
+          fi
+
       - name: Publicar dist en Hostinger
         env:
           FTP_HOST: ${{ secrets.FTP_HOST }}
           FTP_USER: ${{ secrets.FTP_USER }}
           FTP_PASSWORD: ${{ secrets.FTP_PASSWORD }}
         run: |
-          lftp -e "
+          set +e
+          FTP_RESULT=$(lftp -e "
             set ftp:ssl-force true;
             set ftp:ssl-protect-data true;
             set ssl:verify-certificate true;
@@ -54,4 +74,25 @@ jobs:
             open -u \"$FTP_USER\",\"$FTP_PASSWORD\" \"$FTP_HOST\";
             mirror --reverse --delete --verbose dist/ /;
             bye
-          "
+          " 2>&1)
+          FTP_STATUS=$?
+          set -e
+
+          if [ "$FTP_STATUS" -eq 0 ]; then
+            exit 0
+          fi
+
+          if echo "$FTP_RESULT" | grep -Eqi "login failed|authentication failed|530"; then
+            echo "::error::Hostinger rechazó el usuario o la contraseña FTP."
+          elif echo "$FTP_RESULT" | grep -Eqi "certificate|ssl|tls"; then
+            echo "::error::No se pudo validar la conexión segura FTPS de Hostinger."
+          elif echo "$FTP_RESULT" | grep -Eqi "name or service not known|resolve|unknown host"; then
+            echo "::error::FTP_HOST no es un servidor válido. Usa solo el hostname o la IP, sin https:// ni rutas."
+          elif echo "$FTP_RESULT" | grep -Eqi "connection refused|timed out|no route|failed to connect"; then
+            echo "::error::No se pudo conectar con el servidor FTP de Hostinger por el puerto 21."
+          elif echo "$FTP_RESULT" | grep -Eqi "permission denied|access failed|550"; then
+            echo "::error::La cuenta FTP no tiene permisos de escritura en su public_html."
+          else
+            echo "::error::La conexión FTPS falló por una causa no reconocida. Revisa los datos de la cuenta FTP de Hostinger."
+          fi
+          exit "$FTP_STATUS"
