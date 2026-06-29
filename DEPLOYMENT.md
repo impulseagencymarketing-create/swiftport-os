@@ -18,6 +18,11 @@ En el repositorio, abre **Settings → Secrets and variables → Actions** y cre
 
 - `FTP_USER`: usuario de la cuenta FTP aislada.
 - `FTP_PASSWORD`: contraseña de esa cuenta.
+- `DB_HOST`: servidor MySQL (en Hostinger normalmente `localhost`).
+- `DB_NAME`: nombre completo de la base de datos, incluido el prefijo de Hostinger.
+- `DB_USER`: usuario completo de MySQL, incluido el prefijo de Hostinger.
+- `DB_PASSWORD`: contraseña actual del usuario MySQL.
+- `APP_SETUP_TOKEN`: código largo y aleatorio para crear el primer administrador.
 
 No guardes estos datos en archivos del repositorio.
 El servidor FTP público de Hostinger está configurado directamente en el flujo.
@@ -28,10 +33,25 @@ Un cambio enviado a `main` ejecutará automáticamente:
 
 1. `npm ci`
 2. `npm run build`
-3. Sincronización de `dist` con `/public_html/` en la cuenta FTP aislada.
+3. Inclusión de la API PHP protegida dentro de `dist/api`.
+4. Creación de la configuración privada fuera de `public_html`.
+5. Sincronización de `dist` con `/public_html/` en la cuenta FTP aislada.
 
 También puede iniciarse manualmente desde **Actions → Publicar en Hostinger →
 Run workflow**.
+
+## Primer acceso
+
+Después de la primera publicación con autenticación, abre
+`https://app.swiftportlogistic.com/`. La app solicitará:
+
+1. Nombre y email del primer administrador.
+2. Una contraseña nueva de al menos 12 caracteres.
+3. El valor de `APP_SETUP_TOKEN`.
+
+Este formulario se cierra automáticamente después de crear la primera cuenta.
+Desde **Usuarios** el administrador puede crear perfiles de Operaciones,
+Finanzas o Administración.
 
 ## Seguridad
 
