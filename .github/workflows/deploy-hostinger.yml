@@ -21,10 +21,10 @@ jobs:
 
     steps:
       - name: Descargar el código
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Preparar Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm
@@ -51,7 +51,7 @@ jobs:
             set ftp:ssl-protect-data true;
             set ssl:verify-certificate true;
             set net:max-retries 2;
-            open --user \"$FTP_USER\" --password \"$FTP_PASSWORD\" \"$FTP_HOST\";
+            open -u \"$FTP_USER\",\"$FTP_PASSWORD\" \"$FTP_HOST\";
             mirror --reverse --delete --verbose dist/ /;
             bye
           "
