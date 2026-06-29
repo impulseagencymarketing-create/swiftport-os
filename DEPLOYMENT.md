@@ -28,7 +28,7 @@ Un cambio enviado a `main` ejecutará automáticamente:
 
 1. `npm ci`
 2. `npm run build`
-3. Sincronización de `dist` con el `public_html` aislado.
+3. Sincronización de `dist` con `/public_html/` en la cuenta FTP aislada.
 
 También puede iniciarse manualmente desde **Actions → Publicar en Hostinger →
 Run workflow**.

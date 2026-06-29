@@ -71,7 +71,7 @@ jobs:
             set ftp:ssl-protect-data true;
             set ssl:verify-certificate false;
             set net:max-retries 2;
-            mirror --reverse --delete --verbose dist/ /;
+            mirror --reverse --delete --verbose dist/ /public_html/;
             bye
           " 2>&1)
           FTP_STATUS=$?
