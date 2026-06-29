@@ -9,13 +9,14 @@ import {
   BadgeEuro, Sparkles, ArrowLeft, Save, LogOut, ShieldCheck, LockKeyhole, UserPlus, Eye
 } from 'lucide-react';
 import {
-  expedientesIniciales, movimientosAlmacen, transportesIniciales, tramitesAduana,
+  expedientesIniciales, movimientosAlmacen, transportesIniciales, tramitesAduana, eventosCalendarioIniciales,
   clientNames, timeline
 } from './data';
 import './styles.css';
 
 const NAV = [
   ['dashboard','Dashboard',LayoutDashboard],
+  ['calendario','Calendario',CalendarDays],
   ['expedientes','Expedientes',FolderKanban],
   ['almacen','Almacén',WarehouseIcon],
   ['transportes','Transportes',Truck],
@@ -26,6 +27,7 @@ const NAV = [
 ];
 const TITLES = {
   dashboard:['Dashboard','Vista general de la operativa'],
+  calendario:['Calendario','Planificación semanal del equipo'],
   expedientes:['Expedientes','Seguimiento completo por buque'],
   almacen:['Almacén','Entradas, ubicación y días de storage'],
   transportes:['Transportes','Planificación y asignación de conductores'],
@@ -121,6 +123,7 @@ function App({auth,finance,onFinanceChange,onLogout}){
   const [transports,setTransports]=useState(transportesIniciales);
   const [warehouseEntries,setWarehouseEntries]=useState(movimientosAlmacen);
   const [customs,setCustoms]=useState(tramitesAduana);
+  const [calendarEvents,setCalendarEvents]=useState(eventosCalendarioIniciales);
   const [team,setTeam]=useState([]);
   const [clientOptions,setClientOptions]=useState(clientNames);
   const [operationalLoaded,setOperationalLoaded]=useState(false);
@@ -130,8 +133,8 @@ function App({auth,finance,onFinanceChange,onLogout}){
   const notify=message=>{setToast(message);window.clearTimeout(window.__swiftportToast);window.__swiftportToast=window.setTimeout(()=>setToast(''),2600)};
   const navigate=id=>{setTab(canAccess(effectiveRole,id)?id:'dashboard');setMenuOpen(false);setSearch('')};
   const loadTeam=()=>api('/api/users/directory.php').then(result=>setTeam(result.users)).catch(reason=>notify(reason.message));
-  useEffect(()=>{loadTeam();api('/api/clients/directory.php').then(result=>setClientOptions(result.clients.map(item=>item.name))).catch(()=>{});api('/api/operational.php').then(result=>{if(result.data){setCases(result.data.cases);setTransports(result.data.transports);setWarehouseEntries(result.data.warehouseEntries);if(result.data.customs)setCustoms(result.data.customs)}setOperationalLoaded(true)}).catch(reason=>{setOperationalLoaded(true);notify(reason.message)})},[]);
-  const saveOperational=(nextCases=cases,nextTransports=transports,nextWarehouse=warehouseEntries,nextCustoms=customs)=>api('/api/operational.php',{method:'PUT',headers:{'X-CSRF-Token':auth.csrfToken},body:JSON.stringify({data:{cases:nextCases,transports:nextTransports,warehouseEntries:nextWarehouse,customs:nextCustoms}})}).catch(reason=>notify(reason.message));
+  useEffect(()=>{loadTeam();api('/api/clients/directory.php').then(result=>setClientOptions(result.clients.map(item=>item.name))).catch(()=>{});api('/api/operational.php').then(result=>{if(result.data){setCases(result.data.cases);setTransports(result.data.transports);setWarehouseEntries(result.data.warehouseEntries);if(result.data.customs)setCustoms(result.data.customs);if(result.data.calendarEvents)setCalendarEvents(result.data.calendarEvents)}setOperationalLoaded(true)}).catch(reason=>{setOperationalLoaded(true);notify(reason.message)})},[]);
+  const saveOperational=(nextCases=cases,nextTransports=transports,nextWarehouse=warehouseEntries,nextCustoms=customs,nextCalendar=calendarEvents)=>api('/api/operational.php',{method:'PUT',headers:{'X-CSRF-Token':auth.csrfToken},body:JSON.stringify({data:{cases:nextCases,transports:nextTransports,warehouseEntries:nextWarehouse,customs:nextCustoms,calendarEvents:nextCalendar}})}).catch(reason=>notify(reason.message));
   useEffect(()=>{
     if(!operationalLoaded||!team.length)return;
     const names=new Set(team.map(member=>member.fullName));
@@ -144,12 +147,13 @@ function App({auth,finance,onFinanceChange,onLogout}){
     const item={id:'SW-2026-'+String(nextNumber).padStart(4,'0'),buque:form.buque.toUpperCase(),cliente:form.cliente,puerto:form.puerto,eta:form.eta||'Por confirmar',estado:'Nuevo',prioridad:form.prioridad,conductor:'Sin asignar',servicios:['Recepción','Transporte'],bultos:Number(form.bultos)||0,peso:'Por registrar',progreso:8,siguiente:'Completar datos del expediente',aduana:'Por revisar'};
     const next=[item,...cases];setCases(next);saveOperational(next,transports,warehouseEntries);setSelectedId(item.id);setNewOpen(false);setTab('expedientes');notify('Expediente '+item.id+' creado');
   };
-  const updateTransport=updated=>{const nextTransports=transports.map(item=>item.id===updated.id?updated:item);const nextCases=cases.map(item=>item.id===updated.expediente?{...item,conductor:updated.conductor}:item);setTransports(nextTransports);setCases(nextCases);saveOperational(nextCases,nextTransports,warehouseEntries);notify('Transporte y expediente actualizados')};
+  const updateTransport=updated=>{const nextTransports=transports.map(item=>item.id===updated.id?updated:item);const nextCases=cases.map(item=>item.id===updated.expediente?{...item,conductor:updated.conductor}:item);const nextCalendar=calendarEvents.map(item=>item.transporte===updated.id?{...item,asignado:updated.conductor}:item);setTransports(nextTransports);setCases(nextCases);setCalendarEvents(nextCalendar);saveOperational(nextCases,nextTransports,warehouseEntries,customs,nextCalendar);notify('Transporte, expediente y calendario actualizados')};
   const updateCase=updated=>{const {importe,...operationalCase}=updated;const next=cases.map(item=>item.id===operationalCase.id?operationalCase:item);setCases(next);saveOperational(next,transports,warehouseEntries);notify('Expediente actualizado')};
   const updateClient=updated=>{const next={...finance,clients:finance.clients.map(item=>item.codigo===updated.codigo?updated:item)};onFinanceChange(next).then(()=>notify('Cliente y tarifas actualizados')).catch(reason=>notify(reason.message))};
   const updateInvoice=updated=>{const next={...finance,invoices:finance.invoices.map(item=>item.id===updated.id?updated:item)};onFinanceChange(next).then(()=>notify('Documento actualizado')).catch(reason=>notify(reason.message))};
   const updateWarehouseEntry=updated=>{const next=warehouseEntries.map(item=>item.ref===updated.ref?updated:item);setWarehouseEntries(next);saveOperational(cases,transports,next);notify('Entrada de almacén actualizada')};
   const updateCustom=updated=>{const next=customs.map(item=>item.id===updated.id?updated:item);setCustoms(next);saveOperational(cases,transports,warehouseEntries,next);notify('Trámite aduanero actualizado')};
+  const saveCalendarEvent=event=>{const exists=calendarEvents.some(item=>item.id===event.id);const nextCalendar=exists?calendarEvents.map(item=>item.id===event.id?event:item):[...calendarEvents,event];const nextTransports=transports.map(item=>item.id===event.transporte&&event.asignado!=='Sin asignar'?{...item,conductor:event.asignado,estado:item.estado==='Sin asignar'?'Asignado':item.estado}:item);const linked=nextTransports.find(item=>item.id===event.transporte);const nextCases=linked?cases.map(item=>item.id===linked.expediente?{...item,conductor:linked.conductor}:item):cases;setCalendarEvents(nextCalendar);setTransports(nextTransports);setCases(nextCases);saveOperational(nextCases,nextTransports,warehouseEntries,customs,nextCalendar);notify(exists?'Tarea actualizada':'Tarea añadida al calendario')};
   const advanceCase=id=>{const next=cases.map(item=>item.id===id?{...item,progreso:Math.min(100,item.progreso+12),siguiente:'Preparar salida de almacén',estado:'En curso'}:item);setCases(next);saveOperational(next,transports,warehouseEntries);notify('Operación registrada en la línea temporal')};
   const registerWarehouseEntry=form=>{
     const relatedCase=cases.find(item=>item.id===form.expediente);
@@ -188,6 +192,7 @@ function App({auth,finance,onFinanceChange,onLogout}){
       <div className="content">
         {previewUser&&<div className="preview-banner"><Eye/><span>Estás viendo la aplicación como <b>{previewUser.fullName}</b> ({ROLE_LABELS[previewUser.role]}). Tu cuenta sigue siendo administrador.</span><button onClick={()=>setPreviewUser(null)}>Salir de la vista previa</button></div>}
         {tab==='dashboard'&&<Dashboard cases={casesWithFinance} openCase={openCase} navigate={navigate} showFinance={showFinance} user={visibleUser}/>}
+        {tab==='calendario'&&<Calendario events={calendarEvents} team={team} cases={cases} transports={transports} saveEvent={saveCalendarEvent} openCase={openCase}/>}
         {tab==='expedientes'&&<Expedientes cases={casesWithFinance} selected={selected} select={setSelectedId} search={search} setSearch={setSearch} advanceCase={advanceCase} notify={notify} showFinance={showFinance} updateCase={updateCase} clientOptions={clientOptions}/>}
         {tab==='almacen'&&<Almacen items={warehouseEntries} cases={casesWithFinance} openCase={openCase} registerEntry={registerWarehouseEntry} updateEntry={updateWarehouseEntry} showFinance={showFinance} storageTotal={finance.warehouseStorageTotal}/>}
         {tab==='transportes'&&<Transportes items={transports} update={updateTransport} openCase={openCase} team={team}/>}
@@ -219,6 +224,19 @@ function MobileNav({tab,navigate,more,nav}){
 function Badge({children,tone}){return <span className={'badge '+(tone||statusTone(children))}><i/>{children}</span>}
 function SectionHeader({title,subtitle,action}){return <div className="section-header"><div><h2>{title}</h2>{subtitle&&<p>{subtitle}</p>}</div>{action}</div>}
 function Empty({text}){return <div className="empty"><Search/><b>Sin resultados</b><p>{text}</p></div>}
+
+const isoDate=date=>date.toISOString().slice(0,10);
+const addDays=(date,days)=>{const next=new Date(date);next.setDate(next.getDate()+days);return next};
+function Calendario({events,team,cases,transports,saveEvent,openCase}){
+  const [weekStart,setWeekStart]=useState(new Date('2026-06-29T12:00:00'));
+  const [editing,setEditing]=useState(null);
+  const days=Array.from({length:7},(_,index)=>addDays(weekStart,index));
+  const hours=Array.from({length:16},(_,index)=>index+6);
+  const dayLabel=new Intl.DateTimeFormat('es-ES',{weekday:'short',day:'numeric',month:'short'});
+  const newEvent=()=>setEditing({id:'EV-'+Date.now(),titulo:'',fecha:isoDate(days[0]),inicio:'09:00',fin:'10:00',asignado:'Sin asignar',expediente:'',transporte:'',color:'blue'});
+  return <><section className="calendar-toolbar"><div className="calendar-nav"><button className="button tertiary" onClick={()=>setWeekStart(addDays(weekStart,-7))}>‹</button><button className="button tertiary" onClick={()=>setWeekStart(new Date('2026-06-29T12:00:00'))}>Hoy</button><button className="button tertiary" onClick={()=>setWeekStart(addDays(weekStart,7))}>›</button><h2>{days[0].toLocaleDateString('es-ES',{day:'numeric',month:'long'})} – {days[6].toLocaleDateString('es-ES',{day:'numeric',month:'long',year:'numeric'})}</h2></div><button className="button primary" onClick={newEvent}><Plus/> Nueva tarea</button></section><section className="calendar-shell panel"><div className="calendar-scroll"><div className="calendar-head"><span className="calendar-zone">GMT+2</span>{days.map(day=><div key={isoDate(day)} className={isoDate(day)==='2026-06-29'?'today':''}><b>{dayLabel.format(day).replace('.','')}</b></div>)}</div><div className="calendar-body"><div className="calendar-hours">{hours.map(hour=><span key={hour}>{String(hour).padStart(2,'0')}:00</span>)}</div>{days.map(day=><div className="calendar-day" key={isoDate(day)}>{hours.map(hour=><i className="calendar-line" key={hour}/>)}
+    {events.filter(event=>event.fecha===isoDate(day)).map(event=>{const [startHour,startMinute]=event.inicio.split(':').map(Number);const [endHour,endMinute]=event.fin.split(':').map(Number);const top=((startHour*60+startMinute)-360)/60*64;const height=Math.max(34,((endHour*60+endMinute)-(startHour*60+startMinute))/60*64);return <button key={event.id} className={'calendar-event '+event.color} style={{top,height}} onClick={()=>setEditing(event)}><b>{event.inicio} · {event.titulo}</b><small>{event.asignado}</small>{event.expediente&&<small>{event.expediente}</small>}</button>})}</div>)}</div></div></section>{editing&&<CalendarEventModal item={editing} team={team} cases={cases} transports={transports} close={()=>setEditing(null)} submit={item=>{saveEvent(item);setEditing(null)}} openCase={openCase}/>}</>;
+}
 
 function Dashboard({cases,openCase,navigate,showFinance,user}){
   const active=cases.filter(item=>item.estado!=='Completado').length;
@@ -329,6 +347,12 @@ function InvoiceEditModal({item,close,submit}){
 function CustomEditModal({item,close,submit}){
   const [form,setForm]=useState({...item});const update=event=>setForm({...form,[event.target.name]:event.target.value});
   return <div className="modal-backdrop" onMouseDown={event=>{if(event.target===event.currentTarget)close()}}><section className="modal" role="dialog" aria-modal="true"><div className="modal-head"><div><span className="overline">{item.id}</span><h2>Editar trámite aduanero</h2></div><button className="icon-button" onClick={close}><X/></button></div><form onSubmit={event=>{event.preventDefault();submit(form)}}><label className="field"><span>Expediente</span><input name="expediente" value={form.expediente} onChange={update}/></label><label className="field"><span>Tipo</span><input name="tipo" value={form.tipo} onChange={update}/></label><label className="field"><span>Referencia</span><input name="referencia" value={form.referencia} onChange={update}/></label><label className="field"><span>Fecha límite</span><input name="limite" value={form.limite} onChange={update}/></label><label className="field"><span>Estado</span><select name="estado" value={form.estado} onChange={update}>{['Pendiente','Documentación','Liberado'].map(value=><option key={value}>{value}</option>)}</select></label><label className="field"><span>Nota</span><input name="nota" value={form.nota} onChange={update}/></label><div className="modal-actions wide"><button type="button" className="button tertiary" onClick={close}>Cancelar</button><button className="button primary"><Save/> Guardar trámite</button></div></form></section></div>;
+}
+
+function CalendarEventModal({item,team,cases,transports,close,submit,openCase}){
+  const [form,setForm]=useState({...item});const update=event=>setForm({...form,[event.target.name]:event.target.value});
+  const validTeam=team.filter(member=>['operations','admin'].includes(member.role));
+  return <div className="modal-backdrop" onMouseDown={event=>{if(event.target===event.currentTarget)close()}}><section className="modal" role="dialog" aria-modal="true"><div className="modal-head"><div><span className="overline">Planificación</span><h2>{item.titulo?'Editar tarea':'Nueva tarea'}</h2><p>Asigna una hora, un responsable y el trabajo relacionado.</p></div><button className="icon-button" onClick={close}><X/></button></div><form onSubmit={event=>{event.preventDefault();submit(form)}}><label className="field wide"><span>Tarea</span><input name="titulo" value={form.titulo} onChange={update} placeholder="Ej. Entrega a bordo" required autoFocus/></label><label className="field"><span>Fecha</span><input name="fecha" type="date" value={form.fecha} onChange={update} required/></label><label className="field"><span>Responsable</span><select name="asignado" value={form.asignado} onChange={update}><option>Sin asignar</option>{validTeam.map(member=><option key={member.id} value={member.fullName}>{member.fullName}</option>)}</select></label><label className="field"><span>Hora de inicio</span><input name="inicio" type="time" value={form.inicio} onChange={update} required/></label><label className="field"><span>Hora de fin</span><input name="fin" type="time" value={form.fin} onChange={update} required/></label><label className="field"><span>Expediente</span><select name="expediente" value={form.expediente} onChange={update}><option value="">Sin expediente</option>{cases.map(entry=><option key={entry.id} value={entry.id}>{entry.id} · {entry.buque}</option>)}</select></label><label className="field"><span>Transporte</span><select name="transporte" value={form.transporte} onChange={update}><option value="">Sin transporte</option>{transports.map(entry=><option key={entry.id} value={entry.id}>{entry.id} · {entry.ruta}</option>)}</select></label><label className="field wide"><span>Color</span><select name="color" value={form.color} onChange={update}><option value="blue">Azul</option><option value="teal">Verde</option><option value="orange">Naranja</option><option value="purple">Morado</option><option value="red">Rojo</option></select></label>{form.expediente&&<button type="button" className="button tertiary wide calendar-case-link" onClick={()=>{close();openCase(form.expediente)}}>Abrir expediente relacionado <ExternalLink/></button>}<div className="modal-actions wide"><button type="button" className="button tertiary" onClick={close}>Cancelar</button><button className="button primary"><Save/> Guardar tarea</button></div></form></section></div>;
 }
 
 function NewCaseModal({close,submit}){
