@@ -82,6 +82,18 @@ jobs:
             exit 0
           fi
 
+          export FTP_RESULT
+          SAFE_RESULT=$(python3 -c '
+          import os
+          result = os.environ.get("FTP_RESULT", "")
+          for key in ("FTP_USER", "FTP_PASSWORD"):
+              value = os.environ.get(key, "")
+              if value:
+                  result = result.replace(value, "***")
+          print(" | ".join(result.splitlines())[:800])
+          ')
+          echo "::error::Detalle FTPS seguro: $SAFE_RESULT"
+
           if echo "$FTP_RESULT" | grep -Eqi "login failed|authentication failed|530"; then
             echo "::error::Hostinger rechazó el usuario o la contraseña FTP."
           elif echo "$FTP_RESULT" | grep -Eqi "certificate|ssl|tls"; then
