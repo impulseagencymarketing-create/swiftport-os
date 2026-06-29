@@ -1,0 +1,57 @@
+name: Publicar en Hostinger
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hostinger-production
+  cancel-in-progress: true
+
+jobs:
+  build-and-deploy:
+    name: Compilar y publicar
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Descargar el código
+        uses: actions/checkout@v4
+
+      - name: Preparar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Instalar dependencias
+        run: npm ci
+
+      - name: Compilar la aplicación
+        run: npm run build
+
+      - name: Instalar cliente FTPS
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes lftp
+
+      - name: Publicar dist en Hostinger
+        env:
+          FTP_HOST: ${{ secrets.FTP_HOST }}
+          FTP_USER: ${{ secrets.FTP_USER }}
+          FTP_PASSWORD: ${{ secrets.FTP_PASSWORD }}
+        run: |
+          lftp -e "
+            set ftp:ssl-force true;
+            set ftp:ssl-protect-data true;
+            set ssl:verify-certificate true;
+            set net:max-retries 2;
+            open --user \"$FTP_USER\" --password \"$FTP_PASSWORD\" \"$FTP_HOST\";
+            mirror --reverse --delete --verbose dist/ /;
+            bye
+          "
