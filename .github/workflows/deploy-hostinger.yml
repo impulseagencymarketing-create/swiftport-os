@@ -104,11 +104,14 @@ jobs:
           FTP_PASSWORD: ${{ secrets.FTP_PASSWORD }}
         run: |
           set +e
-          FTP_RESULT=$(lftp -u "$FTP_USER","$FTP_PASSWORD" "$FTP_HOST" -e "
+          FTP_RESULT=$(timeout 240s lftp -u "$FTP_USER","$FTP_PASSWORD" "$FTP_HOST" -e "
             set ftp:ssl-force true;
             set ftp:ssl-protect-data true;
             set ssl:verify-certificate false;
+            set net:timeout 20;
             set net:max-retries 2;
+            set net:reconnect-interval-base 5;
+            set net:reconnect-interval-max 10;
             put .deploy/swiftport-config.php -o /swiftport-config.php;
             mirror --reverse --delete --verbose dist/ /public_html/;
             bye
