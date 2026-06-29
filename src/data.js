@@ -18,10 +18,10 @@ export const transportesIniciales = [
   {id:'TR-1039', expediente:'SW-2026-0044', ruta:'Puerto Bilbao → Almacén cliente', hora:'Ayer · 20:10', conductor:'Andrés M.', vehiculo:'5031 LBD', estado:'Entregado'}
 ];
 export const eventosCalendarioIniciales = [
-  {id:'EV-1001',titulo:'Recogida aeropuerto BCN',fecha:'2026-06-29',inicio:'09:15',fin:'10:30',asignado:'Sin asignar',expediente:'SW-2026-0046',transporte:'TR-1042',color:'blue'},
-  {id:'EV-1002',titulo:'Recepción de mercancía',fecha:'2026-06-29',inicio:'14:30',fin:'15:30',asignado:'Sin asignar',expediente:'SW-2026-0047',transporte:'',color:'teal'},
-  {id:'EV-1003',titulo:'Entrega Puerto Tarragona',fecha:'2026-06-30',inicio:'15:30',fin:'17:00',asignado:'Sin asignar',expediente:'SW-2026-0047',transporte:'TR-1044',color:'orange'},
-  {id:'EV-1004',titulo:'Entrega a bordo',fecha:'2026-07-01',inicio:'06:45',fin:'08:15',asignado:'Sin asignar',expediente:'SW-2026-0048',transporte:'TR-1043',color:'purple'}
+  {id:'EV-1001',titulo:'Recogida aeropuerto BCN',tipoServicio:'Transporte',fecha:'2026-06-29',inicio:'09:15',fin:'10:30',asignado:'Sin asignar',expediente:'SW-2026-0046',transporte:'TR-1042',color:'blue'},
+  {id:'EV-1002',titulo:'Recepción de mercancía',tipoServicio:'Recepción',fecha:'2026-06-29',inicio:'14:30',fin:'15:30',asignado:'Sin asignar',expediente:'SW-2026-0047',transporte:'',color:'teal'},
+  {id:'EV-1003',titulo:'Entrega Puerto Tarragona',tipoServicio:'Transporte',fecha:'2026-06-30',inicio:'15:30',fin:'17:00',asignado:'Sin asignar',expediente:'SW-2026-0047',transporte:'TR-1044',color:'orange'},
+  {id:'EV-1004',titulo:'Entrega a bordo',tipoServicio:'Transporte',fecha:'2026-07-01',inicio:'06:45',fin:'08:15',asignado:'Sin asignar',expediente:'SW-2026-0048',transporte:'TR-1043',color:'purple'}
 ];
 export const tramitesAduana = [
   {id:'AD-882', expediente:'SW-2026-0047', tipo:'T1', referencia:'T1ES0060218842', limite:'Hoy · 17:00', estado:'Pendiente', nota:'Falta autorización del consignatario'},
