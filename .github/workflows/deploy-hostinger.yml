@@ -66,12 +66,11 @@ jobs:
           FTP_PASSWORD: ${{ secrets.FTP_PASSWORD }}
         run: |
           set +e
-          FTP_RESULT=$(lftp -e "
+          FTP_RESULT=$(lftp -u "$FTP_USER","$FTP_PASSWORD" "$FTP_HOST" -e "
             set ftp:ssl-force true;
             set ftp:ssl-protect-data true;
             set ssl:verify-certificate false;
             set net:max-retries 2;
-            open -u \"$FTP_USER\",\"$FTP_PASSWORD\" \"$FTP_HOST\";
             mirror --reverse --delete --verbose dist/ /;
             bye
           " 2>&1)
