@@ -25,8 +25,8 @@ if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
 if (mb_strlen($fullName) < 2 || mb_strlen($fullName) > 120) {
     respond(['error' => 'Introduce un nombre válido.'], 422);
 }
-if (strlen($password) < 12) {
-    respond(['error' => 'La contraseña debe tener al menos 12 caracteres.'], 422);
+if (strlen($password) < 4) {
+    respond(['error' => 'La contraseña debe tener al menos 4 caracteres.'], 422);
 }
 
 $statement = db()->prepare(

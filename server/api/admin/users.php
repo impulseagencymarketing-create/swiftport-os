@@ -31,7 +31,7 @@ $role = (string) ($data['role'] ?? 'operations');
 
 if (!filter_var($email, FILTER_VALIDATE_EMAIL)
     || mb_strlen($fullName) < 2
-    || strlen($password) < 12
+    || strlen($password) < 4
     || !in_array($role, ['operations', 'finance', 'admin'], true)
 ) {
     respond(['error' => 'Revisa los datos del nuevo usuario.'], 422);

@@ -46,7 +46,7 @@ Después de la primera publicación con autenticación, abre
 `https://app.swiftportlogistic.com/`. La app solicitará:
 
 1. Nombre y email del primer administrador.
-2. Una contraseña nueva de al menos 12 caracteres.
+2. Una contraseña nueva de al menos 4 caracteres.
 3. El valor de `APP_SETUP_TOKEN`.
 
 Este formulario se cierra automáticamente después de crear la primera cuenta.
