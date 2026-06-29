@@ -62,6 +62,18 @@ const formatEtaDate=value=>{
   return String(value).toUpperCase();
 };
 const caseLabel=item=>[item.id,item.buque,formatEtaDate(item.eta),item.puerto].join(' - ').toUpperCase();
+const DOC_TYPES=['T1','LEVANTE ADUANERO','POD'];
+const normalizeMerchandise=item=>{
+  const count=Math.max(0,Number(item.bultos)||0);
+  const existing=Array.isArray(item.mercancias)?item.mercancias:[];
+  return {...item,mercancias:Array.from({length:count},(_,index)=>existing[index]||({
+    id:`${item.id}-B${String(index+1).padStart(2,'0')}`,
+    referencia:`BULTO ${index+1}`,
+    tipo:'PAQUETE',
+    peso:count===1?item.peso:'POR REGISTRAR',
+    documentos:[]
+  }))};
+};
 
 async function api(path,options={}){
   const response=await fetch(path,{credentials:'same-origin',...options,headers:{'Content-Type':'application/json',...(options.headers||{})}});
@@ -131,7 +143,7 @@ function App({auth,finance,onFinanceChange,onLogout}){
   const [menuOpen,setMenuOpen]=useState(false);
   const [newOpen,setNewOpen]=useState(false);
   const [search,setSearch]=useState('');
-  const [cases,setCases]=useState(expedientesIniciales);
+  const [cases,setCases]=useState(expedientesIniciales.map(normalizeMerchandise));
   const [selectedId,setSelectedId]=useState(expedientesIniciales[0].id);
   const [transports,setTransports]=useState(transportesIniciales);
   const [warehouseEntries,setWarehouseEntries]=useState(movimientosAlmacen);
@@ -146,7 +158,7 @@ function App({auth,finance,onFinanceChange,onLogout}){
   const notify=message=>{setToast(message);window.clearTimeout(window.__swiftportToast);window.__swiftportToast=window.setTimeout(()=>setToast(''),2600)};
   const navigate=id=>{setTab(canAccess(effectiveRole,id)?id:'dashboard');setMenuOpen(false);setSearch('')};
   const loadTeam=()=>api('/api/users/directory.php').then(result=>setTeam(result.users)).catch(reason=>notify(reason.message));
-  useEffect(()=>{loadTeam();api('/api/clients/directory.php').then(result=>setClientOptions(result.clients.map(item=>item.name))).catch(()=>{});api('/api/operational.php').then(result=>{if(result.data){setCases(result.data.cases);setTransports(result.data.transports);setWarehouseEntries(result.data.warehouseEntries);if(result.data.customs)setCustoms(result.data.customs);if(result.data.calendarEvents)setCalendarEvents(result.data.calendarEvents)}setOperationalLoaded(true)}).catch(reason=>{setOperationalLoaded(true);notify(reason.message)})},[]);
+  useEffect(()=>{loadTeam();api('/api/clients/directory.php').then(result=>setClientOptions(result.clients.map(item=>item.name))).catch(()=>{});api('/api/operational.php').then(result=>{if(result.data){setCases(result.data.cases.map(normalizeMerchandise));setTransports(result.data.transports);setWarehouseEntries(result.data.warehouseEntries);if(result.data.customs)setCustoms(result.data.customs);if(result.data.calendarEvents)setCalendarEvents(result.data.calendarEvents)}setOperationalLoaded(true)}).catch(reason=>{setOperationalLoaded(true);notify(reason.message)})},[]);
   const saveOperational=(nextCases=cases,nextTransports=transports,nextWarehouse=warehouseEntries,nextCustoms=customs,nextCalendar=calendarEvents)=>api('/api/operational.php',{method:'PUT',headers:{'X-CSRF-Token':auth.csrfToken},body:JSON.stringify({data:{cases:nextCases,transports:nextTransports,warehouseEntries:nextWarehouse,customs:nextCustoms,calendarEvents:nextCalendar}})}).catch(reason=>notify(reason.message));
   useEffect(()=>{
     if(!operationalLoaded||!team.length)return;
@@ -159,11 +171,11 @@ function App({auth,finance,onFinanceChange,onLogout}){
   const openCase=id=>{setSelectedId(id);navigate('expedientes')};
   const createCase=form=>{
     const nextNumber=49+cases.length-expedientesIniciales.length;
-    const item={id:'SW-2026-'+String(nextNumber).padStart(4,'0'),buque:form.buque.toUpperCase(),cliente:form.cliente,puerto:form.puerto,eta:form.eta||'Por confirmar',estado:'Nuevo',prioridad:form.prioridad,conductor:'Sin asignar',servicios:['Recepción','Transporte'],bultos:Number(form.bultos)||0,peso:'Por registrar',progreso:8,siguiente:'Completar datos del expediente',aduana:'Por revisar'};
+    const item=normalizeMerchandise({id:'SW-2026-'+String(nextNumber).padStart(4,'0'),buque:form.buque.toUpperCase(),cliente:form.cliente,puerto:form.puerto,eta:form.eta||'Por confirmar',estado:'Nuevo',prioridad:form.prioridad,conductor:'Sin asignar',servicios:['Recepción','Transporte'],bultos:Number(form.bultos)||0,peso:'Por registrar',progreso:8,siguiente:'Completar datos del expediente',aduana:'Por revisar'});
     const next=[item,...cases];setCases(next);saveOperational(next,transports,warehouseEntries);setSelectedId(item.id);setNewOpen(false);setTab('expedientes');notify('Expediente '+item.id+' creado');
   };
   const updateTransport=updated=>{const normalized={...updated,hora:formatSchedule(updated.fecha,updated.inicio,updated.fin)};const nextTransports=transports.map(item=>item.id===updated.id?normalized:item);const nextCases=cases.map(item=>item.id===updated.expediente?{...item,conductor:updated.conductor}:item);const linkedEvent=calendarEvents.find(item=>item.transporte===updated.id);const synchronized={titulo:updated.ruta,tipoServicio:'Transporte',fecha:updated.fecha,inicio:updated.inicio,fin:updated.fin,asignado:updated.conductor,expediente:updated.expediente,transporte:updated.id,color:driverTone(updated.conductor,team)};const nextCalendar=linkedEvent?calendarEvents.map(item=>item.transporte===updated.id?{...item,...synchronized}:item):[...calendarEvents,{id:'EV-'+Date.now(),...synchronized}];setTransports(nextTransports);setCases(nextCases);setCalendarEvents(nextCalendar);saveOperational(nextCases,nextTransports,warehouseEntries,customs,nextCalendar);notify('Transporte, expediente y calendario actualizados')};
-  const updateCase=updated=>{const {importe,...operationalCase}=updated;const next=cases.map(item=>item.id===operationalCase.id?operationalCase:item);setCases(next);saveOperational(next,transports,warehouseEntries);notify('Expediente actualizado')};
+  const updateCase=updated=>{const {importe,...rawCase}=updated;const operationalCase=normalizeMerchandise(rawCase);const next=cases.map(item=>item.id===operationalCase.id?operationalCase:item);setCases(next);saveOperational(next,transports,warehouseEntries);notify('Expediente actualizado')};
   const updateClient=updated=>{const next={...finance,clients:finance.clients.map(item=>item.codigo===updated.codigo?updated:item)};onFinanceChange(next).then(()=>notify('Cliente y tarifas actualizados')).catch(reason=>notify(reason.message))};
   const updateInvoice=updated=>{const next={...finance,invoices:finance.invoices.map(item=>item.id===updated.id?updated:item)};onFinanceChange(next).then(()=>notify('Documento actualizado')).catch(reason=>notify(reason.message))};
   const updateWarehouseEntry=updated=>{const next=warehouseEntries.map(item=>item.ref===updated.ref?updated:item);setWarehouseEntries(next);saveOperational(cases,transports,next);notify('Entrada de almacén actualizada')};
@@ -298,10 +310,18 @@ function Expedientes({cases,selected,select,search,setSearch,advanceCase,notify,
   return <div className={'case-layout '+(mobileDetail?'mobile-detail-open':'')}>
     <section className={'panel case-list '+(selected?'has-selection':'')}><div className="list-toolbar"><label className="search-box"><Search/><input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Buscar número, buque, ETA o puerto…"/></label><div className="filter-chips">{['Todos','En curso','Bloqueado','Planificado'].map(value=><button key={value} className={filter===value?'active':''} onClick={()=>setFilter(value)}>{value}</button>)}</div></div><div className="case-count">{filtered.length} expedientes</div>{filtered.length?filtered.map(item=><button key={item.id} className={'case-card '+(selected.id===item.id?'selected':'')} onClick={()=>{select(item.id);setMobileDetail(true)}}><div className="case-card-top"><span className="ship-icon"><Ship/></span><span><b>{caseLabel(item)}</b><small>{item.cliente}</small></span><Badge>{item.estado}</Badge></div><div className="case-card-meta"><span><MapPin/>{item.puerto}</span><span><CalendarDays/>{item.eta}</span></div><div className="case-progress"><span><i style={{width:item.progreso+'%'}}/></span><small>{item.progreso}%</small></div><p><b>Siguiente:</b> {item.siguiente}</p></button>):<Empty text="Prueba con otro término o estado."/>}</section>
     <section className="panel case-detail"><button className="mobile-detail-back" onClick={()=>setMobileDetail(false)}><ArrowLeft/> Expedientes</button><div className="detail-hero"><div><div className="detail-id">{selected.id} <Badge>{selected.estado}</Badge></div><h2>{selected.buque}</h2><p>{selected.cliente} · {selected.puerto}</p></div><button className="icon-button" aria-label="Editar expediente" onClick={()=>setEditOpen(true)}><PencilLine/></button></div><div className={'detail-stats '+(!showFinance?'detail-stats-three':'')}><Stat label="ETA" value={selected.eta} icon={Clock3}/><Stat label="Mercancía" value={selected.bultos+' bultos · '+selected.peso} icon={Box}/><Stat label="Conductor" value={selected.conductor} icon={UserRound}/>{showFinance&&<Stat label="Importe previsto" value={money(selected.importe)} icon={BadgeEuro}/>}</div><div className="detail-columns"><div><h3>Servicios</h3><div className="service-list">{selected.servicios.map(service=><span key={service}><CheckCircle2/>{service}</span>)}<span className="muted-service"><Circle/>Storage adicional</span></div><h3>Línea temporal</h3><div className="timeline">{timeline.map((event,index)=><div className={'timeline-event '+event.estado} key={event.titulo}><span className="timeline-marker">{event.estado==='done'?<CheckCircle2/>:<Circle/>}</span><time>{event.hora}</time><span><b>{event.titulo}</b><small>{event.detalle}</small></span></div>)}</div></div><aside className="detail-side"><div className="next-action"><span>Próxima acción</span><b>{selected.siguiente}</b><p>La operación quedará registrada en este expediente.</p><button className="button primary full" onClick={()=>advanceCase(selected.id)}><ClipboardCheck/> Registrar avance</button></div><div className="document-box"><h3>Documentos</h3><button onClick={()=>notify('Packing list abierto')}><FileText/><span><b>Packing list.pdf</b><small>1,2 MB · verificado</small></span><ExternalLink/></button><button onClick={()=>notify('POD todavía pendiente')}><Camera/><span><b>POD / fotografías</b><small>Pendiente de entrega</small></span><ChevronRight/></button><button className="upload" onClick={()=>notify('Selector de archivos preparado')}><UploadCloud/> Añadir documento</button></div></aside></div></section>
+    <section className="panel merchandise-case-panel"><MerchandisePanel item={selected} updateCase={updateCase}/></section>
     {editOpen&&<CaseEditModal item={selected} clientOptions={clientOptions} close={()=>setEditOpen(false)} submit={item=>{updateCase(item);setEditOpen(false)}}/>}
   </div>;
 }
 function Stat({label,value,icon:Icon}){return <div><Icon/><span><small>{label}</small><b>{value}</b></span></div>}
+function MerchandisePanel({item,updateCase}){
+  const merchandise=item.mercancias||[];
+  const updatePiece=(id,change)=>updateCase({...item,mercancias:merchandise.map(piece=>piece.id===id?{...piece,...change}:piece)});
+  const toggleDocument=(piece,document)=>{const documents=piece.documentos||[];updatePiece(piece.id,{documentos:documents.includes(document)?documents.filter(value=>value!==document):[...documents,document]})};
+  const ready=merchandise.filter(piece=>(piece.documentos||[]).includes('POD')).length;
+  return <><SectionHeader title="Mercancía y documentación" subtitle={`${merchandise.length} bultos · ${ready} con POD para entregar`}/><div className="merchandise-list">{merchandise.map((piece,index)=><details className="merchandise-item" key={piece.id}><summary><span className="box-icon"><Box/></span><span><b>{piece.referencia||`BULTO ${index+1}`}</b><small>{piece.tipo} · {piece.peso}</small></span><span className="document-count">{(piece.documentos||[]).length}/3 docs</span><ChevronRight/></summary><div className="merchandise-editor"><label className="field"><span>Tipo de mercancía</span><select value={piece.tipo} onChange={event=>updatePiece(piece.id,{tipo:event.target.value})}><option>PALLET</option><option>PAQUETE</option></select></label><label className="field"><span>Peso</span><input value={piece.peso} onChange={event=>updatePiece(piece.id,{peso:event.target.value.toUpperCase()})}/></label><div className="piece-documents"><span>Documentación impresa / disponible</span>{DOC_TYPES.map(document=><label key={document} className={(piece.documentos||[]).includes(document)?'checked':''}><input type="checkbox" checked={(piece.documentos||[]).includes(document)} onChange={()=>toggleDocument(piece,document)}/><FileCheck2/><b>{document}</b><small>{(piece.documentos||[]).includes(document)?'DISPONIBLE':'PENDIENTE'}</small></label>)}</div></div></details>)}</div></>;
+}
 
 function Almacen({items,cases,openCase,registerEntry,updateEntry,showFinance,storageTotal}){
   const [entryOpen,setEntryOpen]=useState(false);
