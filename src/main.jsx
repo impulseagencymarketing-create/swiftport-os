@@ -49,7 +49,19 @@ const statusTone = value => {
   return 'warning';
 };
 const money = value => new Intl.NumberFormat('es-ES',{style:'currency',currency:'EUR',maximumFractionDigits:0}).format(value);
-const caseLabel=item=>[item.id,item.buque,item.eta||'ETA por confirmar',item.puerto].join(' - ');
+const formatEtaDate=value=>{
+  if(!value||/confirmar/i.test(value))return 'ETA POR CONFIRMAR';
+  const iso=String(value).match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if(iso)return `${iso[3]}/${iso[2]}/${iso[1].slice(-2)}`;
+  const months={ene:'01',jan:'01',feb:'02',mar:'03',abr:'04',apr:'04',may:'05',jun:'06',jul:'07',ago:'08',aug:'08',sep:'09',oct:'10',nov:'11',dic:'12',dec:'12'};
+  const text=String(value).toLowerCase();
+  const match=text.match(/(\d{1,2})\s+([a-záéíóú]{3})/i);
+  if(match)return `${String(match[1]).padStart(2,'0')}/${months[match[2].slice(0,3)]||'00'}/26`;
+  const numeric=text.match(/(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})/);
+  if(numeric)return `${String(numeric[1]).padStart(2,'0')}/${String(numeric[2]).padStart(2,'0')}/${numeric[3].slice(-2)}`;
+  return String(value).toUpperCase();
+};
+const caseLabel=item=>[item.id,item.buque,formatEtaDate(item.eta),item.puerto].join(' - ').toUpperCase();
 
 async function api(path,options={}){
   const response=await fetch(path,{credentials:'same-origin',...options,headers:{'Content-Type':'application/json',...(options.headers||{})}});
