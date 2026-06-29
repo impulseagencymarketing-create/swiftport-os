@@ -62,17 +62,26 @@ const formatEtaDate=value=>{
   return String(value).toUpperCase();
 };
 const caseLabel=item=>[item.id,item.buque,formatEtaDate(item.eta),item.puerto].join(' - ').toUpperCase();
-const DOC_TYPES=['T1','LEVANTE ADUANERO','POD'];
+const DOC_TYPES=['T1','LEVANTE ADUANERO'];
 const normalizeMerchandise=item=>{
   const count=Math.max(0,Number(item.bultos)||0);
   const existing=Array.isArray(item.mercancias)?item.mercancias:[];
-  return {...item,mercancias:Array.from({length:count},(_,index)=>existing[index]||({
-    id:`${item.id}-B${String(index+1).padStart(2,'0')}`,
-    referencia:`BULTO ${index+1}`,
-    tipo:'PAQUETE',
-    peso:count===1?item.peso:'POR REGISTRAR',
-    documentos:[]
-  }))};
+  const lines=existing.length?existing.map((piece,index)=>({
+    ...piece,
+    id:piece.id||`${item.id}-M${index+1}`,
+    tipo:piece.tipo==='PAQUETE'?'CAJA':piece.tipo||'CAJA',
+    cantidad:Number(piece.cantidad)||1,
+    seguimiento:piece.seguimiento||'',
+    documentos:piece.documentos||[]
+  })):(count?[{id:`${item.id}-M1`,tipo:'CAJA',cantidad:count,seguimiento:'',peso:item.peso||'POR REGISTRAR',documentos:[]}]:[]);
+  const bultos=lines.reduce((sum,line)=>sum+Number(line.cantidad||0),0);
+  return {...item,bultos,mercancias:lines,documentacionMercancia:{
+    alcance:'individual',
+    tipoAduanero:'',
+    aduaneroDisponible:false,
+    podDisponible:false,
+    ...(item.documentacionMercancia||{})
+  }};
 };
 
 async function api(path,options={}){
@@ -185,18 +194,31 @@ function App({auth,finance,onFinanceChange,onLogout}){
   const registerWarehouseEntry=form=>{
     const relatedCase=cases.find(item=>item.id===form.expediente);
     const nextReference=319+warehouseEntries.length-movimientosAlmacen.length;
+    const reference='ALM-'+nextReference;
+    const merchandise=form.mercancias.map((line,index)=>({
+      id:`${form.expediente}-${reference}-M${index+1}`,
+      tipo:line.tipo,
+      cantidad:Number(line.cantidad)||1,
+      seguimiento:line.seguimiento.trim().toUpperCase(),
+      peso:'POR REGISTRAR',
+      documentos:[],
+      sourceEntry:reference
+    }));
+    const totalPackages=merchandise.reduce((sum,line)=>sum+line.cantidad,0);
     const item={
-      ref:'ALM-'+nextReference,
+      ref:reference,
       expediente:form.expediente,
       buque:relatedCase?.buque||'Sin buque',
       zona:form.zona.toUpperCase(),
       entrada:'29 Jun · '+new Date().toLocaleTimeString('es-ES',{hour:'2-digit',minute:'2-digit'}),
-      bultos:Number(form.bultos),
+      bultos:totalPackages,
       peso:Number(form.peso).toLocaleString('es-ES')+' kg',
+      mercancias:merchandise,
       dias:0,
       estado:'En stock'
     };
-    const next=[item,...warehouseEntries];setWarehouseEntries(next);saveOperational(cases,transports,next);
+    const nextCases=cases.map(entry=>{if(entry.id!==form.expediente)return entry;const existing=(entry.mercancias||[]);const hasRegistered=existing.some(line=>line.sourceEntry||line.seguimiento||(line.documentos||[]).length);return normalizeMerchandise({...entry,mercancias:[...(hasRegistered?existing:[]),...merchandise]})});
+    const next=[item,...warehouseEntries];setWarehouseEntries(next);setCases(nextCases);saveOperational(nextCases,transports,next);
     notify('Entrada '+item.ref+' registrada en '+item.zona);
   };
   const [title,subtitle]=TITLES[tab];
@@ -319,8 +341,10 @@ function MerchandisePanel({item,updateCase}){
   const merchandise=item.mercancias||[];
   const updatePiece=(id,change)=>updateCase({...item,mercancias:merchandise.map(piece=>piece.id===id?{...piece,...change}:piece)});
   const toggleDocument=(piece,document)=>{const documents=piece.documentos||[];updatePiece(piece.id,{documentos:documents.includes(document)?documents.filter(value=>value!==document):[...documents,document]})};
-  const ready=merchandise.filter(piece=>(piece.documentos||[]).includes('POD')).length;
-  return <><SectionHeader title="Mercancía y documentación" subtitle={`${merchandise.length} bultos · ${ready} con POD para entregar`}/><div className="merchandise-list">{merchandise.map((piece,index)=><details className="merchandise-item" key={piece.id}><summary><span className="box-icon"><Box/></span><span><b>{piece.referencia||`BULTO ${index+1}`}</b><small>{piece.tipo} · {piece.peso}</small></span><span className="document-count">{(piece.documentos||[]).length}/3 docs</span><ChevronRight/></summary><div className="merchandise-editor"><label className="field"><span>Tipo de mercancía</span><select value={piece.tipo} onChange={event=>updatePiece(piece.id,{tipo:event.target.value})}><option>PALLET</option><option>PAQUETE</option></select></label><label className="field"><span>Peso</span><input value={piece.peso} onChange={event=>updatePiece(piece.id,{peso:event.target.value.toUpperCase()})}/></label><div className="piece-documents"><span>Documentación impresa / disponible</span>{DOC_TYPES.map(document=><label key={document} className={(piece.documentos||[]).includes(document)?'checked':''}><input type="checkbox" checked={(piece.documentos||[]).includes(document)} onChange={()=>toggleDocument(piece,document)}/><FileCheck2/><b>{document}</b><small>{(piece.documentos||[]).includes(document)?'DISPONIBLE':'PENDIENTE'}</small></label>)}</div></div></details>)}</div></>;
+  const documentation=item.documentacionMercancia||{alcance:'individual',tipoAduanero:'',aduaneroDisponible:false,podDisponible:false};
+  const updateDocumentation=change=>updateCase({...item,documentacionMercancia:{...documentation,...change}});
+  const total=merchandise.reduce((sum,piece)=>sum+Number(piece.cantidad||0),0);
+  return <><SectionHeader title="Mercancía y documentación" subtitle={`${total} unidades · POD ${documentation.podDisponible?'DISPONIBLE':'PENDIENTE'}`}/><div className="global-documents"><label className="field"><span>Documento aduanero</span><select value={documentation.alcance} onChange={event=>updateDocumentation({alcance:event.target.value})}><option value="individual">INDIVIDUAL POR MERCANCÍA</option><option value="global">UNO PARA TODO EL EXPEDIENTE</option></select></label>{documentation.alcance==='global'&&<><label className="field"><span>Tipo</span><select value={documentation.tipoAduanero} onChange={event=>updateDocumentation({tipoAduanero:event.target.value})}><option value="">SIN ASIGNAR</option><option>T1</option><option>LEVANTE ADUANERO</option></select></label><label className={'document-switch '+(documentation.aduaneroDisponible?'checked':'')}><input type="checkbox" checked={documentation.aduaneroDisponible} onChange={event=>updateDocumentation({aduaneroDisponible:event.target.checked})}/><FileCheck2/><span><b>DOCUMENTO ADUANERO</b><small>{documentation.aduaneroDisponible?'DISPONIBLE':'PENDIENTE'}</small></span></label></>}<label className={'document-switch pod '+(documentation.podDisponible?'checked':'')}><input type="checkbox" checked={documentation.podDisponible} onChange={event=>updateDocumentation({podDisponible:event.target.checked})}/><ClipboardCheck/><span><b>POD CONJUNTO</b><small>{documentation.podDisponible?'DISPONIBLE PARA ENTREGA':'PENDIENTE'}</small></span></label></div><div className="merchandise-list">{merchandise.map((piece,index)=><details className="merchandise-item" key={piece.id}><summary><span className="box-icon"><Box/></span><span><b>{piece.cantidad} {piece.tipo}{piece.cantidad===1?'':'S'}</b><small>{piece.seguimiento?`TRACKING: ${piece.seguimiento}`:'SIN N.º DE SEGUIMIENTO'}</small></span><span className="document-count">{documentation.alcance==='global'?'DOC GLOBAL':`${(piece.documentos||[]).length}/2 DOCS`}</span><ChevronRight/></summary><div className="merchandise-editor"><label className="field"><span>Tipo</span><select value={piece.tipo} onChange={event=>updatePiece(piece.id,{tipo:event.target.value})}><option>CAJA</option><option>PALLET</option><option>SOBRE</option></select></label><label className="field"><span>Cantidad</span><input type="number" min="1" value={piece.cantidad} onChange={event=>updatePiece(piece.id,{cantidad:Number(event.target.value)||1})}/></label><label className="field wide"><span>N.º seguimiento (opcional)</span><input value={piece.seguimiento||''} onChange={event=>updatePiece(piece.id,{seguimiento:event.target.value.toUpperCase()})}/></label>{documentation.alcance==='individual'&&<div className="piece-documents"><span>Documento aduanero individual</span>{DOC_TYPES.map(document=><label key={document} className={(piece.documentos||[]).includes(document)?'checked':''}><input type="checkbox" checked={(piece.documentos||[]).includes(document)} onChange={()=>toggleDocument(piece,document)}/><FileCheck2/><b>{document}</b><small>{(piece.documentos||[]).includes(document)?'DISPONIBLE':'PENDIENTE'}</small></label>)}</div>}</div></details>)}</div></>;
 }
 
 function Almacen({items,cases,openCase,registerEntry,updateEntry,showFinance,storageTotal}){
@@ -389,6 +413,12 @@ function CustomEditModal({item,close,submit}){
   return <div className="modal-backdrop" onMouseDown={event=>{if(event.target===event.currentTarget)close()}}><section className="modal" role="dialog" aria-modal="true"><div className="modal-head"><div><span className="overline">{item.id}</span><h2>Editar trámite aduanero</h2></div><button className="icon-button" onClick={close}><X/></button></div><form onSubmit={event=>{event.preventDefault();submit(form)}}><label className="field"><span>Expediente</span><input name="expediente" value={form.expediente} onChange={update}/></label><label className="field"><span>Tipo</span><input name="tipo" value={form.tipo} onChange={update}/></label><label className="field"><span>Referencia</span><input name="referencia" value={form.referencia} onChange={update}/></label><label className="field"><span>Fecha límite</span><input name="limite" value={form.limite} onChange={update}/></label><label className="field"><span>Estado</span><select name="estado" value={form.estado} onChange={update}>{['Pendiente','Documentación','Liberado'].map(value=><option key={value}>{value}</option>)}</select></label><label className="field"><span>Nota</span><input name="nota" value={form.nota} onChange={update}/></label><div className="modal-actions wide"><button type="button" className="button tertiary" onClick={close}>Cancelar</button><button className="button primary"><Save/> Guardar trámite</button></div></form></section></div>;
 }
 
+function CargoManifest({item}){
+  if(!item)return null;
+  const documentation=item.documentacionMercancia||{};
+  return <div className="driver-manifest wide"><div><Box/><span><b>CARGA PARA EL CONDUCTOR</b><small>{item.buque} · {item.puerto}</small></span></div>{(item.mercancias||[]).map(piece=><p key={piece.id}><b>{piece.cantidad} {piece.tipo}{piece.cantidad===1?'':'S'}</b><span>{piece.seguimiento?`Tracking: ${piece.seguimiento}`:'Sin seguimiento'}</span></p>)}<footer><span>Aduanas: {documentation.alcance==='global'?(documentation.aduaneroDisponible?`${documentation.tipoAduanero} DISPONIBLE`:'PENDIENTE'):'DOCUMENTOS INDIVIDUALES'}</span><span>POD: {documentation.podDisponible?'DISPONIBLE':'PENDIENTE'}</span></footer></div>;
+}
+
 function CalendarEventModal({item,team,cases,transports,close,submit,openCase}){
   const [form,setForm]=useState({...item,tipoServicio:item.tipoServicio||(item.transporte?'Transporte':'Recepción')});
   const update=event=>{
@@ -397,7 +427,8 @@ function CalendarEventModal({item,team,cases,transports,close,submit,openCase}){
     setForm({...form,[event.target.name]:event.target.value});
   };
   const validTeam=team.filter(member=>['operations','admin'].includes(member.role));
-  return <div className="modal-backdrop" onMouseDown={event=>{if(event.target===event.currentTarget)close()}}><section className="modal" role="dialog" aria-modal="true"><div className="modal-head"><div><span className="overline">Planificación</span><h2>{item.titulo?'Editar tarea':'Nueva tarea'}</h2><p>Define el servicio, responsable y trabajo relacionado.</p></div><button className="icon-button" onClick={close}><X/></button></div><form onSubmit={event=>{event.preventDefault();submit(form)}}><label className="field"><span>Tipo de servicio</span><select name="tipoServicio" value={form.tipoServicio} onChange={update} autoFocus><option>Recepción</option><option>Transporte</option></select></label><label className="field"><span>Expediente / buque</span><select name="expediente" value={form.expediente} onChange={update} required><option value="">Seleccionar expediente</option>{cases.map(entry=><option key={entry.id} value={entry.id}>{entry.id} · {entry.buque}</option>)}</select></label><label className="field"><span>Fecha</span><input name="fecha" type="date" value={form.fecha} onChange={update} required/></label><label className="field"><span>Responsable</span><select name="asignado" value={form.asignado} onChange={update}><option>Sin asignar</option>{validTeam.map(member=><option key={member.id} value={member.fullName}>{member.fullName}</option>)}</select></label><label className="field"><span>Hora de inicio</span><input name="inicio" type="time" value={form.inicio} onChange={update} required/></label><label className="field"><span>Hora de fin</span><input name="fin" type="time" value={form.fin} onChange={update} required/></label>{form.tipoServicio==='Transporte'&&<label className="field wide"><span>Transporte relacionado</span><select name="transporte" value={form.transporte} onChange={update}><option value="">Sin transporte</option>{transports.map(entry=><option key={entry.id} value={entry.id}>{entry.id} · {entry.ruta}</option>)}</select></label>}<label className="field wide"><span>Notas del servicio</span><input name="titulo" value={form.titulo} onChange={update} placeholder="Información adicional"/></label>{form.expediente&&<button type="button" className="button tertiary wide calendar-case-link" onClick={()=>{close();openCase(form.expediente)}}>Abrir expediente relacionado <ExternalLink/></button>}<div className="modal-actions wide"><button type="button" className="button tertiary" onClick={close}>Cancelar</button><button className="button primary"><Save/> Guardar tarea</button></div></form></section></div>;
+  const relatedCase=cases.find(entry=>entry.id===form.expediente);
+  return <div className="modal-backdrop" onMouseDown={event=>{if(event.target===event.currentTarget)close()}}><section className="modal" role="dialog" aria-modal="true"><div className="modal-head"><div><span className="overline">Planificación</span><h2>{item.titulo?'Editar tarea':'Nueva tarea'}</h2><p>Define el servicio, responsable y trabajo relacionado.</p></div><button className="icon-button" onClick={close}><X/></button></div><form onSubmit={event=>{event.preventDefault();submit(form)}}><label className="field"><span>Tipo de servicio</span><select name="tipoServicio" value={form.tipoServicio} onChange={update} autoFocus><option>Recepción</option><option>Transporte</option></select></label><label className="field"><span>Expediente / buque</span><select name="expediente" value={form.expediente} onChange={update} required><option value="">Seleccionar expediente</option>{cases.map(entry=><option key={entry.id} value={entry.id}>{caseLabel(entry)}</option>)}</select></label><label className="field"><span>Fecha</span><input name="fecha" type="date" value={form.fecha} onChange={update} required/></label><label className="field"><span>Responsable</span><select name="asignado" value={form.asignado} onChange={update}><option>Sin asignar</option>{validTeam.map(member=><option key={member.id} value={member.fullName}>{member.fullName}</option>)}</select></label><label className="field"><span>Hora de inicio</span><input name="inicio" type="time" value={form.inicio} onChange={update} required/></label><label className="field"><span>Hora de fin</span><input name="fin" type="time" value={form.fin} onChange={update} required/></label>{form.tipoServicio==='Transporte'&&<label className="field wide"><span>Transporte relacionado</span><select name="transporte" value={form.transporte} onChange={update}><option value="">Sin transporte</option>{transports.map(entry=><option key={entry.id} value={entry.id}>{entry.id} · {entry.ruta}</option>)}</select></label>}<label className="field wide"><span>Notas del servicio</span><input name="titulo" value={form.titulo} onChange={update} placeholder="Información adicional"/></label><CargoManifest item={relatedCase}/>{form.expediente&&<button type="button" className="button tertiary wide calendar-case-link" onClick={()=>{close();openCase(form.expediente)}}>Abrir expediente relacionado <ExternalLink/></button>}<div className="modal-actions wide"><button type="button" className="button tertiary" onClick={close}>Cancelar</button><button className="button primary"><Save/> Guardar tarea</button></div></form></section></div>;
 }
 
 function NewCaseModal({close,submit}){
@@ -406,9 +437,12 @@ function NewCaseModal({close,submit}){
 }
 
 function WarehouseEntryModal({cases,close,submit}){
-  const [form,setForm]=useState({expediente:cases[0]?.id||'',zona:'A-01',bultos:'1',peso:'100'});
+  const [form,setForm]=useState({expediente:cases[0]?.id||'',zona:'A-01',peso:'100',mercancias:[{tipo:'CAJA',cantidad:'1',seguimiento:''}]});
   const update=e=>setForm({...form,[e.target.name]:e.target.value});
-  return <div className="modal-backdrop" role="presentation" onMouseDown={e=>{if(e.target===e.currentTarget)close()}}><section className="modal" role="dialog" aria-modal="true" aria-labelledby="warehouse-entry-title"><div className="modal-head"><div><span className="overline">Almacén</span><h2 id="warehouse-entry-title">Registrar entrada</h2><p>Vincula la mercancía a un expediente y asigna su ubicación.</p></div><button className="icon-button" aria-label="Cerrar" onClick={close}><X/></button></div><form onSubmit={e=>{e.preventDefault();submit(form)}}><label className="field wide"><span>Expediente / buque</span><select name="expediente" value={form.expediente} onChange={update}>{cases.map(item=><option value={item.id} key={item.id}>{item.id} · {item.buque}</option>)}</select></label><label className="field"><span>Ubicación *</span><input name="zona" value={form.zona} onChange={update} placeholder="Ej. A-01" required/></label><label className="field"><span>N.º de bultos *</span><input name="bultos" type="number" min="1" value={form.bultos} onChange={update} required/></label><label className="field wide"><span>Peso total (kg) *</span><input name="peso" type="number" min="1" step="0.1" value={form.peso} onChange={update} required/></label><div className="modal-actions wide"><button type="button" className="button tertiary" onClick={close}>Cancelar</button><button className="button primary"><Save/> Registrar entrada</button></div></form></section></div>;
+  const updateLine=(index,field,value)=>setForm({...form,mercancias:form.mercancias.map((line,lineIndex)=>lineIndex===index?{...line,[field]:value}:line)});
+  const addLine=()=>setForm({...form,mercancias:[...form.mercancias,{tipo:'CAJA',cantidad:'1',seguimiento:''}]});
+  const removeLine=index=>setForm({...form,mercancias:form.mercancias.filter((_,lineIndex)=>lineIndex!==index)});
+  return <div className="modal-backdrop" role="presentation" onMouseDown={e=>{if(e.target===e.currentTarget)close()}}><section className="modal" role="dialog" aria-modal="true" aria-labelledby="warehouse-entry-title"><div className="modal-head"><div><span className="overline">Almacén</span><h2 id="warehouse-entry-title">Registrar mercancía</h2><p>Añade todas las cajas, pallets y sobres recibidos.</p></div><button className="icon-button" aria-label="Cerrar" onClick={close}><X/></button></div><form onSubmit={e=>{e.preventDefault();submit(form)}}><label className="field wide"><span>Expediente</span><select name="expediente" value={form.expediente} onChange={update}>{cases.map(item=><option value={item.id} key={item.id}>{caseLabel(item)}</option>)}</select></label><label className="field"><span>Ubicación *</span><input name="zona" value={form.zona} onChange={update} placeholder="Ej. A-01" required/></label><label className="field"><span>Peso total (kg) *</span><input name="peso" type="number" min="0.1" step="0.1" value={form.peso} onChange={update} required/></label><div className="cargo-lines wide"><div className="cargo-lines-title"><b>Mercancías</b><button type="button" className="button secondary" onClick={addLine}><Plus/> Añadir tipo</button></div>{form.mercancias.map((line,index)=><div className="cargo-line" key={index}><label className="field"><span>Tipo</span><select value={line.tipo} onChange={event=>updateLine(index,'tipo',event.target.value)}><option>CAJA</option><option>PALLET</option><option>SOBRE</option></select></label><label className="field"><span>Cantidad</span><input type="number" min="1" value={line.cantidad} onChange={event=>updateLine(index,'cantidad',event.target.value)} required/></label><label className="field tracking-field"><span>N.º seguimiento (opcional)</span><input value={line.seguimiento} onChange={event=>updateLine(index,'seguimiento',event.target.value)} placeholder="Tracking / AWB"/></label>{form.mercancias.length>1&&<button type="button" className="icon-button remove-cargo" onClick={()=>removeLine(index)}><X/></button>}</div>)}</div><div className="modal-actions wide"><button type="button" className="button tertiary" onClick={close}>Cancelar</button><button className="button primary"><Save/> Registrar entrada</button></div></form></section></div>;
 }
 
 function WarehouseEditModal({item,cases,close,submit}){
