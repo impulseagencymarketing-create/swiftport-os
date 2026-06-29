@@ -33,7 +33,45 @@ jobs:
         run: npm ci
 
       - name: Compilar la aplicación
-        run: npm run build
+        run: |
+          npm run build
+          mkdir -p dist/api
+          cp -R server/api/. dist/api/
+
+      - name: Validar la API PHP
+        run: find server -name '*.php' -print0 | xargs -0 -n1 php -l
+
+      - name: Preparar configuración privada
+        env:
+          DB_HOST: ${{ secrets.DB_HOST }}
+          DB_NAME: ${{ secrets.DB_NAME }}
+          DB_USER: ${{ secrets.DB_USER }}
+          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+          APP_SETUP_TOKEN: ${{ secrets.APP_SETUP_TOKEN }}
+        run: |
+          for variable in DB_HOST DB_NAME DB_USER DB_PASSWORD APP_SETUP_TOKEN; do
+            if [ -z "${!variable}" ]; then
+              echo "::error::El secreto $variable está vacío o no existe."
+              exit 1
+            fi
+          done
+          mkdir -p .deploy
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          values = {
+              "db_host": os.environ["DB_HOST"],
+              "db_name": os.environ["DB_NAME"],
+              "db_user": os.environ["DB_USER"],
+              "db_password": os.environ["DB_PASSWORD"],
+              "setup_token": os.environ["APP_SETUP_TOKEN"],
+          }
+          payload = json.dumps(values, ensure_ascii=False)
+          config = "<?php\nreturn json_decode(<<<'JSON'\n" + payload + "\nJSON, true, 512, JSON_THROW_ON_ERROR);\n"
+          Path(".deploy/swiftport-config.php").write_text(config, encoding="utf-8")
+          PY
 
       - name: Instalar cliente FTPS
         run: |
@@ -71,6 +109,7 @@ jobs:
             set ftp:ssl-protect-data true;
             set ssl:verify-certificate false;
             set net:max-retries 2;
+            put .deploy/swiftport-config.php -o /swiftport-config.php;
             mirror --reverse --delete --verbose dist/ /public_html/;
             bye
           " 2>&1)
