@@ -195,10 +195,16 @@ function extract_local_service(array $email): array
     if ($transportDate === '' && $sampleService) {
         $transportDate = date_after_keywords($text, ['recoger muestras', 'retirar muestras', 'recogida de muestras', 'sample collection', 'collect samples', 'samples pickup', 'pick up samples']);
     }
+    if ($transportDate === '' && $sampleService && $eta !== '') {
+        $transportDate = $eta;
+    }
     $receptionTime = labeled_time($text, ['hora recepción', 'hora de recepción', 'reception time', 'receiving time']);
     $transportTime = labeled_time($text, ['hora transporte', 'hora de transporte', 'transport time', 'delivery time', 'hora entrega', 'pickup time']);
     $pickup = labeled_value($text, ['recogida', 'pickup', 'collect from', 'origen', 'origin']);
     $delivery = labeled_value($text, ['entrega', 'delivery', 'deliver to', 'destino', 'destination']);
+    if ($pickup === '' && $sampleService && $vessel !== '') {
+        $pickup = 'M/V ' . $vessel . ($port !== '' ? ' · ' . $port : '');
+    }
     $cargo = labeled_value($text, ['mercancía', 'mercancia', 'cargo', 'goods', 'packages', 'bultos']);
     if ($cargo === '' && $sampleService) {
         $cargo = 'RECOGIDA DE MUESTRAS';

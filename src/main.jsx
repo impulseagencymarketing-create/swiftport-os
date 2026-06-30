@@ -463,7 +463,7 @@ function Correos({csrfToken,notify,openCase,reloadOperational}){
     catch(reason){setError(reason.message)}
   };
   const reprocess=async item=>{
-    try{const result=await api('/api/mail/review.php',{method:'PUT',headers:{'X-CSRF-Token':csrfToken},body:JSON.stringify({id:item.id,action:'reprocess'})});notify(result.status==='review'?'Servicio detectado: revisa sus datos':'El correo sigue sin datos operativos suficientes');setFilter(result.status);load(result.status)}
+    try{const result=await api('/api/mail/review.php',{method:'PUT',headers:{'X-CSRF-Token':csrfToken},body:JSON.stringify({id:item.id,action:'reprocess'})});notify(result.status==='processed'?`Trabajo creado automáticamente: ${result.caseRef}`:result.status==='review'?'Servicio detectado, pero faltan datos en el correo':'El correo sigue sin datos operativos suficientes');if(result.status==='processed')await reloadOperational();setFilter(result.status);load(result.status)}
     catch(reason){setError(reason.message)}
   };
   const approve=async(item,extracted)=>{

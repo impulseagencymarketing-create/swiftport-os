@@ -28,6 +28,14 @@ if ($action === 'reprocess') {
     if (empty($data['is_service'])) {
         $status = 'ignored';
         $reason = 'No se ha detectado una solicitud operativa';
+    } elseif (!$reasons) {
+        try {
+            $caseRef = apply_service_email($id, $data, (int) $user['id']);
+            audit((int) $user['id'], 'mail.reprocess.auto', ['mailId' => $id, 'caseRef' => $caseRef]);
+            respond(['ok' => true, 'status' => 'processed', 'caseRef' => $caseRef]);
+        } catch (Throwable $error) {
+            respond(['error' => 'No se pudo crear el trabajo: ' . $error->getMessage()], 500);
+        }
     } else {
         $status = 'review';
         $reason = $reasons ? implode('. ', $reasons) : 'Servicio detectado; confirma los datos para crear el trabajo';
