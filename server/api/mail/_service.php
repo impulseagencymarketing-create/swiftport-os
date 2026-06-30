@@ -227,11 +227,55 @@ function sanitize_email_text(string $subject, string $body): string
     return trim(mb_substr($text, 0, 30000));
 }
 
+function openai_error_code_for_status(int $statusCode): string
+{
+    if ($statusCode === 400) {
+        return 'HTTP 400';
+    }
+    if ($statusCode === 401) {
+        return 'HTTP 401';
+    }
+    if ($statusCode === 403) {
+        return 'HTTP 403';
+    }
+    if ($statusCode === 429) {
+        return 'HTTP 429';
+    }
+    if ($statusCode >= 500) {
+        return '5XX';
+    }
+    if ($statusCode >= 400) {
+        return 'HTTP 400';
+    }
+    return 'respuesta inválida';
+}
+
+function openai_error_code_from_exception(Throwable $error): string
+{
+    $message = trim($error->getMessage());
+    if (in_array($message, ['HTTP 400', 'HTTP 401', 'HTTP 403', 'HTTP 429', '5XX', 'error de conexión', 'respuesta inválida'], true)) {
+        return $message;
+    }
+    if (preg_match('/^HTTP\s+\d{3}$/i', $message) === 1) {
+        return strtoupper($message);
+    }
+    if (stripos($message, 'conex') !== false) {
+        return 'error de conexión';
+    }
+    return 'respuesta inválida';
+}
+
+function format_ai_unavailable_reason(array $data): string
+{
+    $code = trim((string) ($data['ai_error_code'] ?? ''));
+    return $code === '' ? 'IA no disponible' : 'IA no disponible (' . $code . ')';
+}
+
 function call_openai_extraction(string $text, array $email): array
 {
     $apiKey = config('openai_api_key');
     if ($apiKey === '') {
-        throw new RuntimeException('No hay clave de OpenAI configurada.');
+        throw new RuntimeException('HTTP 401');
     }
 
     $schema = [
@@ -338,13 +382,17 @@ PROMPT;
     $error = curl_error($ch);
     curl_close($ch);
 
-    if ($response === false || $statusCode >= 400) {
-        throw new RuntimeException($error !== '' ? $error : 'OpenAI devolvió un error HTTP ' . $statusCode);
+    if ($response === false) {
+        throw new RuntimeException('error de conexión');
+    }
+
+    if ($statusCode >= 400) {
+        throw new RuntimeException(openai_error_code_for_status($statusCode));
     }
 
     $decoded = json_decode($response, true);
     if (!is_array($decoded)) {
-        throw new RuntimeException('La respuesta de OpenAI no es válida.');
+        throw new RuntimeException('respuesta inválida');
     }
 
     $content = '';
@@ -368,12 +416,12 @@ PROMPT;
     }
 
     if ($content === '') {
-        throw new RuntimeException('OpenAI no devolvió contenido JSON.');
+        throw new RuntimeException('respuesta inválida');
     }
 
     $parsed = json_decode($content, true);
     if (!is_array($parsed)) {
-        throw new RuntimeException('OpenAI no devolvió JSON válido.');
+        throw new RuntimeException('respuesta inválida');
     }
 
     return normalize_extracted_payload($parsed);
@@ -483,7 +531,8 @@ function extract_local_service(array $email): array
 
     try {
         return call_openai_extraction($text, $email);
-    } catch (Throwable) {
+    } catch (Throwable $error) {
+        $aiErrorCode = openai_error_code_from_exception($error);
         return [
             'is_service' => false,
             'confidence' => 0.0,
@@ -496,7 +545,8 @@ function extract_local_service(array $email): array
             'reception' => ['required' => false, 'date' => '', 'time' => '', 'location' => ''],
             'transport' => ['required' => false, 'date' => '', 'time' => '', 'pickup' => '', 'delivery' => ''],
             'ai_unavailable' => true,
-            'manual_review_reason' => 'IA no disponible',
+            'ai_error_code' => $aiErrorCode,
+            'manual_review_reason' => format_ai_unavailable_reason(['ai_error_code' => $aiErrorCode]),
         ];
     }
 }
@@ -505,7 +555,7 @@ function service_review_reasons(array $data): array
 {
     $reasons = [];
     if (!empty($data['ai_unavailable'])) {
-        $reasons[] = 'IA no disponible';
+        $reasons[] = format_ai_unavailable_reason($data);
         return $reasons;
     }
     if (empty($data['is_service'])) {
@@ -759,7 +809,7 @@ function process_mailboxes(string $triggerType): array
                 $shouldIgnore = !$isService && $confidence >= 0.90;
                 $status = $aiUnavailable ? 'review' : ($shouldIgnore ? 'ignored' : 'review');
                 $reason = $aiUnavailable
-                    ? 'IA no disponible'
+                    ? format_ai_unavailable_reason($data)
                     : ($shouldIgnore
                         ? 'No se ha detectado una solicitud operativa'
                         : ($isService
