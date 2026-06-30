@@ -58,3 +58,17 @@ Finanzas o Administración.
 El despliegue elimina del destino los archivos que ya no existan en `dist`.
 Por eso la cuenta FTP debe estar limitada exclusivamente al `public_html` de
 la app y nunca al directorio de la web principal.
+# Procesamiento automático de correos
+
+La aplicación puede revisar los buzones desde el propio hosting, sin servicios de pago.
+
+En Hostinger, abre **Avanzado → Tareas cron** y crea una tarea cada 10 minutos con:
+
+```bash
+php /home/u443176985/domains/app.swiftportlogistic.com/public_html/api/mail/process.php
+```
+
+Si Hostinger muestra una ruta raíz distinta en el Administrador de archivos, conserva esa ruta y termina siempre en:
+`/public_html/api/mail/process.php`.
+
+El proceso es de solo lectura sobre IMAP, no marca ni elimina mensajes y evita duplicados.

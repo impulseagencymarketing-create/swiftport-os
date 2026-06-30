@@ -48,8 +48,12 @@ jobs:
           DB_USER: ${{ secrets.DB_USER }}
           DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
           APP_SETUP_TOKEN: ${{ secrets.APP_SETUP_TOKEN }}
+          INFO_EMAIL_USER: ${{ secrets.INFO_EMAIL_USER }}
+          INFO_EMAIL_PASSWORD: ${{ secrets.INFO_EMAIL_PASSWORD }}
+          OPERATIONS_EMAIL_USER: ${{ secrets.OPERATIONS_EMAIL_USER }}
+          OPERATIONS_EMAIL_PASSWORD: ${{ secrets.OPERATIONS_EMAIL_PASSWORD }}
         run: |
-          for variable in DB_HOST DB_NAME DB_USER DB_PASSWORD APP_SETUP_TOKEN; do
+          for variable in DB_HOST DB_NAME DB_USER DB_PASSWORD APP_SETUP_TOKEN INFO_EMAIL_USER INFO_EMAIL_PASSWORD OPERATIONS_EMAIL_USER OPERATIONS_EMAIL_PASSWORD; do
             if [ -z "${!variable}" ]; then
               echo "::error::El secreto $variable está vacío o no existe."
               exit 1
@@ -67,6 +71,10 @@ jobs:
               "db_user": os.environ["DB_USER"],
               "db_password": os.environ["DB_PASSWORD"],
               "setup_token": os.environ["APP_SETUP_TOKEN"],
+              "info_email_user": os.environ["INFO_EMAIL_USER"],
+              "info_email_password": os.environ["INFO_EMAIL_PASSWORD"],
+              "operations_email_user": os.environ["OPERATIONS_EMAIL_USER"],
+              "operations_email_password": os.environ["OPERATIONS_EMAIL_PASSWORD"],
           }
           payload = json.dumps(values, ensure_ascii=False)
           config = "<?php\nreturn json_decode(<<<'JSON'\n" + payload + "\nJSON, true, 512, JSON_THROW_ON_ERROR);\n"

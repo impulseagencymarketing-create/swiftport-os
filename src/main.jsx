@@ -6,7 +6,8 @@ import {
   PackageCheck, CircleAlert, WalletCards, CalendarDays, MapPin, Clock3, CheckCircle2,
   Circle, Camera, Box, Scale, Layers3, Navigation, UserRound, FileText, UploadCloud,
   Download, Filter, CircleDollarSign, ExternalLink, Mail, PencilLine, ClipboardCheck,
-  BadgeEuro, Sparkles, ArrowLeft, Save, LogOut, ShieldCheck, LockKeyhole, UserPlus, Eye
+  BadgeEuro, Sparkles, ArrowLeft, Save, LogOut, ShieldCheck, LockKeyhole, UserPlus, Eye,
+  RefreshCw
 } from 'lucide-react';
 import {
   expedientesIniciales, movimientosAlmacen, transportesIniciales, tramitesAduana, eventosCalendarioIniciales,
@@ -21,6 +22,7 @@ const NAV = [
   ['almacen','Almacén',WarehouseIcon],
   ['transportes','Transportes',Truck],
   ['aduanas','Aduanas',FileCheck2],
+  ['correos','Correos',Mail],
   ['clientes','Clientes / Tarifas',UsersRound],
   ['facturacion','Facturación',ReceiptText],
   ['usuarios','Usuarios',ShieldCheck]
@@ -32,6 +34,7 @@ const TITLES = {
   almacen:['Almacén','Entradas, ubicación y días de storage'],
   transportes:['Transportes','Planificación y asignación de conductores'],
   aduanas:['Aduanas','Documentación y control de despachos'],
+  correos:['Correos automáticos','Servicios recibidos por info@ y operations@'],
   clientes:['Clientes y tarifas','Condiciones comerciales por cliente'],
   facturacion:['Facturación','Servicios listos para revisar y exportar'],
   usuarios:['Usuarios y permisos','Control de acceso al equipo']
@@ -39,6 +42,7 @@ const TITLES = {
 const ROLE_LABELS={operations:'Operaciones',finance:'Finanzas',admin:'Administración'};
 const canAccess=(role,id)=>{
   if (['clientes','facturacion'].includes(id)) return ['finance','admin'].includes(role);
+  if (id==='correos') return ['operations','admin'].includes(role);
   if (id==='usuarios') return role==='admin';
   return true;
 };
@@ -106,7 +110,7 @@ const localDateTimeValue=()=>{
   date.setMinutes(date.getMinutes()-date.getTimezoneOffset());
   return date.toISOString().slice(0,16);
 };
-const formatReceptionDate=value=>value?new Date(value).toLocaleString('es-ES',{day:'2-digit',month:'2-digit',year:'2-digit',hour:'2-digit',minute:'2-digit'}):'Sin fecha';
+const formatReceptionDate=value=>value?new Date(String(value).replace(' ','T')).toLocaleString('es-ES',{day:'2-digit',month:'2-digit',year:'2-digit',hour:'2-digit',minute:'2-digit'}):'Sin fecha';
 const documentLabel=name=>{
   const normalized=String(name||'').toLowerCase();
   if(normalized.includes('packing'))return 'PACKING LIST';
@@ -191,7 +195,8 @@ function App({auth,finance,onFinanceChange,onLogout}){
   const notify=message=>{setToast(message);window.clearTimeout(window.__swiftportToast);window.__swiftportToast=window.setTimeout(()=>setToast(''),2600)};
   const navigate=id=>{setTab(canAccess(effectiveRole,id)?id:'dashboard');setMenuOpen(false);setSearch('')};
   const loadTeam=()=>api('/api/users/directory.php').then(result=>setTeam(result.users)).catch(reason=>notify(reason.message));
-  useEffect(()=>{loadTeam();api('/api/clients/directory.php').then(result=>setClientOptions(result.clients.map(item=>item.name))).catch(()=>{});api('/api/operational.php').then(result=>{if(result.data){setCases(result.data.cases.map(normalizeMerchandise));setTransports(result.data.transports);setWarehouseEntries(result.data.warehouseEntries);if(result.data.customs)setCustoms(result.data.customs);if(result.data.calendarEvents)setCalendarEvents(result.data.calendarEvents)}setOperationalLoaded(true)}).catch(reason=>{setOperationalLoaded(true);notify(reason.message)})},[]);
+  const loadOperational=()=>api('/api/operational.php').then(result=>{if(result.data){setCases(result.data.cases.map(normalizeMerchandise));setTransports(result.data.transports);setWarehouseEntries(result.data.warehouseEntries);if(result.data.customs)setCustoms(result.data.customs);if(result.data.calendarEvents)setCalendarEvents(result.data.calendarEvents)}setOperationalLoaded(true)}).catch(reason=>{setOperationalLoaded(true);notify(reason.message)});
+  useEffect(()=>{loadTeam();api('/api/clients/directory.php').then(result=>setClientOptions(result.clients.map(item=>item.name))).catch(()=>{});loadOperational()},[]);
   const saveOperational=(nextCases=cases,nextTransports=transports,nextWarehouse=warehouseEntries,nextCustoms=customs,nextCalendar=calendarEvents)=>api('/api/operational.php',{method:'PUT',headers:{'X-CSRF-Token':auth.csrfToken},body:JSON.stringify({data:{cases:nextCases,transports:nextTransports,warehouseEntries:nextWarehouse,customs:nextCustoms,calendarEvents:nextCalendar}})}).catch(reason=>notify(reason.message));
   useEffect(()=>{
     if(!operationalLoaded||!team.length)return;
@@ -291,6 +296,7 @@ function App({auth,finance,onFinanceChange,onLogout}){
         {tab==='almacen'&&<Almacen items={warehouseEntries} cases={casesWithFinance} openCase={openCase} registerEntry={registerWarehouseEntry} updateEntry={updateWarehouseEntry} showFinance={showFinance} storageTotal={finance.warehouseStorageTotal} csrfToken={auth.csrfToken}/>}
         {tab==='transportes'&&<Transportes items={transports} update={updateTransport} openCase={openCase} team={team}/>}
         {tab==='aduanas'&&<Aduanas items={customs} update={updateCustom} openCase={openCase} notify={notify}/>}
+        {tab==='correos'&&<Correos csrfToken={auth.csrfToken} notify={notify} openCase={openCase} reloadOperational={loadOperational}/>}
         {tab==='clientes'&&showFinance&&<Clientes notify={notify} clients={finance.clients} updateClient={updateClient}/>}
         {tab==='facturacion'&&showFinance&&<Facturacion openCase={openCase} notify={notify} invoices={finance.invoices} updateInvoice={updateInvoice}/>}
         {tab==='usuarios'&&user.role==='admin'&&!previewUser&&<Usuarios csrfToken={auth.csrfToken} notify={notify} onPreview={startPreview} onUsersChanged={loadTeam}/>}
@@ -423,6 +429,61 @@ function Facturacion({openCase,notify,invoices,updateInvoice}){
   const [editing,setEditing]=useState(null);
   const total=invoices.filter(item=>item.estado!=='Enviada').reduce((sum,item)=>sum+item.importe,0);
   return <><section className="billing-hero"><div><span>Importe pendiente de gestión</span><strong>{money(total)}</strong><small>{invoices.filter(item=>item.estado!=='Enviada').length} documentos · junio 2026</small></div><div><span className="holded-mark">H</span><div><b>Integración con Holded</b><small>Exportación manual en este MVP</small></div></div><button className="button primary" onClick={()=>notify('CSV generado con '+invoices.length+' documentos')}><Download/> Exportar selección</button></section><section className="panel"><SectionHeader title="Documentos de facturación" subtitle="Revisa conceptos antes de exportar"/><div className="responsive-table billing-table"><div className="table-head"><span>Documento / expediente</span><span>Cliente</span><span>Concepto</span><span>Importe</span><span>Estado</span><span/></div>{invoices.map(item=><div className="table-row" key={item.id}><span className="primary-cell"><span className="invoice-icon"><ReceiptText/></span><span><b>{item.id}</b><button onClick={()=>openCase(item.expediente)}>{item.expediente}</button></span></span><span data-label="Cliente">{item.cliente}</span><span data-label="Concepto">{item.concepto}</span><strong data-label="Importe">{money(item.importe)}</strong><span data-label="Estado"><Badge>{item.estado}</Badge></span><button className="icon-button" aria-label={'Editar '+item.id} onClick={()=>setEditing(item)}><PencilLine/></button></div>)}</div></section>{editing&&<InvoiceEditModal item={editing} close={()=>setEditing(null)} submit={item=>{updateInvoice(item);setEditing(null)}}/>}</>;
+}
+
+const MAIL_STATUS={review:'Revisar',processed:'Creado',ignored:'Descartado',error:'Error'};
+function Correos({csrfToken,notify,openCase,reloadOperational}){
+  const [items,setItems]=useState([]);
+  const [counts,setCounts]=useState({review:0,processed:0,ignored:0,error:0});
+  const [lastRun,setLastRun]=useState(null);
+  const [filter,setFilter]=useState('all');
+  const [loading,setLoading]=useState(true);
+  const [processing,setProcessing]=useState(false);
+  const [editing,setEditing]=useState(null);
+  const [error,setError]=useState('');
+  const load=async(nextFilter=filter)=>{
+    setLoading(true);setError('');
+    try{const result=await api('/api/mail/inbox.php?status='+nextFilter);setItems(result.items);setCounts(result.counts);setLastRun(result.lastRun)}
+    catch(reason){setError(reason.message)}
+    finally{setLoading(false)}
+  };
+  useEffect(()=>{load(filter)},[filter]);
+  const process=async()=>{
+    setProcessing(true);setError('');
+    try{
+      const result=await api('/api/mail/process.php',{method:'POST',headers:{'X-CSRF-Token':csrfToken},body:'{}'});
+      const summary=result.summary;
+      notify(`${summary.scanned} correos nuevos · ${summary.processed} trabajos creados · ${summary.review} para revisar`);
+      await Promise.all([load(filter),reloadOperational()]);
+    }catch(reason){setError(reason.message)}
+    finally{setProcessing(false)}
+  };
+  const ignore=async item=>{
+    try{await api('/api/mail/review.php',{method:'PUT',headers:{'X-CSRF-Token':csrfToken},body:JSON.stringify({id:item.id,action:'ignore'})});notify('Correo descartado');load(filter)}
+    catch(reason){setError(reason.message)}
+  };
+  const approve=async(item,extracted)=>{
+    const result=await api('/api/mail/review.php',{method:'PUT',headers:{'X-CSRF-Token':csrfToken},body:JSON.stringify({id:item.id,action:'approve',extracted})});
+    setEditing(null);notify('Expediente '+result.caseRef+' creado desde el correo');
+    await Promise.all([load(filter),reloadOperational()]);
+  };
+  return <><section className="mail-automation-hero"><div><Mail/><span><b>Entrada automática sin coste de IA</b><small>Los datos completos crean trabajos; los dudosos esperan revisión.</small></span></div><div><small>Última comprobación</small><b>{lastRun?.finished_at?formatReceptionDate(lastRun.finished_at):'Todavía no ejecutada'}</b></div><button className="button primary" disabled={processing} onClick={process}><RefreshCw className={processing?'spinning':''}/>{processing?'Leyendo buzones…':'Comprobar correos ahora'}</button></section>{error&&<div className="form-error"><CircleAlert/>{error}</div>}<section className="panel"><SectionHeader title="Bandeja de servicios" subtitle="info@swiftportlogistic.com y operations@swiftportlogistic.com"/><div className="mail-filters">{[['all','Todos',Object.values(counts).reduce((a,b)=>a+b,0)],['review','Revisar',counts.review],['processed','Creados',counts.processed],['ignored','Descartados',counts.ignored],['error','Errores',counts.error]].map(([value,label,total])=><button key={value} className={filter===value?'active':''} onClick={()=>setFilter(value)}>{label}<span>{total}</span></button>)}</div>{loading?<div className="users-loading">Cargando correos…</div>:items.length?<div className="mail-list">{items.map(item=><article key={item.id} className={'mail-item '+item.status}><header><div><b>{item.subject||'Sin asunto'}</b><small>{item.sender_name||item.sender_email} · {formatReceptionDate(item.received_at)}</small></div><Badge>{MAIL_STATUS[item.status]||item.status}</Badge></header>{item.extracted&&<div className="mail-extracted"><span><small>BUQUE</small><b>{item.extracted.vessel||'—'}</b></span><span><small>ETA</small><b>{item.extracted.eta||'—'}</b></span><span><small>PUERTO</small><b>{item.extracted.port||'—'}</b></span><span><small>SERVICIO</small><b>{[item.extracted.reception?.required&&'RECEPCIÓN',item.extracted.transport?.required&&'TRANSPORTE'].filter(Boolean).join(' + ')||'—'}</b></span></div>}{item.review_reason&&<p className="mail-reason"><CircleAlert/>{item.review_reason}</p>}{item.error_message&&<p className="mail-reason error"><CircleAlert/>{item.error_message}</p>}<details className="mail-original"><summary>Ver correo original</summary><pre>{item.body}</pre></details><footer>{item.case_ref&&<button className="button tertiary" onClick={()=>openCase(item.case_ref)}>Abrir {item.case_ref}</button>}{item.status==='review'&&<><button className="button tertiary" onClick={()=>ignore(item)}>Descartar</button><button className="button primary" onClick={()=>setEditing(item)}><PencilLine/> Revisar y crear</button></>}</footer></article>)}</div>:<Empty text="No hay correos en este estado."/>}</section>{editing&&<MailReviewModal item={editing} close={()=>setEditing(null)} submit={data=>approve(editing,data)}/>}</>;
+}
+
+function MailReviewModal({item,close,submit}){
+  const base=item.extracted||{};
+  const [form,setForm]=useState({
+    client:base.client||'',vessel:base.vessel||'',eta:base.eta||'',port:base.port||'',priority:base.priority||'Media',cargo_summary:base.cargo_summary||'',
+    reception:{required:Boolean(base.reception?.required),date:base.reception?.date||'',time:base.reception?.time||'',location:base.reception?.location||''},
+    transport:{required:Boolean(base.transport?.required),date:base.transport?.date||'',time:base.transport?.time||'',pickup:base.transport?.pickup||'',delivery:base.transport?.delivery||''},
+    is_service:true,confidence:1
+  });
+  const [busy,setBusy]=useState(false);
+  const [error,setError]=useState('');
+  const top=event=>setForm({...form,[event.target.name]:event.target.value});
+  const service=(type,key,value)=>setForm({...form,[type]:{...form[type],[key]:value}});
+  const save=async event=>{event.preventDefault();setBusy(true);setError('');try{await submit(form)}catch(reason){setError(reason.message);setBusy(false)}};
+  return <div className="modal-backdrop" onMouseDown={event=>{if(event.target===event.currentTarget&&!busy)close()}}><section className="modal mail-review-modal"><div className="modal-head"><div><span className="overline">Revisión de correo</span><h2>Confirmar trabajo operativo</h2><p>{item.subject}</p></div><button className="icon-button" disabled={busy} onClick={close}><X/></button></div><form onSubmit={save}>{error&&<div className="form-error wide"><CircleAlert/>{error}</div>}<label className="field"><span>Cliente</span><input name="client" value={form.client} onChange={top} required/></label><label className="field"><span>Buque *</span><input name="vessel" value={form.vessel} onChange={top} required/></label><label className="field"><span>ETA *</span><input name="eta" type="date" value={form.eta} onChange={top} required/></label><label className="field"><span>Puerto *</span><input name="port" value={form.port} onChange={top} required/></label><label className="field"><span>Prioridad</span><select name="priority" value={form.priority} onChange={top}>{['Baja','Media','Alta','Urgente'].map(value=><option key={value}>{value}</option>)}</select></label><label className="field"><span>Resumen de mercancía</span><input name="cargo_summary" value={form.cargo_summary} onChange={top}/></label><fieldset className="mail-service-fieldset wide"><label className="service-check"><input type="checkbox" checked={form.reception.required} onChange={event=>service('reception','required',event.target.checked)}/><Box/><span><b>RECEPCIÓN</b><small>Crear tarea de recepción</small></span></label>{form.reception.required&&<div className="mail-service-fields"><label className="field"><span>Fecha *</span><input type="date" value={form.reception.date} onChange={event=>service('reception','date',event.target.value)} required/></label><label className="field"><span>Hora</span><input type="time" value={form.reception.time} onChange={event=>service('reception','time',event.target.value)}/></label><label className="field"><span>Lugar</span><input value={form.reception.location} onChange={event=>service('reception','location',event.target.value)}/></label></div>}</fieldset><fieldset className="mail-service-fieldset wide"><label className="service-check"><input type="checkbox" checked={form.transport.required} onChange={event=>service('transport','required',event.target.checked)}/><Truck/><span><b>TRANSPORTE</b><small>Crear transporte y tarea de calendario</small></span></label>{form.transport.required&&<div className="mail-service-fields"><label className="field"><span>Fecha *</span><input type="date" value={form.transport.date} onChange={event=>service('transport','date',event.target.value)} required/></label><label className="field"><span>Hora</span><input type="time" value={form.transport.time} onChange={event=>service('transport','time',event.target.value)}/></label><label className="field"><span>Recogida</span><input value={form.transport.pickup} onChange={event=>service('transport','pickup',event.target.value)}/></label><label className="field"><span>Entrega</span><input value={form.transport.delivery} onChange={event=>service('transport','delivery',event.target.value)}/></label></div>}</fieldset><div className="modal-actions wide"><button type="button" className="button tertiary" disabled={busy} onClick={close}>Cancelar</button><button className="button primary" disabled={busy}><CheckCircle2/>{busy?'Creando…':'Crear expediente y trabajos'}</button></div></form></section></div>;
 }
 
 function Usuarios({csrfToken,notify,onPreview,onUsersChanged}){

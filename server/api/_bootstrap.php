@@ -21,7 +21,11 @@ session_set_cookie_params([
 ]);
 session_start();
 
-$configPath = dirname((string) $_SERVER['DOCUMENT_ROOT']) . '/swiftport-config.php';
+$documentRoot = (string) ($_SERVER['DOCUMENT_ROOT'] ?? '');
+if ($documentRoot === '' && PHP_SAPI === 'cli') {
+    $documentRoot = dirname(__DIR__);
+}
+$configPath = dirname($documentRoot) . '/swiftport-config.php';
 if (!is_file($configPath)) {
     http_response_code(503);
     echo json_encode(['error' => 'La aplicación todavía no está configurada.']);
@@ -173,6 +177,47 @@ function ensure_schema(): void
             uploaded_by BIGINT UNSIGNED NOT NULL,
             created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
             INDEX idx_attachment_created (created_at)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+    );
+    $pdo->exec(
+        "CREATE TABLE IF NOT EXISTS app_mail_items (
+            id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            mailbox VARCHAR(190) NOT NULL,
+            imap_uid BIGINT UNSIGNED NOT NULL,
+            message_id VARCHAR(255) NULL,
+            received_at DATETIME NULL,
+            sender_name VARCHAR(190) NOT NULL DEFAULT '',
+            sender_email VARCHAR(190) NOT NULL DEFAULT '',
+            subject VARCHAR(500) NOT NULL DEFAULT '',
+            body MEDIUMTEXT NOT NULL,
+            status ENUM('review','processed','ignored','error') NOT NULL DEFAULT 'review',
+            confidence DECIMAL(5,4) NOT NULL DEFAULT 0,
+            extracted JSON NULL,
+            review_reason VARCHAR(800) NULL,
+            error_message VARCHAR(1000) NULL,
+            case_ref VARCHAR(40) NULL,
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            processed_at DATETIME NULL,
+            reviewed_by BIGINT UNSIGNED NULL,
+            reviewed_at DATETIME NULL,
+            UNIQUE KEY uq_mailbox_uid (mailbox, imap_uid),
+            INDEX idx_mail_status (status, created_at)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+    );
+    $pdo->exec(
+        "CREATE TABLE IF NOT EXISTS app_mail_runs (
+            id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            trigger_type VARCHAR(30) NOT NULL,
+            status VARCHAR(30) NOT NULL,
+            scanned INT UNSIGNED NOT NULL DEFAULT 0,
+            processed INT UNSIGNED NOT NULL DEFAULT 0,
+            review_count INT UNSIGNED NOT NULL DEFAULT 0,
+            ignored INT UNSIGNED NOT NULL DEFAULT 0,
+            errors INT UNSIGNED NOT NULL DEFAULT 0,
+            details JSON NULL,
+            started_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            finished_at DATETIME NULL,
+            INDEX idx_mail_runs_started (started_at)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
     );
     seed_demo_finance_data($pdo);
