@@ -156,7 +156,15 @@ function date_after_keywords(string $text, array $keywords): string
     }
     return '';
 }
+function is_valid_service_date(string $value): bool
+{
+    return preg_match('/^\d{4}-\d{2}-\d{2}$/', trim($value)) === 1;
+}
 
+function is_valid_service_time(string $value): bool
+{
+    return preg_match('/^\d{2}:\d{2}$/', trim($value)) === 1;
+}
 function sanitize_email_text(string $subject, string $body): string
 {
     $text = trim($subject . "\n\n" . $body);
@@ -164,6 +172,7 @@ function sanitize_email_text(string $subject, string $body): string
     $lines = preg_split('/\n/', $text) ?: [];
     $cleanLines = [];
     $inSignature = false;
+    $inForwarded = false;
     foreach ($lines as $line) {
         $trimmed = trim($line);
         if ($trimmed === '') {
@@ -172,15 +181,18 @@ function sanitize_email_text(string $subject, string $body): string
             }
             continue;
         }
-        if (preg_match('/^(?:--|___|\*{3,})$/', $trimmed)) {
+        if (preg_match('/^(?:--|___|\*{3,})$/', $trimmed) || preg_match('/^(?:On|Enviado el|Forwarded message|Mensaje reenviado|Reenviado|Begin forwarded message|Inicio de mensaje reenviado)\b/i', $trimmed)) {
             $inSignature = true;
+            $inForwarded = true;
             continue;
         }
-        if ($inSignature && preg_match('/^(?:best|regards|thanks|thank you|sincerely|kind regards|saludos|cordialmente|atentamente|un saludo|gracias|cheers)\b/i', $trimmed)) {
-            $inSignature = true;
-            continue;
-        }
-        if ($inSignature && preg_match('/^(?:tel|telefono|phone|mobile|cel|email|e-mail|mail|website|web|www\.)/i', $trimmed)) {
+        if ($inSignature) {
+            if (preg_match('/^(?:best|regards|thanks|thank you|sincerely|kind regards|saludos|cordialmente|atentamente|un saludo|gracias|cheers)\b/i', $trimmed)) {
+                continue;
+            }
+            if (preg_match('/^(?:tel|telefono|phone|mobile|cel|email|e-mail|mail|website|web|www\.|address|direcci[oó]n)/i', $trimmed)) {
+                continue;
+            }
             continue;
         }
         if (preg_match('/^\s*>/', $line)) {
@@ -189,10 +201,10 @@ function sanitize_email_text(string $subject, string $body): string
         if (preg_match('/^(?:from|to|cc|bcc|subject|date|sent|received|on|wrote|enviado|para|asunto|fecha|de):/i', $trimmed)) {
             continue;
         }
-        if (preg_match('/^(?:original message|mensaje original|historial citado|cited history|aviso legal|legal notice|disclaimer|confidential|confidencial|privileged|privilegiado)/i', $trimmed)) {
+        if (preg_match('/^(?:original message|mensaje original|historial citado|cited history|aviso legal|legal notice|disclaimer|confidential|confidencial|privileged|privilegiado|for your records|para su constancia|this email contains|este correo contiene)/i', $trimmed)) {
             continue;
         }
-        if (preg_match('/\b(?:confidential|confidencial|privileged|privilegiado|legal notice|aviso legal|disclaimer|not legal advice|historial citado|cited history)\b/i', $trimmed)) {
+        if (preg_match('/\b(?:confidential|confidencial|privileged|privilegiado|legal notice|aviso legal|disclaimer|not legal advice|historial citado|cited history|for your records|para su constancia)\b/i', $trimmed)) {
             continue;
         }
         $trimmed = preg_replace('/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/i', '[REDACTED_EMAIL]', $trimmed) ?? $trimmed;
@@ -203,7 +215,7 @@ function sanitize_email_text(string $subject, string $body): string
 
     $text = trim(implode("\n", $cleanLines));
     $text = preg_replace('/\n{3,}/', "\n\n", $text) ?? $text;
-    return trim($text);
+    return trim(mb_substr($text, 0, 30000));
 }
 
 function call_openai_extraction(string $text, array $email): array
@@ -273,9 +285,7 @@ Reglas:
 - Si no aparece información, deja los campos vacíos como cadenas vacías y los booleanos en false.
 - No añadas texto adicional ni markdown.
 
-Correo:
-Asunto: {$email['subject']}
-Texto:
+Texto limpio:
 {$text}
 PROMPT;
 
@@ -286,6 +296,8 @@ PROMPT;
             ['role' => 'user', 'content' => $prompt],
         ],
         'temperature' => 0,
+        'store' => false,
+        'max_output_tokens' => 1200,
         'text' => [
             'format' => [
                 'type' => 'json_schema',
@@ -436,77 +448,19 @@ function extract_local_service(array $email): array
     try {
         return call_openai_extraction($text, $email);
     } catch (Throwable) {
-        $lower = mb_strtolower($text);
-        $reception = (bool) preg_match('/\b(recepci[oó]n|reception|receive|receiving|almac[eé]n|warehouse)\b/iu', $lower);
-        $sampleService = (bool) preg_match('/\b(recoger|retirar|recolecci[oó]n|recogida|collect(?:ion)?|pick[\s-]?up)\b[^\r\n]{0,30}\b(muestras?|samples?|specimens?)\b|\b(muestras?|samples?|specimens?)\b[^\r\n]{0,30}\b(recoger|retirar|collect(?:ion)?|pick[\s-]?up)\b/iu', $lower);
-        $transport = $sampleService || (bool) preg_match('/\b(transporte|transport|delivery|deliver|entrega|pickup|pick-up|recogida|recoger|retirar|collect|courier)\b/iu', $lower);
-        $vessel = labeled_value($text, ['buque', 'vessel', 'ship', 'm/v', 'mv']);
-        if ($vessel === '' && preg_match('/\b(?:m\/v|mv)\s+([a-z0-9][a-z0-9 .\'\-]{2,50}?)(?=\s*(?:[-–—|]|\beta\b|\bat\b|\bin\b|$))/iu', $text, $match)) {
-            $vessel = clean_extracted_value($match[1]);
-        }
-        if ($vessel === '' && preg_match('/\b(?:buque|vessel|ship)\s+(?:is\s+|es\s+)?([a-z0-9][a-z0-9 .\'\-]{2,50}?)(?=\s*(?:[-–—,;|]|\beta\b|\bat\b|\bin\b|$))/iu', $text, $match)) {
-            $vessel = clean_extracted_value($match[1]);
-        }
-        $eta = labeled_date($text, ['eta', 'estimated time of arrival']);
-        if ($eta === '') {
-            $eta = date_after_keywords($text, ['eta', 'estimated time of arrival', 'arrival']);
-        }
-        $port = labeled_value($text, ['puerto', 'port', 'port of call']);
-        if ($port === '') {
-            $knownPorts = ['Algeciras', 'Barcelona', 'Tarragona', 'Valencia', 'Bilbao', 'Cartagena', 'Huelva', 'Vigo', 'Las Palmas', 'Gibraltar', 'Ceuta', 'Málaga', 'Malaga', 'Cádiz', 'Cadiz'];
-            foreach ($knownPorts as $knownPort) {
-                if (preg_match('/\b' . preg_quote($knownPort, '/') . '\b/iu', $text)) {
-                    $port = $knownPort;
-                    break;
-                }
-            }
-        }
-        $client = labeled_value($text, ['cliente', 'client', 'customer', 'company']);
-        if ($client === '') {
-            $client = $email['sender_name'] ?: strstr((string) ($email['sender_email'] ?? ''), '@', true);
-        }
-        $receptionDate = labeled_date($text, ['fecha recepción', 'fecha de recepción', 'reception date', 'receiving date']);
-        $transportDate = labeled_date($text, ['fecha transporte', 'fecha de transporte', 'transport date', 'delivery date', 'fecha entrega', 'fecha de entrega', 'pickup date']);
-        if ($transportDate === '' && $sampleService) {
-            $transportDate = date_after_keywords($text, ['recoger muestras', 'retirar muestras', 'recogida de muestras', 'sample collection', 'collect samples', 'samples pickup', 'pick up samples']);
-        }
-        if ($transportDate === '' && $sampleService && $eta !== '') {
-            $transportDate = $eta;
-        }
-        $receptionTime = labeled_time($text, ['hora recepción', 'hora de recepción', 'reception time', 'receiving time']);
-        $transportTime = labeled_time($text, ['hora transporte', 'hora de transporte', 'transport time', 'delivery time', 'hora entrega', 'pickup time']);
-        $pickup = labeled_value($text, ['recogida', 'pickup', 'collect from', 'origen', 'origin']);
-        $delivery = labeled_value($text, ['entrega', 'delivery', 'deliver to', 'destino', 'destination']);
-        if ($pickup === '' && $sampleService && $vessel !== '') {
-            $pickup = 'M/V ' . $vessel . ($port !== '' ? ' · ' . $port : '');
-        }
-        $cargo = labeled_value($text, ['mercancía', 'mercancia', 'cargo', 'goods', 'packages', 'bultos']);
-        if ($cargo === '' && $sampleService) {
-            $cargo = 'RECOGIDA DE MUESTRAS';
-        }
-        $priority = preg_match('/\b(urgente|urgent|asap|immediate)\b/iu', $lower) ? 'Urgente' : 'Media';
         return [
-            'is_service' => $reception || $transport,
-            'confidence' => 0.65,
-            'client' => clean_extracted_value((string) $client),
-            'vessel' => mb_strtoupper(clean_extracted_value($vessel)),
-            'eta' => $eta,
-            'port' => mb_strtoupper(clean_extracted_value($port)),
-            'priority' => $priority,
-            'cargo_summary' => clean_extracted_value($cargo),
-            'reception' => [
-                'required' => $reception,
-                'date' => $receptionDate,
-                'time' => $receptionTime,
-                'location' => labeled_value($text, ['lugar recepción', 'reception location', 'warehouse', 'almacén']),
-            ],
-            'transport' => [
-                'required' => $transport,
-                'date' => $transportDate,
-                'time' => $transportTime,
-                'pickup' => clean_extracted_value($pickup),
-                'delivery' => clean_extracted_value($delivery),
-            ],
+            'is_service' => false,
+            'confidence' => 0.0,
+            'client' => clean_extracted_value((string) ($email['sender_name'] ?? '')),
+            'vessel' => '',
+            'eta' => '',
+            'port' => '',
+            'priority' => 'Media',
+            'cargo_summary' => '',
+            'reception' => ['required' => false, 'date' => '', 'time' => '', 'location' => ''],
+            'transport' => ['required' => false, 'date' => '', 'time' => '', 'pickup' => '', 'delivery' => ''],
+            'ai_unavailable' => true,
+            'manual_review_reason' => 'IA no disponible',
         ];
     }
 }
@@ -514,6 +468,10 @@ function extract_local_service(array $email): array
 function service_review_reasons(array $data): array
 {
     $reasons = [];
+    if (!empty($data['ai_unavailable'])) {
+        $reasons[] = 'IA no disponible';
+        return $reasons;
+    }
     if (empty($data['is_service'])) {
         $reasons[] = 'No se identifica un servicio';
         return $reasons;
@@ -584,6 +542,26 @@ function apply_service_email(int $mailId, array $data, ?int $userId = null): str
         foreach (['cases', 'transports', 'warehouseEntries', 'customs', 'calendarEvents'] as $key) {
             $state[$key] = is_array($state[$key] ?? null) ? $state[$key] : [];
         }
+        $receptionDate = trim((string) ($data['reception']['date'] ?? ''));
+        $transportDate = trim((string) ($data['transport']['date'] ?? ''));
+        $receptionTime = trim((string) ($data['reception']['time'] ?? ''));
+        $transportTime = trim((string) ($data['transport']['time'] ?? ''));
+        if (!empty($data['reception']['required'])) {
+            if ($receptionDate === '' || !is_valid_service_date($receptionDate)) {
+                throw new InvalidArgumentException('Fecha de recepción inválida.');
+            }
+            if ($receptionTime !== '' && !is_valid_service_time($receptionTime)) {
+                throw new InvalidArgumentException('Hora de recepción inválida.');
+            }
+        }
+        if (!empty($data['transport']['required'])) {
+            if ($transportDate === '' || !is_valid_service_date($transportDate)) {
+                throw new InvalidArgumentException('Fecha de transporte inválida.');
+            }
+            if ($transportTime !== '' && !is_valid_service_time($transportTime)) {
+                throw new InvalidArgumentException('Hora de transporte inválida.');
+            }
+        }
         $caseRef = next_case_ref($state['cases']);
         $services = [];
         if (!empty($data['reception']['required'])) $services[] = 'Recepción';
@@ -614,12 +592,12 @@ function apply_service_email(int $mailId, array $data, ?int $userId = null): str
             ]],
         ]);
         if (!empty($data['reception']['required'])) {
-            $start = $data['reception']['time'] ?: '09:00';
+            $start = $receptionTime !== '' ? $receptionTime : '09:00';
             $state['calendarEvents'][] = [
                 'id' => 'EV-MAIL-' . $mailId . '-R',
                 'titulo' => $data['cargo_summary'] ?: 'Recepción de mercancía',
                 'tipoServicio' => 'Recepción',
-                'fecha' => $data['reception']['date'],
+                'fecha' => $receptionDate,
                 'inicio' => $start,
                 'fin' => plus_one_hour($start),
                 'asignado' => 'Sin asignar',
@@ -631,20 +609,20 @@ function apply_service_email(int $mailId, array $data, ?int $userId = null): str
         }
         if (!empty($data['transport']['required'])) {
             $transportRef = next_transport_ref($state['transports']);
-            $start = $data['transport']['time'] ?: '09:00';
+            $start = $transportTime !== '' ? $transportTime : '09:00';
             $pickup = trim((string) $data['transport']['pickup']) ?: 'Origen por confirmar';
             $delivery = trim((string) ($data['transport']['delivery'] ?: $data['port'])) ?: 'Destino por confirmar';
             $route = $pickup . ' → ' . $delivery;
             $state['transports'][] = [
                 'id' => $transportRef, 'expediente' => $caseRef, 'ruta' => $route,
-                'hora' => $data['transport']['date'] . ' · ' . $start . '–' . plus_one_hour($start),
-                'fecha' => $data['transport']['date'], 'inicio' => $start, 'fin' => plus_one_hour($start),
+                'hora' => $transportDate . ' · ' . $start . '–' . plus_one_hour($start),
+                'fecha' => $transportDate, 'inicio' => $start, 'fin' => plus_one_hour($start),
                 'conductor' => 'Sin asignar', 'vehiculo' => 'Por asignar', 'estado' => 'Sin asignar',
                 'sourceEmailId' => $mailId,
             ];
             $state['calendarEvents'][] = [
                 'id' => 'EV-MAIL-' . $mailId . '-T', 'titulo' => $route, 'tipoServicio' => 'Transporte',
-                'fecha' => $data['transport']['date'], 'inicio' => $start, 'fin' => plus_one_hour($start),
+                'fecha' => $transportDate, 'inicio' => $start, 'fin' => plus_one_hour($start),
                 'asignado' => 'Sin asignar', 'expediente' => $caseRef, 'transporte' => $transportRef,
                 'color' => 'gray', 'sourceEmailId' => $mailId,
             ];
@@ -721,10 +699,15 @@ function process_mailboxes(string $triggerType): array
                     'sender_name' => $senderName, 'sender_email' => $senderEmail,
                 ]);
                 $reasons = service_review_reasons($data);
-                $status = empty($data['is_service']) ? 'ignored' : ($reasons ? 'review' : 'review');
-                $reason = empty($data['is_service'])
-                    ? 'No se ha detectado una solicitud operativa'
-                    : ($reasons ? implode('. ', $reasons) : 'Datos completos; pendiente de aprobación automática');
+                $confidence = (float) ($data['confidence'] ?? 0);
+                $isService = !empty($data['is_service']);
+                $aiUnavailable = !empty($data['ai_unavailable']);
+                $status = $aiUnavailable || (!$isService && $confidence < 0.90) ? 'review' : ($isService ? ($reasons ? 'review' : 'review') : 'ignored');
+                $reason = $aiUnavailable
+                    ? 'IA no disponible'
+                    : ($isService
+                        ? ($reasons ? implode('. ', $reasons) : 'Datos completos; pendiente de aprobación automática')
+                        : 'No se ha detectado una solicitud operativa');
                 $insert = $pdo->prepare(
                     'INSERT IGNORE INTO app_mail_items
                      (mailbox, imap_uid, message_id, received_at, sender_name, sender_email, subject, body,
