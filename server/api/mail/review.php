@@ -10,8 +10,42 @@ verify_csrf();
 $payload = input();
 $id = (int) ($payload['id'] ?? 0);
 $action = (string) ($payload['action'] ?? '');
-if ($id < 1 || !in_array($action, ['approve', 'ignore'], true)) {
+if ($id < 1 || !in_array($action, ['approve', 'ignore', 'reprocess'], true)) {
     respond(['error' => 'Acción no válida.'], 422);
+}
+
+if ($action === 'reprocess') {
+    $statement = db()->prepare(
+        'SELECT subject, body, sender_name, sender_email FROM app_mail_items WHERE id = ? AND status <> ?'
+    );
+    $statement->execute([$id, 'processed']);
+    $mail = $statement->fetch();
+    if (!$mail) {
+        respond(['error' => 'El correo no se puede reinterpretar.'], 409);
+    }
+    $data = extract_local_service($mail);
+    $reasons = service_review_reasons($data);
+    if (empty($data['is_service'])) {
+        $status = 'ignored';
+        $reason = 'No se ha detectado una solicitud operativa';
+    } else {
+        $status = 'review';
+        $reason = $reasons ? implode('. ', $reasons) : 'Servicio detectado; confirma los datos para crear el trabajo';
+    }
+    $update = db()->prepare(
+        'UPDATE app_mail_items SET status = ?, confidence = ?, extracted = ?, review_reason = ?,
+         error_message = NULL, reviewed_by = ?, reviewed_at = NOW() WHERE id = ?'
+    );
+    $update->execute([
+        $status,
+        (float) $data['confidence'],
+        json_encode($data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+        $reason,
+        $user['id'],
+        $id,
+    ]);
+    audit((int) $user['id'], 'mail.reprocess', ['mailId' => $id, 'status' => $status]);
+    respond(['ok' => true, 'status' => $status]);
 }
 
 if ($action === 'ignore') {

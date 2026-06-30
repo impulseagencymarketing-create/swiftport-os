@@ -147,27 +147,62 @@ function labeled_time(string $text, array $labels): string
     return '';
 }
 
+function date_after_keywords(string $text, array $keywords): string
+{
+    $escaped = array_map(static fn(string $value): string => preg_quote($value, '/'), $keywords);
+    $datePattern = '((?:20\d{2}[-\/]\d{1,2}[-\/]\d{1,2})|(?:\d{1,2}[-\/]\d{1,2}[-\/](?:20\d{2}|\d{2}))|(?:\d{1,2}\s+[a-záéíóú]+\s+(?:20\d{2}|\d{2})))';
+    if (preg_match('/(?:' . implode('|', $escaped) . ')[^\r\n]{0,45}?' . $datePattern . '/iu', $text, $match)) {
+        return normalize_date_value($match[1]);
+    }
+    return '';
+}
+
 function extract_local_service(array $email): array
 {
     $text = $email['subject'] . "\n" . mb_substr($email['body'], 0, 40000);
     $lower = mb_strtolower($text);
     $reception = (bool) preg_match('/\b(recepci[oó]n|reception|receive|receiving|almac[eé]n|warehouse)\b/iu', $lower);
-    $transport = (bool) preg_match('/\b(transporte|transport|delivery|deliver|entrega|pickup|pick-up|recogida|collect)\b/iu', $lower);
+    $sampleService = (bool) preg_match('/\b(recoger|retirar|recolecci[oó]n|recogida|collect(?:ion)?|pick[\s-]?up)\b[^\r\n]{0,30}\b(muestras?|samples?|specimens?)\b|\b(muestras?|samples?|specimens?)\b[^\r\n]{0,30}\b(recoger|retirar|collect(?:ion)?|pick[\s-]?up)\b/iu', $lower);
+    $transport = $sampleService || (bool) preg_match('/\b(transporte|transport|delivery|deliver|entrega|pickup|pick-up|recogida|recoger|retirar|collect|courier)\b/iu', $lower);
     $operational = $reception || $transport;
     $vessel = labeled_value($text, ['buque', 'vessel', 'ship', 'm/v', 'mv']);
+    if ($vessel === '' && preg_match('/\b(?:m\/v|mv)\s+([a-z0-9][a-z0-9 .\'-]{2,50}?)(?=\s*(?:[-–—|]|\beta\b|\bat\b|\bin\b|$))/iu', $text, $match)) {
+        $vessel = clean_extracted_value($match[1]);
+    }
+    if ($vessel === '' && preg_match('/\b(?:buque|vessel|ship)\s+(?:is\s+|es\s+)?([a-z0-9][a-z0-9 .\'-]{2,50}?)(?=\s*(?:[-–—,;|]|\beta\b|\bat\b|\bin\b|$))/iu', $text, $match)) {
+        $vessel = clean_extracted_value($match[1]);
+    }
     $eta = labeled_date($text, ['eta', 'estimated time of arrival']);
+    if ($eta === '') {
+        $eta = date_after_keywords($text, ['eta', 'estimated time of arrival', 'arrival']);
+    }
     $port = labeled_value($text, ['puerto', 'port', 'port of call']);
+    if ($port === '') {
+        $knownPorts = ['Algeciras', 'Barcelona', 'Tarragona', 'Valencia', 'Bilbao', 'Cartagena', 'Huelva', 'Vigo', 'Las Palmas', 'Gibraltar', 'Ceuta', 'Málaga', 'Malaga', 'Cádiz', 'Cadiz'];
+        foreach ($knownPorts as $knownPort) {
+            if (preg_match('/\b' . preg_quote($knownPort, '/') . '\b/iu', $text)) {
+                $port = $knownPort;
+                break;
+            }
+        }
+    }
     $client = labeled_value($text, ['cliente', 'client', 'customer', 'company']);
     if ($client === '') {
         $client = $email['sender_name'] ?: strstr($email['sender_email'], '@', true);
     }
     $receptionDate = labeled_date($text, ['fecha recepción', 'fecha de recepción', 'reception date', 'receiving date']);
     $transportDate = labeled_date($text, ['fecha transporte', 'fecha de transporte', 'transport date', 'delivery date', 'fecha entrega', 'fecha de entrega', 'pickup date']);
+    if ($transportDate === '' && $sampleService) {
+        $transportDate = date_after_keywords($text, ['recoger muestras', 'retirar muestras', 'recogida de muestras', 'sample collection', 'collect samples', 'samples pickup', 'pick up samples']);
+    }
     $receptionTime = labeled_time($text, ['hora recepción', 'hora de recepción', 'reception time', 'receiving time']);
     $transportTime = labeled_time($text, ['hora transporte', 'hora de transporte', 'transport time', 'delivery time', 'hora entrega', 'pickup time']);
     $pickup = labeled_value($text, ['recogida', 'pickup', 'collect from', 'origen', 'origin']);
     $delivery = labeled_value($text, ['entrega', 'delivery', 'deliver to', 'destino', 'destination']);
     $cargo = labeled_value($text, ['mercancía', 'mercancia', 'cargo', 'goods', 'packages', 'bultos']);
+    if ($cargo === '' && $sampleService) {
+        $cargo = 'RECOGIDA DE MUESTRAS';
+    }
     $priority = preg_match('/\b(urgente|urgent|asap|immediate)\b/iu', $lower) ? 'Urgente' : 'Media';
     $confidence = 0.15;
     $confidence += $operational ? 0.15 : 0;
