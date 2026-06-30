@@ -5,7 +5,9 @@ require dirname(__DIR__) . '/_bootstrap.php';
 ensure_schema();
 $admin = require_roles(['admin']);
 
-if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'GET') {
+$method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
+
+if ($method === 'GET') {
     $rows = db()->query(
         'SELECT id, email, full_name, role, active, last_login_at, created_at
          FROM app_users ORDER BY full_name'
@@ -21,6 +23,20 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'GET') {
     ], $rows)]);
 }
 
+if ($method === 'PUT') {
+    verify_csrf();
+    $data = input();
+    $id = (int) ($data['id'] ?? 0);
+    $role = (string) ($data['role'] ?? '');
+    if ($id < 1 || !in_array($role, ['driver', 'operations', 'finance', 'admin'], true)) {
+        respond(['error' => 'El nivel de acceso no es válido.'], 422);
+    }
+    $statement = db()->prepare('UPDATE app_users SET role = ? WHERE id = ?');
+    $statement->execute([$role, $id]);
+    audit((int) $admin['id'], 'users.role_update', ['updated_user_id' => $id, 'role' => $role]);
+    respond(['ok' => true]);
+}
+
 require_method('POST');
 verify_csrf();
 $data = input();
@@ -32,7 +48,7 @@ $role = (string) ($data['role'] ?? 'operations');
 if (!filter_var($email, FILTER_VALIDATE_EMAIL)
     || mb_strlen($fullName) < 2
     || strlen($password) < 4
-    || !in_array($role, ['operations', 'finance', 'admin'], true)
+    || !in_array($role, ['driver', 'operations', 'finance', 'admin'], true)
 ) {
     respond(['error' => 'Revisa los datos del nuevo usuario.'], 422);
 }

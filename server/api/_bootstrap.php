@@ -101,7 +101,7 @@ function ensure_schema(): void
             email VARCHAR(190) NOT NULL UNIQUE,
             password_hash VARCHAR(255) NOT NULL,
             full_name VARCHAR(120) NOT NULL,
-            role ENUM('operations','finance','admin') NOT NULL DEFAULT 'operations',
+            role ENUM('driver','operations','finance','admin') NOT NULL DEFAULT 'operations',
             active TINYINT(1) NOT NULL DEFAULT 1,
             last_login_at DATETIME NULL,
             created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -158,6 +158,13 @@ function ensure_schema(): void
             due_date VARCHAR(40) NOT NULL
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
     );
+    $roleColumn = $pdo->query("SHOW COLUMNS FROM app_users LIKE 'role'")->fetch();
+    if ($roleColumn && !str_contains((string) $roleColumn['Type'], "'driver'")) {
+        $pdo->exec(
+            "ALTER TABLE app_users
+             MODIFY role ENUM('driver','operations','finance','admin') NOT NULL DEFAULT 'operations'"
+        );
+    }
     $pdo->exec(
         "CREATE TABLE IF NOT EXISTS app_operational_state (
             id TINYINT UNSIGNED PRIMARY KEY,
