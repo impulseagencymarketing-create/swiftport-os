@@ -17,6 +17,11 @@ export const transportesIniciales = [
   {id:'TR-1044', expediente:'SW-2026-0047', ruta:'Almacén Swiftport → Puerto Tarragona', hora:'Mañana · 15:30', conductor:'Sin asignar', vehiculo:'—', estado:'Sin asignar'},
   {id:'TR-1039', expediente:'SW-2026-0044', ruta:'Puerto Bilbao → Almacén cliente', hora:'Ayer · 20:10', conductor:'Andrés M.', vehiculo:'5031 LBD', estado:'Entregado'}
 ];
+export const proveedoresIniciales = [
+  {id:'PRV-001',nombre:'Swiftport Logistic',contacto:'Operaciones propias',telefono:'',activo:true},
+  {id:'PRV-002',nombre:'Transportes del Estrecho',contacto:'Tráfico',telefono:'',activo:true},
+  {id:'PRV-003',nombre:'Mediterránea Cargo',contacto:'Operaciones',telefono:'',activo:true}
+];
 export const eventosCalendarioIniciales = [
   {id:'EV-1001',titulo:'Recogida aeropuerto BCN',tipoServicio:'Transporte',fecha:'2026-06-29',inicio:'09:15',fin:'10:30',asignado:'Sin asignar',expediente:'SW-2026-0046',transporte:'TR-1042',color:'blue'},
   {id:'EV-1002',titulo:'Recepción de mercancía',tipoServicio:'Recepción',fecha:'2026-06-29',inicio:'14:30',fin:'15:30',asignado:'Sin asignar',expediente:'SW-2026-0047',transporte:'',color:'teal'},
