@@ -384,22 +384,18 @@ function normalize_extracted_payload(array $payload): array
     $reception = is_array($payload['reception'] ?? null) ? $payload['reception'] : [];
     $transport = is_array($payload['transport'] ?? null) ? $payload['transport'] : [];
     $isService = (bool) ($payload['is_service'] ?? false);
-    $confidence = (float) ($payload['confidence'] ?? 0.0);
+    $confidence = min(1.0, max(0.0, (float) ($payload['confidence'] ?? 0.0)));
     $hasSignals = trim((string) ($payload['client'] ?? '')) !== ''
         || trim((string) ($payload['vessel'] ?? '')) !== ''
         || trim((string) ($payload['eta'] ?? '')) !== ''
         || trim((string) ($payload['port'] ?? '')) !== ''
         || !empty($reception['required']) || !empty($transport['required']);
-    if (!$isService) {
-        $confidence = 0.95;
-    } elseif (!$hasSignals) {
-        $confidence = 0.25;
-    } elseif ($confidence < 0.40) {
+    if ($isService && !$hasSignals && $confidence < 0.40) {
         $confidence = 0.40;
     }
     return [
         'is_service' => $isService,
-        'confidence' => min(1.0, max(0.0, $confidence)),
+        'confidence' => $confidence,
         'client' => clean_extracted_value((string) ($payload['client'] ?? '')),
         'vessel' => mb_strtoupper(clean_extracted_value((string) ($payload['vessel'] ?? ''))),
         'eta' => trim((string) ($payload['eta'] ?? '')),
@@ -442,11 +438,25 @@ function service_required_data_complete(array $data): bool
     if (trim((string) ($data['port'] ?? '')) === '') {
         return false;
     }
-    if (!empty($data['reception']['required']) && trim((string) ($data['reception']['date'] ?? '')) === '') {
-        return false;
+    if (!empty($data['reception']['required'])) {
+        $receptionDate = trim((string) ($data['reception']['date'] ?? ''));
+        $receptionTime = trim((string) ($data['reception']['time'] ?? ''));
+        if ($receptionDate === '' || !is_valid_service_date($receptionDate)) {
+            return false;
+        }
+        if ($receptionTime !== '' && !is_valid_service_time($receptionTime)) {
+            return false;
+        }
     }
-    if (!empty($data['transport']['required']) && trim((string) ($data['transport']['date'] ?? '')) === '') {
-        return false;
+    if (!empty($data['transport']['required'])) {
+        $transportDate = trim((string) ($data['transport']['date'] ?? ''));
+        $transportTime = trim((string) ($data['transport']['time'] ?? ''));
+        if ($transportDate === '' || !is_valid_service_date($transportDate)) {
+            return false;
+        }
+        if ($transportTime !== '' && !is_valid_service_time($transportTime)) {
+            return false;
+        }
     }
     return true;
 }
@@ -508,8 +518,26 @@ function service_review_reasons(array $data): array
     if (empty($data['port'])) $reasons[] = 'Falta el puerto';
     $reception = !empty($data['reception']['required']);
     $transport = !empty($data['transport']['required']);
-    if ($reception && empty($data['reception']['date'])) $reasons[] = 'Falta la fecha de recepción';
-    if ($transport && empty($data['transport']['date'])) $reasons[] = 'Falta la fecha de transporte';
+    if ($reception) {
+        $receptionDate = trim((string) ($data['reception']['date'] ?? ''));
+        $receptionTime = trim((string) ($data['reception']['time'] ?? ''));
+        if ($receptionDate === '' || !is_valid_service_date($receptionDate)) {
+            $reasons[] = 'Fecha de recepción inválida';
+        }
+        if ($receptionTime !== '' && !is_valid_service_time($receptionTime)) {
+            $reasons[] = 'Hora de recepción inválida';
+        }
+    }
+    if ($transport) {
+        $transportDate = trim((string) ($data['transport']['date'] ?? ''));
+        $transportTime = trim((string) ($data['transport']['time'] ?? ''));
+        if ($transportDate === '' || !is_valid_service_date($transportDate)) {
+            $reasons[] = 'Fecha de transporte inválida';
+        }
+        if ($transportTime !== '' && !is_valid_service_time($transportTime)) {
+            $reasons[] = 'Hora de transporte inválida';
+        }
+    }
     if ((float) ($data['confidence'] ?? 0) < 0.90) $reasons[] = 'Revisión manual recomendada';
     return $reasons;
 }
