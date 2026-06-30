@@ -162,6 +162,19 @@ function ensure_schema(): void
             updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
     );
+    $pdo->exec(
+        "CREATE TABLE IF NOT EXISTS app_attachments (
+            id CHAR(32) PRIMARY KEY,
+            original_name VARCHAR(255) NOT NULL,
+            stored_name VARCHAR(80) NOT NULL,
+            mime_type VARCHAR(100) NOT NULL,
+            file_size INT UNSIGNED NOT NULL,
+            category ENUM('photo','document') NOT NULL,
+            uploaded_by BIGINT UNSIGNED NOT NULL,
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            INDEX idx_attachment_created (created_at)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+    );
     seed_demo_finance_data($pdo);
 }
 
