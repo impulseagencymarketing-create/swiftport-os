@@ -157,104 +157,376 @@ function date_after_keywords(string $text, array $keywords): string
     return '';
 }
 
-function extract_local_service(array $email): array
+function sanitize_email_text(string $subject, string $body): string
 {
-    $text = $email['subject'] . "\n" . mb_substr($email['body'], 0, 40000);
-    $lower = mb_strtolower($text);
-    $reception = (bool) preg_match('/\b(recepci[oó]n|reception|receive|receiving|almac[eé]n|warehouse)\b/iu', $lower);
-    $sampleService = (bool) preg_match('/\b(recoger|retirar|recolecci[oó]n|recogida|collect(?:ion)?|pick[\s-]?up)\b[^\r\n]{0,30}\b(muestras?|samples?|specimens?)\b|\b(muestras?|samples?|specimens?)\b[^\r\n]{0,30}\b(recoger|retirar|collect(?:ion)?|pick[\s-]?up)\b/iu', $lower);
-    $transport = $sampleService || (bool) preg_match('/\b(transporte|transport|delivery|deliver|entrega|pickup|pick-up|recogida|recoger|retirar|collect|courier)\b/iu', $lower);
-    $operational = $reception || $transport;
-    $vessel = labeled_value($text, ['buque', 'vessel', 'ship', 'm/v', 'mv']);
-    if ($vessel === '' && preg_match('/\b(?:m\/v|mv)\s+([a-z0-9][a-z0-9 .\'-]{2,50}?)(?=\s*(?:[-–—|]|\beta\b|\bat\b|\bin\b|$))/iu', $text, $match)) {
-        $vessel = clean_extracted_value($match[1]);
+    $text = trim($subject . "\n\n" . $body);
+    $text = preg_replace("/\r\n?/", "\n", $text) ?? $text;
+    $lines = preg_split('/\n/', $text) ?: [];
+    $cleanLines = [];
+    $inSignature = false;
+    foreach ($lines as $line) {
+        $trimmed = trim($line);
+        if ($trimmed === '') {
+            if ($cleanLines !== [] && end($cleanLines) !== '') {
+                $cleanLines[] = '';
+            }
+            continue;
+        }
+        if (preg_match('/^(?:--|___|\*{3,})$/', $trimmed)) {
+            $inSignature = true;
+            continue;
+        }
+        if ($inSignature && preg_match('/^(?:best|regards|thanks|thank you|sincerely|kind regards|saludos|cordialmente|atentamente|un saludo|gracias|cheers)\b/i', $trimmed)) {
+            $inSignature = true;
+            continue;
+        }
+        if ($inSignature && preg_match('/^(?:tel|telefono|phone|mobile|cel|email|e-mail|mail|website|web|www\.)/i', $trimmed)) {
+            continue;
+        }
+        if (preg_match('/^\s*>/', $line)) {
+            continue;
+        }
+        if (preg_match('/^(?:from|to|cc|bcc|subject|date|sent|received|on|wrote|enviado|para|asunto|fecha|de):/i', $trimmed)) {
+            continue;
+        }
+        if (preg_match('/^(?:original message|mensaje original|historial citado|cited history|aviso legal|legal notice|disclaimer|confidential|confidencial|privileged|privilegiado)/i', $trimmed)) {
+            continue;
+        }
+        if (preg_match('/\b(?:confidential|confidencial|privileged|privilegiado|legal notice|aviso legal|disclaimer|not legal advice|historial citado|cited history)\b/i', $trimmed)) {
+            continue;
+        }
+        $trimmed = preg_replace('/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/i', '[REDACTED_EMAIL]', $trimmed) ?? $trimmed;
+        $trimmed = preg_replace('/\+?\d[\d\-\s\(\)]{6,}\d/', '[REDACTED_PHONE]', $trimmed) ?? $trimmed;
+        $trimmed = preg_replace('/\b(?:https?:\/\/|www\.)\S+/i', '[REDACTED_LINK]', $trimmed) ?? $trimmed;
+        $cleanLines[] = $trimmed;
     }
-    if ($vessel === '' && preg_match('/\b(?:buque|vessel|ship)\s+(?:is\s+|es\s+)?([a-z0-9][a-z0-9 .\'-]{2,50}?)(?=\s*(?:[-–—,;|]|\beta\b|\bat\b|\bin\b|$))/iu', $text, $match)) {
-        $vessel = clean_extracted_value($match[1]);
+
+    $text = trim(implode("\n", $cleanLines));
+    $text = preg_replace('/\n{3,}/', "\n\n", $text) ?? $text;
+    return trim($text);
+}
+
+function call_openai_extraction(string $text, array $email): array
+{
+    $apiKey = config('openai_api_key');
+    if ($apiKey === '') {
+        throw new RuntimeException('No hay clave de OpenAI configurada.');
     }
-    $eta = labeled_date($text, ['eta', 'estimated time of arrival']);
-    if ($eta === '') {
-        $eta = date_after_keywords($text, ['eta', 'estimated time of arrival', 'arrival']);
+
+    $schema = [
+        'type' => 'object',
+        'additionalProperties' => false,
+        'properties' => [
+            'is_service' => ['type' => 'boolean'],
+            'confidence' => ['type' => 'number', 'minimum' => 0, 'maximum' => 1],
+            'client' => ['type' => 'string'],
+            'vessel' => ['type' => 'string'],
+            'eta' => ['type' => 'string'],
+            'port' => ['type' => 'string'],
+            'priority' => ['type' => 'string'],
+            'cargo_summary' => ['type' => 'string'],
+            'reception' => [
+                'type' => 'object',
+                'additionalProperties' => false,
+                'properties' => [
+                    'required' => ['type' => 'boolean'],
+                    'date' => ['type' => 'string'],
+                    'time' => ['type' => 'string'],
+                    'location' => ['type' => 'string'],
+                ],
+                'required' => ['required', 'date', 'time', 'location'],
+            ],
+            'transport' => [
+                'type' => 'object',
+                'additionalProperties' => false,
+                'properties' => [
+                    'required' => ['type' => 'boolean'],
+                    'date' => ['type' => 'string'],
+                    'time' => ['type' => 'string'],
+                    'pickup' => ['type' => 'string'],
+                    'delivery' => ['type' => 'string'],
+                ],
+                'required' => ['required', 'date', 'time', 'pickup', 'delivery'],
+            ],
+        ],
+        'required' => ['is_service', 'confidence', 'client', 'vessel', 'eta', 'port', 'priority', 'cargo_summary', 'reception', 'transport'],
+    ];
+
+    $prompt = <<<PROMPT
+Extrae la solicitud operativa de este correo marítimo. Usa solo el texto limpio proporcionado.
+Devuelve exclusivamente un objeto JSON válido con esta estructura exacta:
+{
+  "is_service": true,
+  "confidence": 0.95,
+  "client": "",
+  "vessel": "",
+  "eta": "YYYY-MM-DD",
+  "port": "",
+  "priority": "Media",
+  "cargo_summary": "",
+  "reception": {"required": false, "date": "", "time": "", "location": ""},
+  "transport": {"required": false, "date": "", "time": "", "pickup": "", "delivery": ""}
+}
+Reglas:
+- Identifica si es una solicitud operativa real. Si no, devuelve "is_service": false y confidence baja.
+- Si el correo es un servicio de recepción o transporte, marca el bloque correspondiente como required true.
+- Si no aparece información, deja los campos vacíos como cadenas vacías y los booleanos en false.
+- No añadas texto adicional ni markdown.
+
+Correo:
+Asunto: {$email['subject']}
+Texto:
+{$text}
+PROMPT;
+
+    $body = json_encode([
+        'model' => 'gpt-5.4-mini',
+        'input' => [
+            ['role' => 'system', 'content' => 'Extrae solicitudes operativas de correos marítimos y devuelve JSON estricto.'],
+            ['role' => 'user', 'content' => $prompt],
+        ],
+        'temperature' => 0,
+        'text' => [
+            'format' => [
+                'type' => 'json_schema',
+                'name' => 'mail_extraction',
+                'schema' => $schema,
+                'strict' => true,
+            ],
+        ],
+    ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+
+    if (!function_exists('curl_init')) {
+        throw new RuntimeException('La extensión cURL de PHP no está disponible.');
     }
-    $port = labeled_value($text, ['puerto', 'port', 'port of call']);
-    if ($port === '') {
-        $knownPorts = ['Algeciras', 'Barcelona', 'Tarragona', 'Valencia', 'Bilbao', 'Cartagena', 'Huelva', 'Vigo', 'Las Palmas', 'Gibraltar', 'Ceuta', 'Málaga', 'Malaga', 'Cádiz', 'Cadiz'];
-        foreach ($knownPorts as $knownPort) {
-            if (preg_match('/\b' . preg_quote($knownPort, '/') . '\b/iu', $text)) {
-                $port = $knownPort;
-                break;
+
+    $ch = curl_init('https://api.openai.com/v1/responses');
+    curl_setopt($ch, CURLOPT_POST, true);
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+    curl_setopt($ch, CURLOPT_HTTPHEADER, [
+        'Content-Type: application/json',
+        'Authorization: Bearer ' . $apiKey,
+    ]);
+    curl_setopt($ch, CURLOPT_TIMEOUT, 45);
+    curl_setopt($ch, CURLOPT_POSTFIELDS, $body);
+    $response = curl_exec($ch);
+    $statusCode = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    $error = curl_error($ch);
+    curl_close($ch);
+
+    if ($response === false || $statusCode >= 400) {
+        throw new RuntimeException($error !== '' ? $error : 'OpenAI devolvió un error HTTP ' . $statusCode);
+    }
+
+    $decoded = json_decode($response, true);
+    if (!is_array($decoded)) {
+        throw new RuntimeException('La respuesta de OpenAI no es válida.');
+    }
+
+    $content = '';
+    if (isset($decoded['output']) && is_array($decoded['output'])) {
+        foreach ($decoded['output'] as $block) {
+            if (($block['type'] ?? '') !== 'message') {
+                continue;
+            }
+            foreach (($block['content'] ?? []) as $part) {
+                if (($part['type'] ?? '') === 'output_text' && isset($part['text'])) {
+                    $content .= (string) $part['text'];
+                } elseif (($part['type'] ?? '') === 'text' && isset($part['text'])) {
+                    $content .= (string) $part['text'];
+                }
             }
         }
+    } elseif (isset($decoded['choices'][0]['message']['content'])) {
+        $content = is_array($decoded['choices'][0]['message']['content'])
+            ? json_encode($decoded['choices'][0]['message']['content'], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)
+            : (string) $decoded['choices'][0]['message']['content'];
     }
-    $client = labeled_value($text, ['cliente', 'client', 'customer', 'company']);
-    if ($client === '') {
-        $client = $email['sender_name'] ?: strstr($email['sender_email'], '@', true);
+
+    if ($content === '') {
+        throw new RuntimeException('OpenAI no devolvió contenido JSON.');
     }
-    $receptionDate = labeled_date($text, ['fecha recepción', 'fecha de recepción', 'reception date', 'receiving date']);
-    $transportDate = labeled_date($text, ['fecha transporte', 'fecha de transporte', 'transport date', 'delivery date', 'fecha entrega', 'fecha de entrega', 'pickup date']);
-    if ($transportDate === '' && $sampleService) {
-        $transportDate = date_after_keywords($text, ['recoger muestras', 'retirar muestras', 'recogida de muestras', 'sample collection', 'collect samples', 'samples pickup', 'pick up samples']);
+
+    $parsed = json_decode($content, true);
+    if (!is_array($parsed)) {
+        throw new RuntimeException('OpenAI no devolvió JSON válido.');
     }
-    if ($transportDate === '' && $sampleService && $eta !== '') {
-        $transportDate = $eta;
-    }
-    $receptionTime = labeled_time($text, ['hora recepción', 'hora de recepción', 'reception time', 'receiving time']);
-    $transportTime = labeled_time($text, ['hora transporte', 'hora de transporte', 'transport time', 'delivery time', 'hora entrega', 'pickup time']);
-    $pickup = labeled_value($text, ['recogida', 'pickup', 'collect from', 'origen', 'origin']);
-    $delivery = labeled_value($text, ['entrega', 'delivery', 'deliver to', 'destino', 'destination']);
-    if ($pickup === '' && $sampleService && $vessel !== '') {
-        $pickup = 'M/V ' . $vessel . ($port !== '' ? ' · ' . $port : '');
-    }
-    $cargo = labeled_value($text, ['mercancía', 'mercancia', 'cargo', 'goods', 'packages', 'bultos']);
-    if ($cargo === '' && $sampleService) {
-        $cargo = 'RECOGIDA DE MUESTRAS';
-    }
-    $priority = preg_match('/\b(urgente|urgent|asap|immediate)\b/iu', $lower) ? 'Urgente' : 'Media';
-    $confidence = 0.15;
-    $confidence += $operational ? 0.15 : 0;
-    $confidence += $vessel !== '' ? 0.18 : 0;
-    $confidence += $eta !== '' ? 0.14 : 0;
-    $confidence += $port !== '' ? 0.14 : 0;
-    $confidence += $client !== '' ? 0.08 : 0;
-    $confidence += (!$reception || $receptionDate !== '') ? 0.08 : 0;
-    $confidence += (!$transport || $transportDate !== '') ? 0.08 : 0;
+
+    return normalize_extracted_payload($parsed);
+}
+
+function normalize_extracted_payload(array $payload): array
+{
+    $reception = is_array($payload['reception'] ?? null) ? $payload['reception'] : [];
+    $transport = is_array($payload['transport'] ?? null) ? $payload['transport'] : [];
     return [
-        'is_service' => $operational,
-        'confidence' => min(1, $confidence),
-        'client' => clean_extracted_value((string) $client),
-        'vessel' => mb_strtoupper(clean_extracted_value($vessel)),
-        'eta' => $eta,
-        'port' => mb_strtoupper(clean_extracted_value($port)),
-        'priority' => $priority,
-        'cargo_summary' => clean_extracted_value($cargo),
+        'is_service' => (bool) ($payload['is_service'] ?? false),
+        'confidence' => min(1.0, max(0.0, (float) ($payload['confidence'] ?? 0.0))),
+        'client' => clean_extracted_value((string) ($payload['client'] ?? '')),
+        'vessel' => mb_strtoupper(clean_extracted_value((string) ($payload['vessel'] ?? ''))),
+        'eta' => trim((string) ($payload['eta'] ?? '')),
+        'port' => mb_strtoupper(clean_extracted_value((string) ($payload['port'] ?? ''))),
+        'priority' => trim((string) ($payload['priority'] ?? 'Media')) !== '' ? trim((string) ($payload['priority'] ?? 'Media')) : 'Media',
+        'cargo_summary' => clean_extracted_value((string) ($payload['cargo_summary'] ?? '')),
         'reception' => [
-            'required' => $reception,
-            'date' => $receptionDate,
-            'time' => $receptionTime,
-            'location' => labeled_value($text, ['lugar recepción', 'reception location', 'warehouse', 'almacén']),
+            'required' => (bool) ($reception['required'] ?? false),
+            'date' => trim((string) ($reception['date'] ?? '')),
+            'time' => trim((string) ($reception['time'] ?? '')),
+            'location' => clean_extracted_value((string) ($reception['location'] ?? '')),
         ],
         'transport' => [
-            'required' => $transport,
-            'date' => $transportDate,
-            'time' => $transportTime,
-            'pickup' => clean_extracted_value($pickup),
-            'delivery' => clean_extracted_value($delivery),
+            'required' => (bool) ($transport['required'] ?? false),
+            'date' => trim((string) ($transport['date'] ?? '')),
+            'time' => trim((string) ($transport['time'] ?? '')),
+            'pickup' => clean_extracted_value((string) ($transport['pickup'] ?? '')),
+            'delivery' => clean_extracted_value((string) ($transport['delivery'] ?? '')),
         ],
     ];
+}
+
+function service_required_data_complete(array $data): bool
+{
+    if (empty($data['is_service'])) {
+        return false;
+    }
+    if ((float) ($data['confidence'] ?? 0) < 0.90) {
+        return false;
+    }
+    if (trim((string) ($data['client'] ?? '')) === '') {
+        return false;
+    }
+    if (trim((string) ($data['vessel'] ?? '')) === '') {
+        return false;
+    }
+    if (trim((string) ($data['eta'] ?? '')) === '') {
+        return false;
+    }
+    if (trim((string) ($data['port'] ?? '')) === '') {
+        return false;
+    }
+    if (!empty($data['reception']['required']) && trim((string) ($data['reception']['date'] ?? '')) === '') {
+        return false;
+    }
+    if (!empty($data['transport']['required']) && trim((string) ($data['transport']['date'] ?? '')) === '') {
+        return false;
+    }
+    return true;
+}
+
+function extract_local_service(array $email): array
+{
+    $subject = (string) ($email['subject'] ?? '');
+    $body = (string) ($email['body'] ?? '');
+    $text = sanitize_email_text($subject, $body);
+    if ($text === '') {
+        return [
+            'is_service' => false,
+            'confidence' => 0.0,
+            'client' => clean_extracted_value((string) ($email['sender_name'] ?? '')),
+            'vessel' => '',
+            'eta' => '',
+            'port' => '',
+            'priority' => 'Media',
+            'cargo_summary' => '',
+            'reception' => ['required' => false, 'date' => '', 'time' => '', 'location' => ''],
+            'transport' => ['required' => false, 'date' => '', 'time' => '', 'pickup' => '', 'delivery' => ''],
+        ];
+    }
+
+    try {
+        return call_openai_extraction($text, $email);
+    } catch (Throwable) {
+        $lower = mb_strtolower($text);
+        $reception = (bool) preg_match('/\b(recepci[oó]n|reception|receive|receiving|almac[eé]n|warehouse)\b/iu', $lower);
+        $sampleService = (bool) preg_match('/\b(recoger|retirar|recolecci[oó]n|recogida|collect(?:ion)?|pick[\s-]?up)\b[^\r\n]{0,30}\b(muestras?|samples?|specimens?)\b|\b(muestras?|samples?|specimens?)\b[^\r\n]{0,30}\b(recoger|retirar|collect(?:ion)?|pick[\s-]?up)\b/iu', $lower);
+        $transport = $sampleService || (bool) preg_match('/\b(transporte|transport|delivery|deliver|entrega|pickup|pick-up|recogida|recoger|retirar|collect|courier)\b/iu', $lower);
+        $vessel = labeled_value($text, ['buque', 'vessel', 'ship', 'm/v', 'mv']);
+        if ($vessel === '' && preg_match('/\b(?:m\/v|mv)\s+([a-z0-9][a-z0-9 .\'\-]{2,50}?)(?=\s*(?:[-–—|]|\beta\b|\bat\b|\bin\b|$))/iu', $text, $match)) {
+            $vessel = clean_extracted_value($match[1]);
+        }
+        if ($vessel === '' && preg_match('/\b(?:buque|vessel|ship)\s+(?:is\s+|es\s+)?([a-z0-9][a-z0-9 .\'\-]{2,50}?)(?=\s*(?:[-–—,;|]|\beta\b|\bat\b|\bin\b|$))/iu', $text, $match)) {
+            $vessel = clean_extracted_value($match[1]);
+        }
+        $eta = labeled_date($text, ['eta', 'estimated time of arrival']);
+        if ($eta === '') {
+            $eta = date_after_keywords($text, ['eta', 'estimated time of arrival', 'arrival']);
+        }
+        $port = labeled_value($text, ['puerto', 'port', 'port of call']);
+        if ($port === '') {
+            $knownPorts = ['Algeciras', 'Barcelona', 'Tarragona', 'Valencia', 'Bilbao', 'Cartagena', 'Huelva', 'Vigo', 'Las Palmas', 'Gibraltar', 'Ceuta', 'Málaga', 'Malaga', 'Cádiz', 'Cadiz'];
+            foreach ($knownPorts as $knownPort) {
+                if (preg_match('/\b' . preg_quote($knownPort, '/') . '\b/iu', $text)) {
+                    $port = $knownPort;
+                    break;
+                }
+            }
+        }
+        $client = labeled_value($text, ['cliente', 'client', 'customer', 'company']);
+        if ($client === '') {
+            $client = $email['sender_name'] ?: strstr((string) ($email['sender_email'] ?? ''), '@', true);
+        }
+        $receptionDate = labeled_date($text, ['fecha recepción', 'fecha de recepción', 'reception date', 'receiving date']);
+        $transportDate = labeled_date($text, ['fecha transporte', 'fecha de transporte', 'transport date', 'delivery date', 'fecha entrega', 'fecha de entrega', 'pickup date']);
+        if ($transportDate === '' && $sampleService) {
+            $transportDate = date_after_keywords($text, ['recoger muestras', 'retirar muestras', 'recogida de muestras', 'sample collection', 'collect samples', 'samples pickup', 'pick up samples']);
+        }
+        if ($transportDate === '' && $sampleService && $eta !== '') {
+            $transportDate = $eta;
+        }
+        $receptionTime = labeled_time($text, ['hora recepción', 'hora de recepción', 'reception time', 'receiving time']);
+        $transportTime = labeled_time($text, ['hora transporte', 'hora de transporte', 'transport time', 'delivery time', 'hora entrega', 'pickup time']);
+        $pickup = labeled_value($text, ['recogida', 'pickup', 'collect from', 'origen', 'origin']);
+        $delivery = labeled_value($text, ['entrega', 'delivery', 'deliver to', 'destino', 'destination']);
+        if ($pickup === '' && $sampleService && $vessel !== '') {
+            $pickup = 'M/V ' . $vessel . ($port !== '' ? ' · ' . $port : '');
+        }
+        $cargo = labeled_value($text, ['mercancía', 'mercancia', 'cargo', 'goods', 'packages', 'bultos']);
+        if ($cargo === '' && $sampleService) {
+            $cargo = 'RECOGIDA DE MUESTRAS';
+        }
+        $priority = preg_match('/\b(urgente|urgent|asap|immediate)\b/iu', $lower) ? 'Urgente' : 'Media';
+        return [
+            'is_service' => $reception || $transport,
+            'confidence' => 0.65,
+            'client' => clean_extracted_value((string) $client),
+            'vessel' => mb_strtoupper(clean_extracted_value($vessel)),
+            'eta' => $eta,
+            'port' => mb_strtoupper(clean_extracted_value($port)),
+            'priority' => $priority,
+            'cargo_summary' => clean_extracted_value($cargo),
+            'reception' => [
+                'required' => $reception,
+                'date' => $receptionDate,
+                'time' => $receptionTime,
+                'location' => labeled_value($text, ['lugar recepción', 'reception location', 'warehouse', 'almacén']),
+            ],
+            'transport' => [
+                'required' => $transport,
+                'date' => $transportDate,
+                'time' => $transportTime,
+                'pickup' => clean_extracted_value($pickup),
+                'delivery' => clean_extracted_value($delivery),
+            ],
+        ];
+    }
 }
 
 function service_review_reasons(array $data): array
 {
     $reasons = [];
+    if (empty($data['is_service'])) {
+        $reasons[] = 'No se identifica un servicio';
+        return $reasons;
+    }
+    if (empty($data['client'])) $reasons[] = 'Falta el cliente';
     if (empty($data['vessel'])) $reasons[] = 'Falta el buque';
     if (empty($data['eta'])) $reasons[] = 'Falta la ETA';
     if (empty($data['port'])) $reasons[] = 'Falta el puerto';
     $reception = !empty($data['reception']['required']);
     $transport = !empty($data['transport']['required']);
-    if (!$reception && !$transport) $reasons[] = 'No se identifica un servicio';
     if ($reception && empty($data['reception']['date'])) $reasons[] = 'Falta la fecha de recepción';
     if ($transport && empty($data['transport']['date'])) $reasons[] = 'Falta la fecha de transporte';
-    if ((float) ($data['confidence'] ?? 0) < 0.85) $reasons[] = 'Revisión manual recomendada';
+    if ((float) ($data['confidence'] ?? 0) < 0.90) $reasons[] = 'Revisión manual recomendada';
     return $reasons;
 }
 
@@ -289,12 +561,12 @@ function plus_one_hour(string $time): string
 
 function apply_service_email(int $mailId, array $data, ?int $userId = null): string
 {
-    $critical = array_filter(
-        service_review_reasons($data),
-        static fn(string $reason): bool => $reason !== 'Revisión manual recomendada'
-    );
-    if ($critical) {
-        throw new InvalidArgumentException(implode('. ', $critical) . '.');
+    if (!service_required_data_complete($data)) {
+        $critical = array_filter(
+            service_review_reasons($data),
+            static fn(string $reason): bool => $reason !== 'Revisión manual recomendada'
+        );
+        throw new InvalidArgumentException(($critical ? implode('. ', $critical) : 'Faltan datos obligatorios o la confianza es insuficiente.') . '.');
     }
     $pdo = db();
     $pdo->beginTransaction();
@@ -392,6 +664,7 @@ function apply_service_email(int $mailId, array $data, ?int $userId = null): str
             json_encode($data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
             (float) ($data['confidence'] ?? 1), $caseRef, $userId, $userId, $mailId,
         ]);
+        audit($userId, 'mail.auto_create', ['mailId' => $mailId, 'caseRef' => $caseRef]);
         $pdo->commit();
         return $caseRef;
     } catch (Throwable $error) {
@@ -470,7 +743,7 @@ function process_mailboxes(string $triggerType): array
                 $summary['scanned']++;
                 if ($status === 'ignored') {
                     $summary['ignored']++;
-                } elseif (!$reasons && (float) $data['confidence'] >= 0.85) {
+                } elseif (!$reasons && service_required_data_complete($data)) {
                     try {
                         apply_service_email($mailId, $data);
                         $summary['processed']++;
