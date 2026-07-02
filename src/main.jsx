@@ -255,7 +255,8 @@ function App({auth,finance,onFinanceChange,onLogout}){
   const [clientOptions,setClientOptions]=useState(clientNames);
   const [operationalLoaded,setOperationalLoaded]=useState(false);
   const [toast,setToast]=useState('');
-  const [scheduleAlerts,setScheduleAlerts]=useState([]);
+  const scheduleAlertsKey=`swiftport-driver-alerts-${user.id}`;
+  const [scheduleAlerts,setScheduleAlerts]=useState(()=>{if(user.role!=='driver')return[];try{const stored=JSON.parse(localStorage.getItem(scheduleAlertsKey)||'[]');return Array.isArray(stored)?stored:[]}catch{return[]}});
   const scheduleSnapshotRef=useRef(null);
   const casesWithFinance=useMemo(()=>cases.map(item=>({...item,importe:finance.caseAmounts[item.id]||0})),[cases,finance.caseAmounts]);
   const selected=casesWithFinance.find(item=>item.id===selectedId)||casesWithFinance[0];
@@ -270,7 +271,7 @@ function App({auth,finance,onFinanceChange,onLogout}){
         if(!stored){try{stored=JSON.parse(localStorage.getItem(storageKey)||'null')}catch{stored=null}}
         const current=driverScheduleSnapshot(result.data,user.fullName);
         const changes=changedDriverSchedules(stored,current);
-        if(changes.length)setScheduleAlerts(existing=>[...changes,...existing].slice(0,20));
+        if(changes.length)setScheduleAlerts(existing=>{const next=[...changes,...existing].slice(0,20);try{localStorage.setItem(scheduleAlertsKey,JSON.stringify(next))}catch{}return next});
         scheduleSnapshotRef.current=current;
         try{localStorage.setItem(storageKey,JSON.stringify(current))}catch{}
       }
@@ -425,7 +426,7 @@ function App({auth,finance,onFinanceChange,onLogout}){
       </header>
       <div className="content">
         {previewUser&&<div className="preview-banner"><Eye/><span>Estás viendo la aplicación como <b>{previewUser.fullName}</b> ({ROLE_LABELS[previewUser.role]}). Tu cuenta sigue siendo administrador.</span><button onClick={()=>setPreviewUser(null)}>Salir de la vista previa</button></div>}
-        {effectiveRole==='driver'&&scheduleAlert&&<section className="schedule-change-alert" role="alert"><Clock3/><div><small>HORARIO ACTUALIZADO · {scheduleAlert.service}</small><b>{scheduleAlert.title}</b>{scheduleAlert.oldEta!==scheduleAlert.newEta&&<p>ETA: <s>{scheduleAlert.oldEta}</s> → <strong>{scheduleAlert.newEta}</strong></p>}{scheduleAlert.oldTask!==scheduleAlert.newTask&&<p>Servicio: <s>{scheduleAlert.oldTask}</s> → <strong>{scheduleAlert.newTask}</strong></p>}</div><button className="button secondary" onClick={()=>setScheduleAlerts(alerts=>alerts.slice(1))}>Entendido</button></section>}
+        {effectiveRole==='driver'&&scheduleAlert&&<section className="schedule-change-alert" role="alert"><Clock3/><div><small>HORARIO ACTUALIZADO · {scheduleAlert.service}</small><b>{scheduleAlert.title}</b>{scheduleAlert.oldEta!==scheduleAlert.newEta&&<p>ETA: <s>{scheduleAlert.oldEta}</s> → <strong>{scheduleAlert.newEta}</strong></p>}{scheduleAlert.oldTask!==scheduleAlert.newTask&&<p>Servicio: <s>{scheduleAlert.oldTask}</s> → <strong>{scheduleAlert.newTask}</strong></p>}</div><button className="button secondary" onClick={()=>setScheduleAlerts(alerts=>{const next=alerts.slice(1);try{localStorage.setItem(scheduleAlertsKey,JSON.stringify(next))}catch{}return next})}>Entendido</button></section>}
         {tab==='dashboard'&&<Dashboard cases={casesWithFinance} warehouseEntries={warehouseEntries} calendarEvents={calendarEvents} openCase={openCase} navigate={navigate} showFinance={showFinance} user={visibleUser}/>}
         {tab==='calendario'&&<>{effectiveRole!=='driver'&&<DriverLegend team={operationalTeam}/>}<Calendario events={calendarEvents} team={operationalTeam} cases={cases} transports={transports} providers={providers} warehouseEntries={warehouseEntries} saveEvent={saveCalendarEvent} completeCaseStep={completeCaseStep} undoCaseStep={undoCaseStep} openCase={openCase} currentUser={visibleUser} csrfToken={auth.csrfToken}/></>}
         {tab==='expedientes'&&<Expedientes cases={casesWithFinance} selected={selected} select={setSelectedId} search={search} setSearch={setSearch} completeCaseStep={completeCaseStep} notify={notify} showFinance={showFinance} updateCase={updateCase} clientOptions={clientOptions} warehouseEntries={warehouseEntries} transports={transports} csrfToken={auth.csrfToken}/>}
