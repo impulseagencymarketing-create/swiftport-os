@@ -269,7 +269,7 @@ function extract_port_call_fallbacks(string $text, string $receivedAt): array
             }
         }
     }
-    if (preg_match('/\b(?:port\s+stay|time\s+in\s+port|stay(?:ing)?(?:\s+in\s+port)?|remain(?:ing)?\s+in\s+port|in\s+port\s+for|estancia(?:\s+en\s+puerto)?|permanencia(?:\s+en\s+puerto)?)\b[^0-9]{0,45}(\d+(?:[.,]\d+)?)\s*(hours?|hrs?|h|days?|d[ií]as?)/iu', $text, $match)) {
+    if (preg_match('/\b(?:port\s+stay|time\s+in\s+port|stay(?:ing)?(?:\s+in\s+port)?|remain(?:ing)?(?:\s+in\s+port)?|in\s+port\s+for|estancia(?:\s+en\s+puerto)?|permanencia(?:\s+en\s+puerto)?)\b[^0-9]{0,45}(\d+(?:[.,]\d+)?)\s*(hours?|hrs?|h|days?|d[ií]as?)/iu', $text, $match)) {
         $result['port_stay'] = clean_extracted_value($match[1] . ' ' . $match[2]);
     }
     return $result;
