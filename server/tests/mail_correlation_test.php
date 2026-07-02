@@ -1,6 +1,6 @@
 <?php
 declare(strict_types=1);
-require dirname(__DIR__) . '/api/mail/_correlation.php';
+require dirname(__DIR__) . '/api/mail/_service.php';
 
 function expect_same(mixed $expected, mixed $actual, string $message): void
 {
@@ -79,6 +79,30 @@ expect_same(
 
 expect_same(true, port_call_data_has_schedule(['etb' => '2026-07-04']), 'ETB debe considerarse una actualización operativa.');
 expect_same(false, port_call_data_has_schedule(['operational_notes' => 'Sin cambios']), 'Una nota sin horario no es una actualización de escala.');
+expect_same('SAPPHIRE', port_call_token('GC SAPPHIRE'), 'El tipo de buque GC no debe formar parte del nombre correlacionado.');
+expect_same(
+    'SW-SAPPHIRE',
+    find_correlated_case_ref_in_state([
+        ['id' => 'SW-SAPPHIRE', 'buque' => 'SAPPHIRE', 'cliente' => 'LIMANI', 'puerto' => 'TARRAGONA', 'eta' => '2026-07-04', 'estado' => 'En curso'],
+    ], [
+        'vessel' => 'GC SAPPHIRE', 'client' => 'LIMANI', 'port' => 'TARRAGONA', 'eta' => '2026-07-04', 'existing_reference' => '',
+    ]),
+    'Todos los correos de GC SAPPHIRE para la misma escala deben unirse en un expediente.'
+);
+expect_same('TORC', subject_target_vessel('RE: TORC - GABARRA - BARCELONA'), 'GABARRA nunca debe sustituir al buque TORC.');
+expect_same('Transporte a gabarra', transport_service_name(['delivery_mode' => 'barge']), 'La tarea debe mostrar Transporte a gabarra.');
+$scheduleFallback = extract_port_call_fallbacks(
+    "GC SAPPHIRE prospects\nETA: 04/07/2026 06:30\nETB: 04/07/2026 09:00\nETD: 05/07/2026 18:00\nPort stay: 36 hours",
+    '2026-07-02 10:43:00'
+);
+expect_same('2026-07-04', $scheduleFallback['eta'], 'Debe rescatarse la fecha ETA del conjunto de correos.');
+expect_same('06:30', $scheduleFallback['eta_time'], 'Debe rescatarse la hora ETA del conjunto de correos.');
+expect_same('36 hours', $scheduleFallback['port_stay'], 'Debe conservarse la permanencia prevista en puerto.');
+$forwarded = sanitize_email_text(
+    'RE: GC SAPPHIRE at port TARRAGONA Prospects Update',
+    "Best regards,\nFirma del consignatario\nDe: Port Agent\nAsunto: SAPPHIRE prospects\nETA: 04/07/2026 06:30\nStaying in port about 36 hours"
+);
+expect_same(true, str_contains($forwarded, 'ETA: 04/07/2026 06:30'), 'La firma no debe ocultar la ETA del mensaje reenviado.');
 expect_same(
     ['2026-07-04', '14:00'],
     port_call_operational_slot([

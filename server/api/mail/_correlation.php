@@ -3,10 +3,15 @@ declare(strict_types=1);
 
 function port_call_token(string $value): string
 {
-    $value = mb_strtoupper(trim($value));
-    $value = preg_replace('/^(?:MV|M\/V|VSL|VESSEL|SHIP)\s+/u', '', $value) ?? $value;
+    $value = port_call_vessel_name($value);
     $value = preg_replace('/[^A-Z0-9]+/u', ' ', $value) ?? $value;
     return trim(preg_replace('/\s+/', ' ', $value) ?? $value);
+}
+
+function port_call_vessel_name(string $value): string
+{
+    $value = mb_strtoupper(trim($value));
+    return trim(preg_replace('/^(?:MV|M\/V|MT|M\/T|MY|M\/Y|MS|M\/S|GC|LNGC|LPGC|SS|VSL|VESSEL|SHIP)\s+/u', '', $value) ?? $value);
 }
 
 function port_call_known_value(string $value): bool
