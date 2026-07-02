@@ -4,6 +4,9 @@ require_once __DIR__ . '/_correlation.php';
 
 function mail_decode_header_value(string $value): string
 {
+    if (!function_exists('imap_mime_header_decode')) {
+        return trim(mb_decode_mimeheader($value));
+    }
     $result = '';
     foreach (imap_mime_header_decode($value) as $part) {
         $charset = strtoupper((string) ($part->charset ?? 'UTF-8'));
@@ -126,7 +129,7 @@ function subject_target_vessel(string $subject): string
 {
     $normalized = normalized_mail_subject($subject);
     if (preg_match('/^(.{2,70}?)\s+-\s+(?:GABARRA|BARGE)\b/u', $normalized, $match)) {
-        $candidate = trim(preg_replace('/^(?:MV|M\/V|VSL|VESSEL)\s+/u', '', $match[1]) ?? $match[1]);
+        $candidate = port_call_vessel_name($match[1]);
         return in_array($candidate, ['SERVICE', 'SERVICIO', 'REQUEST', 'SOLICITUD'], true) ? '' : $candidate;
     }
     return '';
@@ -229,6 +232,49 @@ function date_after_keywords(string $text, array $keywords): string
     }
     return '';
 }
+
+function normalize_operational_date(string $value, string $receivedAt): string
+{
+    $normalized = normalize_date_value($value);
+    if ($normalized !== '') return $normalized;
+    $year = (int) date('Y', strtotime($receivedAt) ?: time());
+    if (preg_match('/\b(\d{1,2})[-\/.](\d{1,2})\b/', trim($value), $match)) {
+        $candidate = sprintf('%04d-%02d-%02d', $year, (int) $match[2], (int) $match[1]);
+        return is_valid_service_date($candidate) ? $candidate : '';
+    }
+    $months = [
+        'jan' => 1, 'ene' => 1, 'feb' => 2, 'mar' => 3, 'apr' => 4, 'abr' => 4,
+        'may' => 5, 'jun' => 6, 'jul' => 7, 'aug' => 8, 'ago' => 8,
+        'sep' => 9, 'oct' => 10, 'nov' => 11, 'dec' => 12, 'dic' => 12,
+    ];
+    if (preg_match('/\b(\d{1,2})\s+([a-záéíóú]{3,})\b/iu', trim($value), $match)) {
+        $month = $months[mb_strtolower(mb_substr($match[2], 0, 3))] ?? 0;
+        if ($month) {
+            $candidate = sprintf('%04d-%02d-%02d', $year, $month, (int) $match[1]);
+            return is_valid_service_date($candidate) ? $candidate : '';
+        }
+    }
+    return '';
+}
+
+function extract_port_call_fallbacks(string $text, string $receivedAt): array
+{
+    $result = ['eta' => '', 'eta_time' => '', 'etb' => '', 'etb_time' => '', 'etd' => '', 'etd_time' => '', 'port_stay' => ''];
+    $datePattern = '(20\d{2}[-\/.]\d{1,2}[-\/.]\d{1,2}|\d{1,2}[-\/.]\d{1,2}(?:[-\/.]\d{2,4})?|\d{1,2}\s+[a-záéíóú]{3,}(?:\s+\d{2,4})?)';
+    foreach (['eta', 'etb', 'etd'] as $field) {
+        if (preg_match('/\b' . strtoupper($field) . '\b\s*[:\-]?\s*(?:on\s+)?' . $datePattern . '(?:\s*(?:at|@)?\s*([0-2]?\d[:.][0-5]\d))?/iu', $text, $match)) {
+            $result[$field] = normalize_operational_date((string) $match[1], $receivedAt);
+            if (!empty($match[2]) && preg_match('/(\d{1,2})[:.](\d{2})/', (string) $match[2], $timeMatch)) {
+                $result[$field . '_time'] = sprintf('%02d:%02d', (int) $timeMatch[1], (int) $timeMatch[2]);
+            }
+        }
+    }
+    if (preg_match('/\b(?:port\s+stay|time\s+in\s+port|stay(?:ing)?(?:\s+in\s+port)?|remain(?:ing)?\s+in\s+port|in\s+port\s+for|estancia(?:\s+en\s+puerto)?|permanencia(?:\s+en\s+puerto)?)\b[^0-9]{0,45}(\d+(?:[.,]\d+)?)\s*(hours?|hrs?|h|days?|d[ií]as?)/iu', $text, $match)) {
+        $result['port_stay'] = clean_extracted_value($match[1] . ' ' . $match[2]);
+    }
+    return $result;
+}
+
 function is_valid_service_date(string $value): bool
 {
     $value = trim($value);
@@ -263,7 +309,7 @@ function sanitize_email_text(string $subject, string $body): string
             }
             continue;
         }
-        if (preg_match('/^(?:[-_*]+\s*)?(?:On|Enviado el|Forwarded message|Mensaje reenviado|Reenviado|Begin forwarded message|Inicio de mensaje reenviado)\b/i', $trimmed)) {
+        if (preg_match('/^(?:[-_*]+\s*)?(?:On|Enviado el|Forwarded message|Mensaje reenviado|Reenviado|Begin forwarded message|Inicio de mensaje reenviado|Original message|Mensaje original)\b/i', $trimmed)) {
             $inSignature = false;
             $cleanLines[] = '[CONTEXTO REENVIADO]';
             continue;
@@ -274,6 +320,11 @@ function sanitize_email_text(string $subject, string $body): string
         }
         if (preg_match('/^(?:kind regards|regards|thanks|thank you|sincerely|saludos|cordialmente|atentamente|gracias|cheers|best|with thanks|many thanks)\b/i', $trimmed)) {
             $inSignature = true;
+            continue;
+        }
+        if ($inSignature && preg_match('/^(?:from|de|sent|enviado|to|para|subject|asunto|date|fecha):/i', $trimmed)) {
+            $inSignature = false;
+            $cleanLines[] = '[CONTEXTO REENVIADO]';
             continue;
         }
         if ($inSignature) {
@@ -389,6 +440,9 @@ function call_openai_extraction(string $text, array $email): array
             'etb_time' => ['type' => 'string'],
             'etd' => ['type' => 'string'],
             'etd_time' => ['type' => 'string'],
+            'port_stay' => ['type' => 'string'],
+            'delivery_mode' => ['type' => 'string', 'enum' => ['vessel', 'barge', 'shore', 'warehouse', 'unknown']],
+            'operation_location' => ['type' => 'string'],
             'port' => ['type' => 'string'],
             'priority' => ['type' => 'string', 'enum' => ['Baja', 'Media', 'Alta', 'Urgente']],
             'cargo_summary' => ['type' => 'string'],
@@ -417,7 +471,7 @@ function call_openai_extraction(string $text, array $email): array
                 'required' => ['required', 'date', 'time', 'pickup', 'delivery'],
             ],
         ],
-        'required' => ['is_service', 'confidence', 'request_action', 'service_kind', 'existing_reference', 'client', 'vessel', 'eta', 'eta_time', 'etb', 'etb_time', 'etd', 'etd_time', 'port', 'priority', 'cargo_summary', 'operational_notes', 'reception', 'transport'],
+        'required' => ['is_service', 'confidence', 'request_action', 'service_kind', 'existing_reference', 'client', 'vessel', 'eta', 'eta_time', 'etb', 'etb_time', 'etd', 'etd_time', 'port_stay', 'delivery_mode', 'operation_location', 'port', 'priority', 'cargo_summary', 'operational_notes', 'reception', 'transport'],
     ];
 
     $subject = clean_extracted_value((string) ($email['subject'] ?? ''));
@@ -447,9 +501,12 @@ CRITERIO OPERATIVO
 EXTRACCIÓN
 - Extrae el buque aunque aparezca como MV, M/V, VSL, vessel, ship o en el asunto.
 - En asuntos del tipo "TORC - GABARRA - BARCELONA", el buque objetivo es TORC; GABARRA/BARGE describe la operativa y BARCELONA es el puerto.
+- GABARRA/BARGE nunca es el buque ni el cliente. El buque sigue siendo el indicado en el asunto o cuerpo. Para una entrega mediante gabarra usa delivery_mode "barge", transport.required true y operation_location con el muelle, punto de carga, nombre o ubicación de la gabarra.
+- Una entrega directa al buque usa delivery_mode "vessel". Una entrega en terminal o muelle para colaboradores usa "shore". La tarea debe llamarse conceptualmente "Transporte a gabarra" o "Transporte a buque", sin sustituir el nombre del buque.
 - Si se indica que el buque objetivo entrará después de la salida de otro buque, ese segundo buque es solo una referencia temporal. No lo uses como vessel.
 - LIMANI suele enviar primero la solicitud y después abrir otro hilo copiando al consignatario para comunicar cambios de la misma escala. Conserva LIMANI como cliente y relaciona las actualizaciones con el buque objetivo.
 - ETA es la llegada prevista al puerto o zona de espera, ETB es la fecha/hora prevista de atraque y ETD es la salida prevista. Extrae cada fecha y cada hora en su campo; no las mezcles con la fecha de recogida, recepción o entrega.
+- port_stay conserva cuánto tiempo permanecerá el buque en puerto (por ejemplo "36 horas" o "2 días"). Es información operativa importante aunque no sea una fecha.
 - Una entrega al buque se programa a su llegada ETA. Si no hay una hora de entrega explícita, usa la fecha y hora ETA para transport.date y transport.time. Nunca programes la entrega con ETD ni con la salida de otro buque.
 - ETB y ETD se conservan para que Operaciones conozca el margen portuario, pero no sustituyen la ETA como hora operativa del conductor.
 - Si el correo solo dice que TORC entrará tras la salida de LUCA IEVIOLI, no inventes la ETA o ETB de TORC: la salida de LUCA es contexto hasta que se indique una fecha u hora concreta para TORC.
@@ -486,7 +543,7 @@ PROMPT;
         ],
         'temperature' => 0,
         'store' => false,
-        'max_output_tokens' => 1200,
+        'max_output_tokens' => 1600,
         'text' => [
             'format' => [
                 'type' => 'json_schema',
@@ -585,13 +642,17 @@ function normalize_extracted_payload(array $payload): array
             ? (string) $payload['service_kind'] : 'none',
         'existing_reference' => mb_strtoupper(clean_extracted_value((string) ($payload['existing_reference'] ?? ''))),
         'client' => clean_extracted_value((string) ($payload['client'] ?? '')),
-        'vessel' => mb_strtoupper(clean_extracted_value((string) ($payload['vessel'] ?? ''))),
+        'vessel' => port_call_vessel_name(clean_extracted_value((string) ($payload['vessel'] ?? ''))),
         'eta' => trim((string) ($payload['eta'] ?? '')),
         'eta_time' => trim((string) ($payload['eta_time'] ?? '')),
         'etb' => trim((string) ($payload['etb'] ?? '')),
         'etb_time' => trim((string) ($payload['etb_time'] ?? '')),
         'etd' => trim((string) ($payload['etd'] ?? '')),
         'etd_time' => trim((string) ($payload['etd_time'] ?? '')),
+        'port_stay' => clean_extracted_value((string) ($payload['port_stay'] ?? '')),
+        'delivery_mode' => in_array((string) ($payload['delivery_mode'] ?? ''), ['vessel', 'barge', 'shore', 'warehouse', 'unknown'], true)
+            ? (string) $payload['delivery_mode'] : 'unknown',
+        'operation_location' => clean_extracted_value((string) ($payload['operation_location'] ?? '')),
         'port' => mb_strtoupper(clean_extracted_value((string) ($payload['port'] ?? ''))),
         'priority' => trim((string) ($payload['priority'] ?? 'Media')) !== '' ? trim((string) ($payload['priority'] ?? 'Media')) : 'Media',
         'cargo_summary' => clean_extracted_value((string) ($payload['cargo_summary'] ?? '')),
@@ -679,6 +740,9 @@ function extract_local_service(array $email): array
             'etb_time' => '',
             'etd' => '',
             'etd_time' => '',
+            'port_stay' => '',
+            'delivery_mode' => 'unknown',
+            'operation_location' => '',
             'port' => '',
             'priority' => 'Media',
             'cargo_summary' => '',
@@ -690,6 +754,15 @@ function extract_local_service(array $email): array
 
     try {
         $data = call_openai_extraction($text, $email);
+        $fallbacks = extract_port_call_fallbacks(
+            $text,
+            (string) ($email['received_at'] ?? date('Y-m-d H:i:s'))
+        );
+        foreach ($fallbacks as $field => $value) {
+            if ($value !== '' && trim((string) ($data[$field] ?? '')) === '') {
+                $data[$field] = $value;
+            }
+        }
         $subjectVessel = subject_target_vessel((string) ($email['subject'] ?? ''));
         if ($subjectVessel !== '') {
             $data['vessel'] = $subjectVessel;
@@ -697,6 +770,25 @@ function extract_local_service(array $email): array
         $subjectPort = subject_target_port((string) ($email['subject'] ?? ''));
         if ($subjectPort !== '' && trim((string) ($data['port'] ?? '')) === '') {
             $data['port'] = $subjectPort;
+        }
+        $normalizedSubject = normalized_mail_subject((string) ($email['subject'] ?? ''));
+        if (preg_match('/\b(?:GABARRA|BARGE)\b/u', $normalizedSubject)) {
+            $data['is_service'] = true;
+            $data['confidence'] = max(0.92, (float) ($data['confidence'] ?? 0));
+            if (in_array((string) ($data['request_action'] ?? ''), ['not_service', 'information'], true)) {
+                $data['request_action'] = 'new';
+            }
+            $data['service_kind'] = 'delivery';
+            $data['delivery_mode'] = 'barge';
+            $data['transport']['required'] = true;
+            $location = trim((string) ($data['operation_location'] ?? ''))
+                ?: trim((string) ($data['transport']['delivery'] ?? ''))
+                ?: trim((string) ($data['transport']['pickup'] ?? ''));
+            if ($location === '') {
+                $location = 'Gabarra · ' . ($subjectPort !== '' ? $subjectPort : 'ubicación por confirmar');
+            }
+            $data['operation_location'] = $location;
+            $data['transport']['delivery'] = $location;
         }
         $senderIdentity = mb_strtolower(
             (string) ($email['sender_name'] ?? '') . ' ' . (string) ($email['sender_email'] ?? '')
@@ -721,6 +813,9 @@ function extract_local_service(array $email): array
             'etb_time' => '',
             'etd' => '',
             'etd_time' => '',
+            'port_stay' => '',
+            'delivery_mode' => 'unknown',
+            'operation_location' => '',
             'port' => '',
             'priority' => 'Media',
             'cargo_summary' => '',
@@ -818,6 +913,15 @@ function plus_one_hour(string $time): string
     return date('H:i', strtotime($time . ' +1 hour'));
 }
 
+function transport_service_name(array $data): string
+{
+    return match ((string) ($data['delivery_mode'] ?? 'unknown')) {
+        'barge' => 'Transporte a gabarra',
+        'vessel' => 'Transporte a buque',
+        default => 'Transporte',
+    };
+}
+
 function append_operational_note(string $current, string $incoming): string
 {
     $incoming = trim($incoming);
@@ -889,6 +993,15 @@ function apply_thread_update_to_state(
     if (trim((string) ($data['existing_reference'] ?? '')) !== '') {
         $case['referenciaCliente'] = (string) $data['existing_reference'];
     }
+    if (trim((string) ($data['port_stay'] ?? '')) !== '') {
+        $case['portStay'] = trim((string) $data['port_stay']);
+    }
+    if (in_array((string) ($data['delivery_mode'] ?? ''), ['vessel', 'barge', 'shore', 'warehouse'], true)) {
+        $case['deliveryMode'] = (string) $data['delivery_mode'];
+    }
+    if (trim((string) ($data['operation_location'] ?? '')) !== '') {
+        $case['operationLocation'] = trim((string) $data['operation_location']);
+    }
     $services = is_array($case['servicios'] ?? null) ? $case['servicios'] : [];
     if (!empty($data['reception']['required'])) $services[] = 'Recepción';
     if (!empty($data['transport']['required'])) $services[] = 'Transporte';
@@ -946,6 +1059,7 @@ function apply_thread_update_to_state(
     $updatesTransport = !empty($data['transport']['required'])
         || (port_call_data_has_schedule($data) && in_array('Transporte', $case['servicios'], true));
     if ($updatesTransport) {
+        $transportType = transport_service_name($data);
         [$transportDate, $transportTime] = port_call_operational_slot($data, 'transport');
         $start = $transportTime;
         $pickup = trim((string) ($data['transport']['pickup'] ?? ''));
@@ -957,6 +1071,7 @@ function apply_thread_update_to_state(
         foreach ($state['transports'] as &$transport) {
             if (($transport['expediente'] ?? '') === $caseRef) {
                 $transportRef = (string) $transport['id'];
+                $transport['tipoServicio'] = $transportType;
                 if ($route !== '') $transport['ruta'] = $route;
                 if ($transportDate !== '' && $start !== '') {
                     $transport['fecha'] = $transportDate;
@@ -975,6 +1090,7 @@ function apply_thread_update_to_state(
                 'ruta' => $route !== '' ? $route : 'Ruta por confirmar',
                 'hora' => $transportDate !== '' && $start !== '' ? $transportDate . ' · ' . $start . '–' . plus_one_hour($start) : 'Por programar',
                 'fecha' => $transportDate, 'inicio' => $start, 'fin' => $start !== '' ? plus_one_hour($start) : '',
+                'tipoServicio' => $transportType,
                 'conductor' => 'Sin asignar', 'vehiculo' => 'Por asignar', 'estado' => 'Sin asignar',
                 'sourceEmailId' => $mailId,
             ];
@@ -982,8 +1098,9 @@ function apply_thread_update_to_state(
         if ($transportDate !== '' && $start !== '') {
             $found = false;
             foreach ($state['calendarEvents'] as &$event) {
-                if (($event['expediente'] ?? '') === $caseRef && ($event['tipoServicio'] ?? '') === 'Transporte') {
+                if (($event['expediente'] ?? '') === $caseRef && str_starts_with((string) ($event['tipoServicio'] ?? ''), 'Transporte')) {
                     if ($route !== '') $event['titulo'] = $route;
+                    $event['tipoServicio'] = $transportType;
                     $event['fecha'] = $transportDate;
                     $event['inicio'] = $start;
                     $event['fin'] = plus_one_hour($start);
@@ -996,7 +1113,7 @@ function apply_thread_update_to_state(
             if (!$found) {
                 $state['calendarEvents'][] = [
                     'id' => 'EV-MAIL-' . $mailId . '-T', 'titulo' => $route !== '' ? $route : 'Transporte',
-                    'tipoServicio' => 'Transporte', 'fecha' => $transportDate, 'inicio' => $start,
+                    'tipoServicio' => $transportType, 'fecha' => $transportDate, 'inicio' => $start,
                     'fin' => plus_one_hour($start), 'asignado' => 'Sin asignar', 'expediente' => $caseRef,
                     'transporte' => $transportRef, 'color' => 'gray', 'sourceEmailId' => $mailId,
                 ];
@@ -1122,6 +1239,9 @@ function apply_service_email(int $mailId, array $data, ?int $userId = null): str
             'resumenMercancia' => (string) ($data['cargo_summary'] ?? ''),
             'notasOperativas' => (string) ($data['operational_notes'] ?? ''),
             'referenciaCliente' => (string) ($data['existing_reference'] ?? ''),
+            'portStay' => (string) ($data['port_stay'] ?? ''),
+            'deliveryMode' => (string) ($data['delivery_mode'] ?? 'unknown'),
+            'operationLocation' => (string) ($data['operation_location'] ?? ''),
             'emailInterpretation' => [
                 'serviceKind' => (string) ($data['service_kind'] ?? 'other'),
                 'confidence' => (float) ($data['confidence'] ?? 0),
@@ -1155,6 +1275,7 @@ function apply_service_email(int $mailId, array $data, ?int $userId = null): str
         }
         if (!empty($data['transport']['required'])) {
             $transportRef = next_transport_ref($state['transports']);
+            $transportType = transport_service_name($data);
             [$transportDate, $transportTime] = port_call_operational_slot($data, 'transport');
             $start = $transportTime;
             $pickup = trim((string) $data['transport']['pickup']) ?: 'Origen por confirmar';
@@ -1164,12 +1285,13 @@ function apply_service_email(int $mailId, array $data, ?int $userId = null): str
                 'id' => $transportRef, 'expediente' => $caseRef, 'ruta' => $route,
                 'hora' => $transportDate !== '' && $start !== '' ? $transportDate . ' · ' . $start . '–' . plus_one_hour($start) : 'Por programar',
                 'fecha' => $transportDate, 'inicio' => $start, 'fin' => $start !== '' ? plus_one_hour($start) : '',
+                'tipoServicio' => $transportType,
                 'conductor' => 'Sin asignar', 'vehiculo' => 'Por asignar', 'estado' => 'Sin asignar',
                 'sourceEmailId' => $mailId,
             ];
             if ($transportDate !== '' && $start !== '') {
                 $state['calendarEvents'][] = [
-                    'id' => 'EV-MAIL-' . $mailId . '-T', 'titulo' => $route, 'tipoServicio' => 'Transporte',
+                    'id' => 'EV-MAIL-' . $mailId . '-T', 'titulo' => $route, 'tipoServicio' => $transportType,
                     'fecha' => $transportDate, 'inicio' => $start, 'fin' => plus_one_hour($start),
                     'asignado' => 'Sin asignar', 'expediente' => $caseRef, 'transporte' => $transportRef,
                     'color' => 'gray', 'sourceEmailId' => $mailId,
@@ -1216,7 +1338,7 @@ function merge_records_by_key(array $left, array $right): array
 
 function reconcile_existing_mail_threads(PDO $pdo): array
 {
-    $summary = ['threads' => 0, 'mergedCases' => 0, 'removedEmptyCases' => 0];
+    $summary = ['threads' => 0, 'mergedCases' => 0, 'correctedCases' => 0, 'removedEmptyCases' => 0];
     $rows = $pdo->query(
         "SELECT id, subject, sender_name, sender_email, case_ref, extracted, received_at
          FROM app_mail_items
@@ -1226,9 +1348,43 @@ function reconcile_existing_mail_threads(PDO $pdo): array
     if (!$rows) return $summary;
 
     $groups = [];
+    $portCallBuckets = [];
     foreach ($rows as $row) {
         $key = normalized_mail_subject((string) $row['subject']);
-        if ($key !== '') $groups[$key][] = $row;
+        if ($key !== '') $groups['SUBJECT|' . $key][] = $row;
+        $data = json_decode((string) ($row['extracted'] ?? ''), true);
+        if (!is_array($data)) continue;
+        $vessel = subject_target_vessel((string) $row['subject']) ?: (string) ($data['vessel'] ?? '');
+        $port = subject_target_port((string) $row['subject']) ?: (string) ($data['port'] ?? '');
+        if (port_call_token($vessel) !== '' && port_call_known_value($port)) {
+            $portCallBuckets[port_call_token($vessel) . '|' . port_call_token($port)][] = $row;
+        }
+    }
+    foreach ($portCallBuckets as $bucketKey => $bucketRows) {
+        usort($bucketRows, static fn(array $left, array $right): int => strcmp((string) $left['received_at'], (string) $right['received_at']));
+        $clusters = [];
+        foreach ($bucketRows as $row) {
+            $data = json_decode((string) ($row['extracted'] ?? ''), true) ?: [];
+            $date = port_call_iso_date((string) ($data['eta'] ?? ''))
+                ?: date('Y-m-d', strtotime((string) $row['received_at']) ?: time());
+            $placed = false;
+            foreach ($clusters as &$cluster) {
+                $distance = port_call_date_distance($cluster['anchor'], $date);
+                if ($distance !== null && $distance <= 21) {
+                    $cluster['rows'][] = $row;
+                    if (trim((string) ($data['eta'] ?? '')) !== '') $cluster['anchor'] = $date;
+                    $placed = true;
+                    break;
+                }
+            }
+            unset($cluster);
+            if (!$placed) $clusters[] = ['anchor' => $date, 'rows' => [$row]];
+        }
+        foreach ($clusters as $index => $cluster) {
+            if (count($cluster['rows']) > 1) {
+                $groups['PORTCALL|' . $bucketKey . '|' . $index] = $cluster['rows'];
+            }
+        }
     }
 
     $pdo->beginTransaction();
@@ -1254,28 +1410,64 @@ function reconcile_existing_mail_threads(PDO $pdo): array
                 $threadRows
             ))));
             $existingRefs = array_values(array_filter($refs, static fn(string $ref): bool => isset($caseByRef[$ref])));
-            if (count($existingRefs) < 2) continue;
+            if (count($existingRefs) < 1) continue;
 
             $canonicalRef = $existingRefs[0];
             $canonical = $caseByRef[$canonicalRef];
+            $beforeCanonical = json_encode($canonical);
             $duplicateRefs = array_values(array_diff($existingRefs, [$canonicalRef]));
             $subjectVessel = subject_target_vessel((string) $threadRows[0]['subject']);
             if ($subjectVessel !== '') $canonical['buque'] = $subjectVessel;
             $subjectPort = subject_target_port((string) $threadRows[0]['subject']);
             if ($subjectPort !== '') $canonical['puerto'] = $subjectPort;
+            $isBargeThread = preg_match('/\b(?:GABARRA|BARGE)\b/u', normalized_mail_subject((string) $threadRows[0]['subject'])) === 1;
             if ($subjectVessel !== '') {
                 $canonical['servicios'] = array_values(array_unique(array_merge(
                     is_array($canonical['servicios'] ?? null) ? $canonical['servicios'] : [],
                     ['Transporte']
                 )));
             }
+            if ($isBargeThread) $canonical['deliveryMode'] = 'barge';
 
             foreach ($threadRows as $row) {
                 $senderIdentity = mb_strtolower((string) ($row['sender_name'] ?? '') . ' ' . (string) ($row['sender_email'] ?? ''));
                 if (str_contains($senderIdentity, 'limani')) $canonical['cliente'] = 'LIMANI';
                 $data = json_decode((string) ($row['extracted'] ?? ''), true);
                 if (!is_array($data)) continue;
+                $beforeData = json_encode($data);
+                if ($subjectVessel !== '') $data['vessel'] = $subjectVessel;
+                if ($subjectPort !== '' && trim((string) ($data['port'] ?? '')) === '') $data['port'] = $subjectPort;
+                if ($isBargeThread) {
+                    $data['is_service'] = true;
+                    if (empty($data['request_action'])) $data['request_action'] = 'new';
+                    $data['confidence'] = max(0.92, (float) ($data['confidence'] ?? 0));
+                    $data['service_kind'] = 'delivery';
+                    $data['delivery_mode'] = 'barge';
+                    $data['transport'] = is_array($data['transport'] ?? null) ? $data['transport'] : [];
+                    $data['transport']['required'] = true;
+                }
+                if ($beforeData !== json_encode($data)) {
+                    $repairMail = $pdo->prepare('UPDATE app_mail_items SET extracted = ? WHERE id = ?');
+                    $repairMail->execute([
+                        json_encode($data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+                        (int) $row['id'],
+                    ]);
+                    $summary['correctedCases']++;
+                }
+                if (trim((string) ($data['vessel'] ?? '')) !== '') {
+                    $canonical['buque'] = port_call_vessel_name((string) $data['vessel']);
+                }
+                $canonical['servicios'] = is_array($canonical['servicios'] ?? null) ? $canonical['servicios'] : [];
+                if (!empty($data['reception']['required'])) $canonical['servicios'][] = 'Recepción';
+                if (!empty($data['transport']['required'])) $canonical['servicios'][] = 'Transporte';
+                $canonical['servicios'] = array_values(array_unique($canonical['servicios']));
                 if (trim((string) ($data['eta'] ?? '')) !== '') $canonical['eta'] = (string) $data['eta'];
+                $canonical['portCall'] = merge_port_call_schedule(
+                    is_array($canonical['portCall'] ?? null) ? $canonical['portCall'] : [],
+                    $data
+                );
+                if (trim((string) ($data['port_stay'] ?? '')) !== '') $canonical['portStay'] = (string) $data['port_stay'];
+                if (trim((string) ($data['operation_location'] ?? '')) !== '') $canonical['operationLocation'] = (string) $data['operation_location'];
                 if (trim((string) ($data['port'] ?? '')) !== '') $canonical['puerto'] = mb_strtoupper((string) $data['port']);
                 if (str_contains(mb_strtolower((string) ($data['client'] ?? '')), 'limani')) $canonical['cliente'] = 'LIMANI';
                 $canonical['resumenMercancia'] = append_operational_note(
@@ -1314,16 +1506,27 @@ function reconcile_existing_mail_threads(PDO $pdo): array
                 unset($caseByRef[$duplicateRef]);
                 $summary['mergedCases']++;
             }
-            $timeline = is_array($canonical['timelineCustom'] ?? null) ? $canonical['timelineCustom'] : [];
-            array_unshift($timeline, [
-                'id' => 'THREAD-MERGE-' . md5(implode('|', $existingRefs)),
-                'fecha' => date('d/m/Y'), 'hora' => date('H:i'),
-                'titulo' => 'Hilo de correo consolidado',
-                'detalle' => count($existingRefs) . ' expedientes duplicados unidos en ' . $canonicalRef,
-                'actor' => 'Gestor automático', 'estado' => 'done',
-            ]);
-            $canonical['timelineCustom'] = $timeline;
+            $caseChanged = $beforeCanonical !== json_encode($canonical) || $duplicateRefs !== [];
+            if ($caseChanged) {
+                $timeline = is_array($canonical['timelineCustom'] ?? null) ? $canonical['timelineCustom'] : [];
+                $timelineId = 'THREAD-CORRECTION-' . md5(implode('|', $existingRefs) . '|' . (string) $subjectVessel);
+                if (!array_filter($timeline, static fn(array $event): bool => ($event['id'] ?? '') === $timelineId)) {
+                    array_unshift($timeline, [
+                        'id' => $timelineId,
+                        'fecha' => date('d/m/Y'), 'hora' => date('H:i'),
+                        'titulo' => $duplicateRefs ? 'Hilos de correo consolidados' : 'Datos portuarios corregidos',
+                        'detalle' => $duplicateRefs
+                            ? count($existingRefs) . ' expedientes duplicados unidos en ' . $canonicalRef
+                            : 'Buque, destino operativo y escala revisados desde el asunto del correo',
+                        'actor' => 'Gestor automático', 'estado' => 'done',
+                    ]);
+                }
+                $canonical['timelineCustom'] = $timeline;
+                $summary['correctedCases']++;
+            }
             $caseByRef[$canonicalRef] = $canonical;
+            $bargeLocation = trim((string) ($canonical['operationLocation'] ?? ''))
+                ?: ($subjectPort !== '' ? $subjectPort : 'Ubicación por confirmar');
 
             foreach (['transports', 'warehouseEntries', 'customs', 'calendarEvents'] as $collection) {
                 foreach ($state[$collection] as &$record) {
@@ -1335,21 +1538,36 @@ function reconcile_existing_mail_threads(PDO $pdo): array
             }
             if ($subjectVessel !== '') {
                 $hasTransport = false;
-                foreach ($state['transports'] as $transport) {
+                foreach ($state['transports'] as &$transport) {
                     if (($transport['expediente'] ?? '') === $canonicalRef) {
                         $hasTransport = true;
+                        if ($isBargeThread) {
+                            $transport['tipoServicio'] = 'Transporte a gabarra';
+                            if (empty($transport['ruta']) || str_contains(mb_strtolower((string) $transport['ruta']), 'buque')) {
+                                $transport['ruta'] = 'Transporte a gabarra · ' . $bargeLocation;
+                            }
+                        }
                         break;
                     }
                 }
+                unset($transport);
+                foreach ($state['calendarEvents'] as &$event) {
+                    if (($event['expediente'] ?? '') === $canonicalRef && $isBargeThread && str_starts_with((string) ($event['tipoServicio'] ?? ''), 'Transporte')) {
+                        $event['tipoServicio'] = 'Transporte a gabarra';
+                    }
+                }
+                unset($event);
                 if (!$hasTransport) {
                     $state['transports'][] = [
                         'id' => next_transport_ref($state['transports']),
                         'expediente' => $canonicalRef,
-                        'ruta' => 'Servicio de gabarra · ' . ($subjectPort !== '' ? $subjectPort : 'Puerto por confirmar'),
-                        'hora' => 'Por programar', 'fecha' => '', 'inicio' => '09:00', 'fin' => '10:00',
+                        'ruta' => 'Transporte a gabarra · ' . $bargeLocation,
+                        'tipoServicio' => 'Transporte a gabarra',
+                        'hora' => 'Por programar', 'fecha' => '', 'inicio' => '', 'fin' => '',
                         'conductor' => 'Sin asignar', 'vehiculo' => 'Por asignar', 'estado' => 'Sin asignar',
                         'sourceEmailId' => (int) $threadRows[0]['id'],
                     ];
+                    $summary['correctedCases']++;
                 }
             }
             $mailIds = array_map(static fn(array $row): int => (int) $row['id'], $threadRows);
@@ -1358,7 +1576,7 @@ function reconcile_existing_mail_threads(PDO $pdo): array
                 $updateMail = $pdo->prepare("UPDATE app_mail_items SET case_ref = ? WHERE id IN ($placeholders)");
                 $updateMail->execute(array_merge([$canonicalRef], $mailIds));
             }
-            $summary['threads']++;
+            if ($caseChanged || $duplicateRefs !== []) $summary['threads']++;
         }
 
         $activeRefs = array_fill_keys(array_keys($caseByRef), true);
@@ -1386,7 +1604,7 @@ function reconcile_existing_mail_threads(PDO $pdo): array
             }
         }
 
-        if ($summary['mergedCases'] === 0 && $summary['removedEmptyCases'] === 0) {
+        if ($summary['mergedCases'] === 0 && $summary['correctedCases'] === 0 && $summary['removedEmptyCases'] === 0) {
             $pdo->commit();
             return $summary;
         }

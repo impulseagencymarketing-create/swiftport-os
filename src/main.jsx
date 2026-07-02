@@ -7,7 +7,7 @@ import {
   Circle, Camera, Box, Scale, Layers3, Navigation, UserRound, FileText, UploadCloud,
   Download, Filter, CircleDollarSign, ExternalLink, Mail, PencilLine, ClipboardCheck,
   BadgeEuro, Sparkles, ArrowLeft, Save, LogOut, ShieldCheck, LockKeyhole, UserPlus, Eye,
-  RefreshCw
+  RefreshCw, Timer
 } from 'lucide-react';
 import {
   expedientesIniciales, movimientosAlmacen, transportesIniciales, proveedoresIniciales, tramitesAduana, eventosCalendarioIniciales,
@@ -388,7 +388,7 @@ function MobileNav({tab,navigate,more,nav}){
 function Badge({children,tone}){return <span className={'badge '+(tone||statusTone(children))}><i/>{children}</span>}
 function SectionHeader({title,subtitle,action}){return <div className="section-header"><div><h2>{title}</h2>{subtitle&&<p>{subtitle}</p>}</div>{action}</div>}
 function Empty({text}){return <div className="empty"><Search/><b>Sin resultados</b><p>{text}</p></div>}
-function PortCallPanel({item}){const schedule=portCallSchedule(item);return <section className="port-call-panel"><div><Ship/><span><small>LLEGADA · ETA</small><b>{schedule.eta}</b></span></div><div><MapPin/><span><small>ATRAQUE · ETB</small><b>{schedule.etb}</b></span></div><div><Clock3/><span><small>SALIDA · ETD</small><b>{schedule.etd}</b></span></div></section>}
+function PortCallPanel({item}){const schedule=portCallSchedule(item);const destination=item.deliveryMode==='barge'?'TRANSPORTE A GABARRA':item.deliveryMode==='vessel'?'TRANSPORTE A BUQUE':'';return <section className="port-call-panel"><div><Ship/><span><small>LLEGADA · ETA</small><b>{schedule.eta}</b></span></div><div><MapPin/><span><small>ATRAQUE · ETB</small><b>{schedule.etb}</b></span></div><div><Clock3/><span><small>SALIDA · ETD</small><b>{schedule.etd}</b></span></div><div><Timer/><span><small>ESTANCIA EN PUERTO</small><b>{item.portStay||'POR CONFIRMAR'}</b></span></div>{destination&&<footer><Truck/><span><small>DESTINO OPERATIVO</small><b>{destination}{item.operationLocation?` · ${item.operationLocation}`:''}</b></span></footer>}</section>}
 
 const isoDate=date=>date.toISOString().slice(0,10);
 const addDays=(date,days)=>{const next=new Date(date);next.setDate(next.getDate()+days);return next};
@@ -589,7 +589,7 @@ function Correos({csrfToken,notify,openCase,reloadOperational,canRebuild}){
   const [error,setError]=useState('');
   const load=async(nextFilter=filter)=>{
     setLoading(true);setError('');
-    try{const result=await api('/api/mail/inbox.php?status='+nextFilter);setItems(result.items);setCounts(result.counts);setLastRun(result.lastRun);const repaired=Number(result.reconciliation?.mergedCases||0)+Number(result.reconciliation?.removedEmptyCases||0);if(repaired){await reloadOperational();notify(`${repaired} expedientes duplicados o vacíos corregidos`)}}
+    try{const result=await api('/api/mail/inbox.php?status='+nextFilter);setItems(result.items);setCounts(result.counts);setLastRun(result.lastRun);const repaired=Number(result.reconciliation?.mergedCases||0)+Number(result.reconciliation?.correctedCases||0)+Number(result.reconciliation?.removedEmptyCases||0);if(repaired){await reloadOperational();notify(`${repaired} expedientes portuarios corregidos`)}}
     catch(reason){setError(reason.message)}
     finally{setLoading(false)}
   };
@@ -599,7 +599,7 @@ function Correos({csrfToken,notify,openCase,reloadOperational,canRebuild}){
     try{
       const result=await api('/api/mail/process.php',{method:'POST',headers:{'X-CSRF-Token':csrfToken},body:'{}'});
       const summary=result.summary;
-      const repaired=Number(summary.reconciliation?.mergedCases||0)+Number(summary.reconciliation?.removedEmptyCases||0);
+      const repaired=Number(summary.reconciliation?.mergedCases||0)+Number(summary.reconciliation?.correctedCases||0)+Number(summary.reconciliation?.removedEmptyCases||0);
       notify(`${summary.scanned} correos nuevos · ${summary.processed} trabajos creados · ${summary.review} para revisar${repaired?` · ${repaired} duplicados corregidos`:''}`);
       await Promise.all([load(filter),reloadOperational()]);
     }catch(reason){setError(reason.message)}
@@ -652,7 +652,7 @@ function Correos({csrfToken,notify,openCase,reloadOperational,canRebuild}){
 function MailReviewModal({item,close,submit}){
   const base=item.extracted||{};
   const [form,setForm]=useState({
-    client:base.client||'',vessel:base.vessel||'',eta:base.eta||'',eta_time:base.eta_time||'',etb:base.etb||'',etb_time:base.etb_time||'',etd:base.etd||'',etd_time:base.etd_time||'',port:base.port||'',priority:base.priority||'Media',cargo_summary:base.cargo_summary||'',
+    client:base.client||'',vessel:base.vessel||'',eta:base.eta||'',eta_time:base.eta_time||'',etb:base.etb||'',etb_time:base.etb_time||'',etd:base.etd||'',etd_time:base.etd_time||'',port_stay:base.port_stay||'',delivery_mode:base.delivery_mode||'unknown',operation_location:base.operation_location||'',port:base.port||'',priority:base.priority||'Media',cargo_summary:base.cargo_summary||'',
     operational_notes:base.operational_notes||'',existing_reference:base.existing_reference||'',request_action:'new',service_kind:base.service_kind||'other',
     reception:{required:Boolean(base.reception?.required),date:base.reception?.date||'',time:base.reception?.time||'',location:base.reception?.location||''},
     transport:{required:Boolean(base.transport?.required),date:base.transport?.date||'',time:base.transport?.time||'',pickup:base.transport?.pickup||'',delivery:base.transport?.delivery||''},
