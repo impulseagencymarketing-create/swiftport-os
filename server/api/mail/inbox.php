@@ -1,10 +1,12 @@
 <?php
 declare(strict_types=1);
 require dirname(__DIR__) . '/_bootstrap.php';
+require __DIR__ . '/_service.php';
 
 ensure_schema();
 require_roles(['operations', 'admin']);
 require_method('GET');
+$reconciliation = reconcile_existing_mail_threads(db());
 
 $status = (string) ($_GET['status'] ?? 'all');
 $allowed = ['all', 'review', 'processed', 'ignored', 'error'];
@@ -35,4 +37,4 @@ $lastRun = db()->query(
      FROM app_mail_runs ORDER BY id DESC LIMIT 1'
 )->fetch() ?: null;
 
-respond(['items' => $items, 'counts' => $counts, 'lastRun' => $lastRun]);
+respond(['items' => $items, 'counts' => $counts, 'lastRun' => $lastRun, 'reconciliation' => $reconciliation]);

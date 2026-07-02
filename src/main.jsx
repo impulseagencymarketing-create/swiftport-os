@@ -577,7 +577,7 @@ function Correos({csrfToken,notify,openCase,reloadOperational}){
   const [error,setError]=useState('');
   const load=async(nextFilter=filter)=>{
     setLoading(true);setError('');
-    try{const result=await api('/api/mail/inbox.php?status='+nextFilter);setItems(result.items);setCounts(result.counts);setLastRun(result.lastRun)}
+    try{const result=await api('/api/mail/inbox.php?status='+nextFilter);setItems(result.items);setCounts(result.counts);setLastRun(result.lastRun);const repaired=Number(result.reconciliation?.mergedCases||0)+Number(result.reconciliation?.removedEmptyCases||0);if(repaired){await reloadOperational();notify(`${repaired} expedientes duplicados o vacíos corregidos`)}}
     catch(reason){setError(reason.message)}
     finally{setLoading(false)}
   };

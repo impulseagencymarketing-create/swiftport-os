@@ -1316,6 +1316,11 @@ function reconcile_existing_mail_threads(PDO $pdo): array
             }
         }
 
+        if ($summary['mergedCases'] === 0 && $summary['removedEmptyCases'] === 0) {
+            $pdo->commit();
+            return $summary;
+        }
+
         $state['cases'] = array_values($caseByRef);
 
         $threadMailIds = array_fill_keys(array_map(static fn(array $row): int => (int) $row['id'], $rows), true);
