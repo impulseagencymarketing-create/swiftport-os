@@ -25,12 +25,16 @@ if ($action === 'reprocess') {
     }
     $data = extract_local_service($mail);
     $reasons = service_review_reasons($data);
+    $threadUpdate = !empty($data['is_service'])
+        && (float) ($data['confidence'] ?? 0) >= 0.88
+        && in_array((string) ($data['request_action'] ?? 'new'), ['new', 'update'], true)
+        && find_existing_thread_case_ref(db(), $id, (string) $mail['subject']) !== '';
     if (empty($data['is_service'])) {
         $status = (float) ($data['confidence'] ?? 0) >= 0.90 ? 'ignored' : 'review';
         $reason = $status === 'ignored'
             ? 'No se ha detectado una solicitud operativa'
             : 'Clasificación dudosa; revisar el mensaje';
-    } elseif (service_required_data_complete($data)) {
+    } elseif (service_required_data_complete($data) || $threadUpdate) {
         try {
             $caseRef = apply_service_email($id, $data, (int) $user['id']);
             audit((int) $user['id'], 'mail.reprocess.auto', ['mailId' => $id, 'caseRef' => $caseRef]);

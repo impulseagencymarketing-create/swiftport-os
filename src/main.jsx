@@ -587,7 +587,8 @@ function Correos({csrfToken,notify,openCase,reloadOperational}){
     try{
       const result=await api('/api/mail/process.php',{method:'POST',headers:{'X-CSRF-Token':csrfToken},body:'{}'});
       const summary=result.summary;
-      notify(`${summary.scanned} correos nuevos · ${summary.processed} trabajos creados · ${summary.review} para revisar`);
+      const repaired=Number(summary.reconciliation?.mergedCases||0)+Number(summary.reconciliation?.removedEmptyCases||0);
+      notify(`${summary.scanned} correos nuevos · ${summary.processed} trabajos creados · ${summary.review} para revisar${repaired?` · ${repaired} duplicados corregidos`:''}`);
       await Promise.all([load(filter),reloadOperational()]);
     }catch(reason){setError(reason.message)}
     finally{setProcessing(false)}

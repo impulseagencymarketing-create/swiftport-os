@@ -112,6 +112,54 @@ function clean_extracted_value(string $value): string
     return trim(preg_replace('/\s+/', ' ', rtrim($value, ". \t\n\r\0\x0B")));
 }
 
+function normalized_mail_subject(string $subject): string
+{
+    $value = mail_decode_header_value($subject);
+    $value = preg_replace('/^\s*(?:\[(?:external|externo|spam)\]\s*)+/iu', '', $value) ?? $value;
+    $value = preg_replace('/^\s*(?:(?:re|rv|fw|fwd|enc)\s*:\s*)+/iu', '', $value) ?? $value;
+    $value = preg_replace('/^\s*(?:\[(?:external|externo|spam)\]\s*)+/iu', '', $value) ?? $value;
+    return mb_strtoupper(trim(preg_replace('/\s+/', ' ', $value) ?? $value));
+}
+
+function subject_target_vessel(string $subject): string
+{
+    $normalized = normalized_mail_subject($subject);
+    if (preg_match('/^(.{2,70}?)\s+-\s+(?:GABARRA|BARGE)\b/u', $normalized, $match)) {
+        $candidate = trim(preg_replace('/^(?:MV|M\/V|VSL|VESSEL)\s+/u', '', $match[1]) ?? $match[1]);
+        return in_array($candidate, ['SERVICE', 'SERVICIO', 'REQUEST', 'SOLICITUD'], true) ? '' : $candidate;
+    }
+    return '';
+}
+
+function subject_target_port(string $subject): string
+{
+    $normalized = normalized_mail_subject($subject);
+    if (preg_match('/^.{2,70}?\s+-\s+(?:GABARRA|BARGE)\s+-\s+(.{2,60})$/u', $normalized, $match)) {
+        return trim($match[1]);
+    }
+    return '';
+}
+
+function find_existing_thread_case_ref(PDO $pdo, int $mailId, string $subject): string
+{
+    $thread = normalized_mail_subject($subject);
+    if ($thread === '' || mb_strlen($thread) < 5) {
+        return '';
+    }
+    $statement = $pdo->prepare(
+        "SELECT subject, case_ref FROM app_mail_items
+         WHERE id <> ? AND status = 'processed' AND case_ref IS NOT NULL
+         ORDER BY received_at DESC, id DESC LIMIT 250"
+    );
+    $statement->execute([$mailId]);
+    foreach ($statement->fetchAll() as $row) {
+        if (normalized_mail_subject((string) $row['subject']) === $thread) {
+            return (string) $row['case_ref'];
+        }
+    }
+    return '';
+}
+
 function labeled_value(string $text, array $labels, int $limit = 70): string
 {
     $escaped = array_map(static fn(string $label): string => preg_quote($label, '/'), $labels);
@@ -391,6 +439,9 @@ CRITERIO OPERATIVO
 
 EXTRACCIÓN
 - Extrae el buque aunque aparezca como MV, M/V, VSL, vessel, ship o en el asunto.
+- En asuntos del tipo "TORC - GABARRA - BARCELONA", el buque objetivo es TORC; GABARRA/BARGE describe la operativa y BARCELONA es el puerto.
+- Si se indica que el buque objetivo entrará después de la salida de otro buque, ese segundo buque es solo una referencia temporal. No lo uses como vessel.
+- En hilos iniciados por LIMANI, conserva LIMANI como cliente aunque las respuestas posteriores lleguen del consignatario copiado.
 - ETA es la llegada del buque; no confundas ETA con la fecha de recogida, recepción o entrega.
 - Resuelve "hoy", "mañana" y días de la semana usando la fecha de recepción del mensaje.
 - Las fechas deben ser YYYY-MM-DD y las horas HH:MM. Si no constan o no pueden deducirse con seguridad, usa cadena vacía.
@@ -611,7 +662,22 @@ function extract_local_service(array $email): array
     }
 
     try {
-        return call_openai_extraction($text, $email);
+        $data = call_openai_extraction($text, $email);
+        $subjectVessel = subject_target_vessel((string) ($email['subject'] ?? ''));
+        if ($subjectVessel !== '') {
+            $data['vessel'] = $subjectVessel;
+        }
+        $subjectPort = subject_target_port((string) ($email['subject'] ?? ''));
+        if ($subjectPort !== '' && trim((string) ($data['port'] ?? '')) === '') {
+            $data['port'] = $subjectPort;
+        }
+        $senderIdentity = mb_strtolower(
+            (string) ($email['sender_name'] ?? '') . ' ' . (string) ($email['sender_email'] ?? '')
+        );
+        if (str_contains($senderIdentity, 'limani')) {
+            $data['client'] = 'LIMANI';
+        }
+        return $data;
     } catch (Throwable $error) {
         $aiErrorCode = openai_error_code_from_exception($error);
         return [
@@ -713,19 +779,199 @@ function plus_one_hour(string $time): string
     return date('H:i', strtotime($time . ' +1 hour'));
 }
 
+function append_operational_note(string $current, string $incoming): string
+{
+    $incoming = trim($incoming);
+    if ($incoming === '' || str_contains(mb_strtolower($current), mb_strtolower($incoming))) {
+        return $current;
+    }
+    return trim($current) === '' ? $incoming : trim($current) . ' · ' . $incoming;
+}
+
+function apply_thread_update_to_state(
+    array &$state,
+    string $caseRef,
+    int $mailId,
+    string $subject,
+    array $data
+): bool {
+    $caseIndex = null;
+    foreach ($state['cases'] as $index => $case) {
+        if (($case['id'] ?? '') === $caseRef) {
+            $caseIndex = $index;
+            break;
+        }
+    }
+    if ($caseIndex === null) {
+        return false;
+    }
+
+    $case = $state['cases'][$caseIndex];
+    $subjectVessel = subject_target_vessel($subject);
+    if ($subjectVessel !== '') {
+        $case['buque'] = $subjectVessel;
+    }
+    if (trim((string) ($data['eta'] ?? '')) !== '') {
+        $case['eta'] = (string) $data['eta'];
+    }
+    if (trim((string) ($data['port'] ?? '')) !== '') {
+        $case['puerto'] = mb_strtoupper(trim((string) $data['port']));
+    }
+    if (
+        trim((string) ($data['client'] ?? '')) !== ''
+        && in_array(mb_strtolower(trim((string) ($case['cliente'] ?? ''))), ['', 'por identificar'], true)
+    ) {
+        $case['cliente'] = trim((string) $data['client']);
+    }
+    if (str_contains(mb_strtolower((string) ($data['client'] ?? '')), 'limani')) {
+        $case['cliente'] = 'LIMANI';
+    }
+    $case['resumenMercancia'] = append_operational_note(
+        (string) ($case['resumenMercancia'] ?? ''),
+        (string) ($data['cargo_summary'] ?? '')
+    );
+    $case['notasOperativas'] = append_operational_note(
+        (string) ($case['notasOperativas'] ?? ''),
+        (string) ($data['operational_notes'] ?? '')
+    );
+    if (trim((string) ($data['existing_reference'] ?? '')) !== '') {
+        $case['referenciaCliente'] = (string) $data['existing_reference'];
+    }
+    $services = is_array($case['servicios'] ?? null) ? $case['servicios'] : [];
+    if (!empty($data['reception']['required'])) $services[] = 'Recepción';
+    if (!empty($data['transport']['required'])) $services[] = 'Transporte';
+    $case['servicios'] = array_values(array_unique($services));
+    $sourceIds = is_array($case['sourceEmailIds'] ?? null) ? $case['sourceEmailIds'] : [];
+    if (!empty($case['sourceEmailId'])) $sourceIds[] = (int) $case['sourceEmailId'];
+    $sourceIds[] = $mailId;
+    $case['sourceEmailIds'] = array_values(array_unique($sourceIds));
+    $timeline = is_array($case['timelineCustom'] ?? null) ? $case['timelineCustom'] : [];
+    array_unshift($timeline, [
+        'id' => 'EMAIL-UPDATE-' . $mailId,
+        'fecha' => date('d/m/Y'),
+        'hora' => date('H:i'),
+        'titulo' => 'Actualización recibida por email',
+        'detalle' => trim((string) ($data['operational_notes'] ?? '')) !== ''
+            ? mb_substr((string) $data['operational_notes'], 0, 240)
+            : 'Hilo actualizado sin crear un expediente nuevo',
+        'actor' => 'Gestor automático',
+        'estado' => 'done',
+    ]);
+    $case['timelineCustom'] = $timeline;
+    $state['cases'][$caseIndex] = $case;
+
+    $receptionDate = trim((string) ($data['reception']['date'] ?? ''));
+    $receptionTime = trim((string) ($data['reception']['time'] ?? ''));
+    if (!empty($data['reception']['required']) && $receptionDate !== '') {
+        $start = $receptionTime !== '' ? $receptionTime : '09:00';
+        $found = false;
+        foreach ($state['calendarEvents'] as &$event) {
+            if (($event['expediente'] ?? '') === $caseRef && ($event['tipoServicio'] ?? '') === 'Recepción') {
+                $event['fecha'] = $receptionDate;
+                $event['inicio'] = $start;
+                $event['fin'] = plus_one_hour($start);
+                $event['titulo'] = trim((string) ($data['cargo_summary'] ?? '')) ?: ($event['titulo'] ?? 'Recepción de mercancía');
+                $found = true;
+                break;
+            }
+        }
+        unset($event);
+        if (!$found) {
+            $state['calendarEvents'][] = [
+                'id' => 'EV-MAIL-' . $mailId . '-R', 'titulo' => $data['cargo_summary'] ?: 'Recepción de mercancía',
+                'tipoServicio' => 'Recepción', 'fecha' => $receptionDate, 'inicio' => $start,
+                'fin' => plus_one_hour($start), 'asignado' => 'Sin asignar', 'expediente' => $caseRef,
+                'transporte' => '', 'color' => 'gray', 'sourceEmailId' => $mailId,
+            ];
+        }
+    }
+
+    if (!empty($data['transport']['required'])) {
+        $transportDate = trim((string) ($data['transport']['date'] ?? ''));
+        $transportTime = trim((string) ($data['transport']['time'] ?? ''));
+        $start = $transportTime !== '' ? $transportTime : '09:00';
+        $pickup = trim((string) ($data['transport']['pickup'] ?? ''));
+        $delivery = trim((string) ($data['transport']['delivery'] ?? ''));
+        $route = ($pickup !== '' || $delivery !== '')
+            ? ($pickup ?: 'Origen por confirmar') . ' → ' . ($delivery ?: 'Destino por confirmar')
+            : '';
+        $transportRef = '';
+        foreach ($state['transports'] as &$transport) {
+            if (($transport['expediente'] ?? '') === $caseRef) {
+                $transportRef = (string) $transport['id'];
+                if ($route !== '') $transport['ruta'] = $route;
+                if ($transportDate !== '') {
+                    $transport['fecha'] = $transportDate;
+                    $transport['inicio'] = $start;
+                    $transport['fin'] = plus_one_hour($start);
+                    $transport['hora'] = $transportDate . ' · ' . $start . '–' . plus_one_hour($start);
+                }
+                break;
+            }
+        }
+        unset($transport);
+        if ($transportRef === '') {
+            $transportRef = next_transport_ref($state['transports']);
+            $state['transports'][] = [
+                'id' => $transportRef, 'expediente' => $caseRef,
+                'ruta' => $route !== '' ? $route : 'Ruta por confirmar',
+                'hora' => $transportDate !== '' ? $transportDate . ' · ' . $start . '–' . plus_one_hour($start) : 'Por programar',
+                'fecha' => $transportDate, 'inicio' => $start, 'fin' => plus_one_hour($start),
+                'conductor' => 'Sin asignar', 'vehiculo' => 'Por asignar', 'estado' => 'Sin asignar',
+                'sourceEmailId' => $mailId,
+            ];
+        }
+        if ($transportDate !== '') {
+            $found = false;
+            foreach ($state['calendarEvents'] as &$event) {
+                if (($event['expediente'] ?? '') === $caseRef && ($event['tipoServicio'] ?? '') === 'Transporte') {
+                    if ($route !== '') $event['titulo'] = $route;
+                    $event['fecha'] = $transportDate;
+                    $event['inicio'] = $start;
+                    $event['fin'] = plus_one_hour($start);
+                    $event['transporte'] = $transportRef;
+                    $found = true;
+                    break;
+                }
+            }
+            unset($event);
+            if (!$found) {
+                $state['calendarEvents'][] = [
+                    'id' => 'EV-MAIL-' . $mailId . '-T', 'titulo' => $route !== '' ? $route : 'Transporte',
+                    'tipoServicio' => 'Transporte', 'fecha' => $transportDate, 'inicio' => $start,
+                    'fin' => plus_one_hour($start), 'asignado' => 'Sin asignar', 'expediente' => $caseRef,
+                    'transporte' => $transportRef, 'color' => 'gray', 'sourceEmailId' => $mailId,
+                ];
+            }
+        }
+    }
+    return true;
+}
+
 function apply_service_email(int $mailId, array $data, ?int $userId = null): string
 {
-    if (!service_required_data_complete($data)) {
+    $pdo = db();
+    $previewStatement = $pdo->prepare('SELECT subject FROM app_mail_items WHERE id = ?');
+    $previewStatement->execute([$mailId]);
+    $preview = $previewStatement->fetch();
+    if (!$preview) {
+        throw new RuntimeException('Correo no encontrado.');
+    }
+    $threadCaseRef = find_existing_thread_case_ref($pdo, $mailId, (string) $preview['subject']);
+    $threadUpdateAllowed = $threadCaseRef !== ''
+        && !empty($data['is_service'])
+        && (float) ($data['confidence'] ?? 0) >= 0.88
+        && in_array((string) ($data['request_action'] ?? 'new'), ['new', 'update'], true);
+    if (!service_required_data_complete($data) && !$threadUpdateAllowed) {
         $critical = array_filter(
             service_review_reasons($data),
             static fn(string $reason): bool => $reason !== 'Revisión manual recomendada'
         );
         throw new InvalidArgumentException(($critical ? implode('. ', $critical) : 'Faltan datos obligatorios o la confianza es insuficiente.') . '.');
     }
-    $pdo = db();
     $pdo->beginTransaction();
     try {
-        $mailStatement = $pdo->prepare('SELECT status, case_ref FROM app_mail_items WHERE id = ? FOR UPDATE');
+        $mailStatement = $pdo->prepare('SELECT status, case_ref, subject FROM app_mail_items WHERE id = ? FOR UPDATE');
         $mailStatement->execute([$mailId]);
         $mail = $mailStatement->fetch();
         if (!$mail) throw new RuntimeException('Correo no encontrado.');
@@ -737,6 +983,32 @@ function apply_service_email(int $mailId, array $data, ?int $userId = null): str
         $state = $stateRow ? json_decode($stateRow['data'], true, 512, JSON_THROW_ON_ERROR) : [];
         foreach (['cases', 'transports', 'warehouseEntries', 'customs', 'calendarEvents'] as $key) {
             $state[$key] = is_array($state[$key] ?? null) ? $state[$key] : [];
+        }
+        if ($threadUpdateAllowed && apply_thread_update_to_state(
+            $state,
+            $threadCaseRef,
+            $mailId,
+            (string) $mail['subject'],
+            $data
+        )) {
+            $encoded = json_encode($state, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
+            $save = $pdo->prepare(
+                'INSERT INTO app_operational_state (id, data, updated_by) VALUES (1, ?, ?)
+                 ON DUPLICATE KEY UPDATE data = VALUES(data), updated_by = VALUES(updated_by)'
+            );
+            $save->execute([$encoded, $userId]);
+            $mark = $pdo->prepare(
+                "UPDATE app_mail_items SET status = 'processed', extracted = ?, confidence = ?,
+                 review_reason = NULL, error_message = NULL, case_ref = ?, processed_at = NOW(),
+                 reviewed_by = ?, reviewed_at = IF(? IS NULL, reviewed_at, NOW()) WHERE id = ?"
+            );
+            $mark->execute([
+                json_encode($data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+                (float) ($data['confidence'] ?? 1), $threadCaseRef, $userId, $userId, $mailId,
+            ]);
+            audit($userId, 'mail.thread_update', ['mailId' => $mailId, 'caseRef' => $threadCaseRef]);
+            $pdo->commit();
+            return $threadCaseRef;
         }
         $receptionDate = trim((string) ($data['reception']['date'] ?? ''));
         $transportDate = trim((string) ($data['transport']['date'] ?? ''));
@@ -858,6 +1130,244 @@ function apply_service_email(int $mailId, array $data, ?int $userId = null): str
     }
 }
 
+function merge_records_by_key(array $left, array $right): array
+{
+    $result = [];
+    $seen = [];
+    foreach (array_merge($left, $right) as $record) {
+        if (!is_array($record)) continue;
+        $key = (string) ($record['id'] ?? $record['ref'] ?? md5(json_encode($record)));
+        if (isset($seen[$key])) continue;
+        $seen[$key] = true;
+        $result[] = $record;
+    }
+    return $result;
+}
+
+function reconcile_existing_mail_threads(PDO $pdo): array
+{
+    $summary = ['threads' => 0, 'mergedCases' => 0, 'removedEmptyCases' => 0];
+    $rows = $pdo->query(
+        "SELECT id, subject, sender_name, sender_email, case_ref, extracted, received_at
+         FROM app_mail_items
+         WHERE status = 'processed' AND case_ref IS NOT NULL
+         ORDER BY received_at ASC, id ASC"
+    )->fetchAll();
+    if (!$rows) return $summary;
+
+    $groups = [];
+    foreach ($rows as $row) {
+        $key = normalized_mail_subject((string) $row['subject']);
+        if ($key !== '') $groups[$key][] = $row;
+    }
+
+    $pdo->beginTransaction();
+    try {
+        $stateRow = $pdo->query('SELECT data FROM app_operational_state WHERE id = 1 FOR UPDATE')->fetch();
+        if (!$stateRow) {
+            $pdo->commit();
+            return $summary;
+        }
+        $state = json_decode($stateRow['data'], true, 512, JSON_THROW_ON_ERROR);
+        foreach (['cases', 'transports', 'warehouseEntries', 'customs', 'calendarEvents'] as $key) {
+            $state[$key] = is_array($state[$key] ?? null) ? $state[$key] : [];
+        }
+
+        $caseByRef = [];
+        foreach ($state['cases'] as $case) {
+            $caseByRef[(string) ($case['id'] ?? '')] = $case;
+        }
+
+        foreach ($groups as $threadRows) {
+            $refs = array_values(array_unique(array_filter(array_map(
+                static fn(array $row): string => (string) ($row['case_ref'] ?? ''),
+                $threadRows
+            ))));
+            $existingRefs = array_values(array_filter($refs, static fn(string $ref): bool => isset($caseByRef[$ref])));
+            if (count($existingRefs) < 2) continue;
+
+            $canonicalRef = $existingRefs[0];
+            $canonical = $caseByRef[$canonicalRef];
+            $duplicateRefs = array_values(array_diff($existingRefs, [$canonicalRef]));
+            $subjectVessel = subject_target_vessel((string) $threadRows[0]['subject']);
+            if ($subjectVessel !== '') $canonical['buque'] = $subjectVessel;
+            $subjectPort = subject_target_port((string) $threadRows[0]['subject']);
+            if ($subjectPort !== '') $canonical['puerto'] = $subjectPort;
+            if ($subjectVessel !== '') {
+                $canonical['servicios'] = array_values(array_unique(array_merge(
+                    is_array($canonical['servicios'] ?? null) ? $canonical['servicios'] : [],
+                    ['Transporte']
+                )));
+            }
+
+            foreach ($threadRows as $row) {
+                $senderIdentity = mb_strtolower((string) ($row['sender_name'] ?? '') . ' ' . (string) ($row['sender_email'] ?? ''));
+                if (str_contains($senderIdentity, 'limani')) $canonical['cliente'] = 'LIMANI';
+                $data = json_decode((string) ($row['extracted'] ?? ''), true);
+                if (!is_array($data)) continue;
+                if (trim((string) ($data['eta'] ?? '')) !== '') $canonical['eta'] = (string) $data['eta'];
+                if (trim((string) ($data['port'] ?? '')) !== '') $canonical['puerto'] = mb_strtoupper((string) $data['port']);
+                if (str_contains(mb_strtolower((string) ($data['client'] ?? '')), 'limani')) $canonical['cliente'] = 'LIMANI';
+                $canonical['resumenMercancia'] = append_operational_note(
+                    (string) ($canonical['resumenMercancia'] ?? ''),
+                    (string) ($data['cargo_summary'] ?? '')
+                );
+                $canonical['notasOperativas'] = append_operational_note(
+                    (string) ($canonical['notasOperativas'] ?? ''),
+                    (string) ($data['operational_notes'] ?? '')
+                );
+            }
+
+            foreach ($duplicateRefs as $duplicateRef) {
+                $duplicate = $caseByRef[$duplicateRef];
+                $canonical['servicios'] = array_values(array_unique(array_merge(
+                    is_array($canonical['servicios'] ?? null) ? $canonical['servicios'] : [],
+                    is_array($duplicate['servicios'] ?? null) ? $duplicate['servicios'] : []
+                )));
+                $canonical['mercancias'] = merge_records_by_key(
+                    is_array($canonical['mercancias'] ?? null) ? $canonical['mercancias'] : [],
+                    is_array($duplicate['mercancias'] ?? null) ? $duplicate['mercancias'] : []
+                );
+                $canonical['recepciones'] = merge_records_by_key(
+                    is_array($canonical['recepciones'] ?? null) ? $canonical['recepciones'] : [],
+                    is_array($duplicate['recepciones'] ?? null) ? $duplicate['recepciones'] : []
+                );
+                $canonical['timelineCustom'] = merge_records_by_key(
+                    is_array($canonical['timelineCustom'] ?? null) ? $canonical['timelineCustom'] : [],
+                    is_array($duplicate['timelineCustom'] ?? null) ? $duplicate['timelineCustom'] : []
+                );
+                $canonical['progreso'] = max((int) ($canonical['progreso'] ?? 0), (int) ($duplicate['progreso'] ?? 0));
+                if ((int) ($canonical['bultos'] ?? 0) === 0 && (int) ($duplicate['bultos'] ?? 0) > 0) {
+                    $canonical['bultos'] = $duplicate['bultos'];
+                    $canonical['peso'] = $duplicate['peso'] ?? $canonical['peso'];
+                }
+                unset($caseByRef[$duplicateRef]);
+                $summary['mergedCases']++;
+            }
+            $timeline = is_array($canonical['timelineCustom'] ?? null) ? $canonical['timelineCustom'] : [];
+            array_unshift($timeline, [
+                'id' => 'THREAD-MERGE-' . md5(implode('|', $existingRefs)),
+                'fecha' => date('d/m/Y'), 'hora' => date('H:i'),
+                'titulo' => 'Hilo de correo consolidado',
+                'detalle' => count($existingRefs) . ' expedientes duplicados unidos en ' . $canonicalRef,
+                'actor' => 'Gestor automático', 'estado' => 'done',
+            ]);
+            $canonical['timelineCustom'] = $timeline;
+            $caseByRef[$canonicalRef] = $canonical;
+
+            foreach (['transports', 'warehouseEntries', 'customs', 'calendarEvents'] as $collection) {
+                foreach ($state[$collection] as &$record) {
+                    if (in_array((string) ($record['expediente'] ?? ''), $duplicateRefs, true)) {
+                        $record['expediente'] = $canonicalRef;
+                    }
+                }
+                unset($record);
+            }
+            if ($subjectVessel !== '') {
+                $hasTransport = false;
+                foreach ($state['transports'] as $transport) {
+                    if (($transport['expediente'] ?? '') === $canonicalRef) {
+                        $hasTransport = true;
+                        break;
+                    }
+                }
+                if (!$hasTransport) {
+                    $state['transports'][] = [
+                        'id' => next_transport_ref($state['transports']),
+                        'expediente' => $canonicalRef,
+                        'ruta' => 'Servicio de gabarra · ' . ($subjectPort !== '' ? $subjectPort : 'Puerto por confirmar'),
+                        'hora' => 'Por programar', 'fecha' => '', 'inicio' => '09:00', 'fin' => '10:00',
+                        'conductor' => 'Sin asignar', 'vehiculo' => 'Por asignar', 'estado' => 'Sin asignar',
+                        'sourceEmailId' => (int) $threadRows[0]['id'],
+                    ];
+                }
+            }
+            $mailIds = array_map(static fn(array $row): int => (int) $row['id'], $threadRows);
+            if ($mailIds) {
+                $placeholders = implode(',', array_fill(0, count($mailIds), '?'));
+                $updateMail = $pdo->prepare("UPDATE app_mail_items SET case_ref = ? WHERE id IN ($placeholders)");
+                $updateMail->execute(array_merge([$canonicalRef], $mailIds));
+            }
+            $summary['threads']++;
+        }
+
+        $activeRefs = array_fill_keys(array_keys($caseByRef), true);
+        foreach ($caseByRef as $ref => $case) {
+            $hasService = !empty($case['servicios']);
+            $hasActivity = (int) ($case['progreso'] ?? 0) > 20
+                || !empty($case['mercancias'])
+                || !empty($case['recepciones'])
+                || array_filter($state['warehouseEntries'], static fn(array $entry): bool => ($entry['expediente'] ?? '') === $ref);
+            if (!empty($case['sourceEmailId']) && !$hasService && !$hasActivity) {
+                unset($caseByRef[$ref], $activeRefs[$ref]);
+                foreach (['transports', 'warehouseEntries', 'customs', 'calendarEvents'] as $collection) {
+                    $state[$collection] = array_values(array_filter(
+                        $state[$collection],
+                        static fn(array $record): bool => ($record['expediente'] ?? '') !== $ref
+                    ));
+                }
+                $resetMail = $pdo->prepare(
+                    "UPDATE app_mail_items SET status = 'review', case_ref = NULL, processed_at = NULL,
+                     review_reason = 'No contiene un servicio ejecutable; revisar el contexto del hilo'
+                     WHERE case_ref = ?"
+                );
+                $resetMail->execute([$ref]);
+                $summary['removedEmptyCases']++;
+            }
+        }
+
+        $state['cases'] = array_values($caseByRef);
+
+        $threadMailIds = array_fill_keys(array_map(static fn(array $row): int => (int) $row['id'], $rows), true);
+        $latestTransport = [];
+        foreach ($state['transports'] as $index => $transport) {
+            $mailId = (int) ($transport['sourceEmailId'] ?? 0);
+            if ($mailId && isset($threadMailIds[$mailId])) {
+                $latestTransport[(string) ($transport['expediente'] ?? '')] = $index;
+            }
+        }
+        $state['transports'] = array_values(array_filter(
+            $state['transports'],
+            static function (array $transport, int $index) use ($latestTransport, $threadMailIds): bool {
+                $mailId = (int) ($transport['sourceEmailId'] ?? 0);
+                $ref = (string) ($transport['expediente'] ?? '');
+                return !$mailId || !isset($threadMailIds[$mailId]) || ($latestTransport[$ref] ?? $index) === $index;
+            },
+            ARRAY_FILTER_USE_BOTH
+        ));
+
+        $latestEvent = [];
+        foreach ($state['calendarEvents'] as $index => $event) {
+            $mailId = (int) ($event['sourceEmailId'] ?? 0);
+            if ($mailId && isset($threadMailIds[$mailId])) {
+                $key = (string) ($event['expediente'] ?? '') . '|' . (string) ($event['tipoServicio'] ?? '');
+                $latestEvent[$key] = $index;
+            }
+        }
+        $state['calendarEvents'] = array_values(array_filter(
+            $state['calendarEvents'],
+            static function (array $event, int $index) use ($latestEvent, $threadMailIds): bool {
+                $mailId = (int) ($event['sourceEmailId'] ?? 0);
+                $key = (string) ($event['expediente'] ?? '') . '|' . (string) ($event['tipoServicio'] ?? '');
+                return !$mailId || !isset($threadMailIds[$mailId]) || ($latestEvent[$key] ?? $index) === $index;
+            },
+            ARRAY_FILTER_USE_BOTH
+        ));
+
+        $encoded = json_encode($state, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
+        $save = $pdo->prepare(
+            'UPDATE app_operational_state SET data = ?, updated_by = NULL WHERE id = 1'
+        );
+        $save->execute([$encoded]);
+        audit(null, 'mail.threads_reconciled', $summary);
+        $pdo->commit();
+        return $summary;
+    } catch (Throwable $error) {
+        if ($pdo->inTransaction()) $pdo->rollBack();
+        throw $error;
+    }
+}
+
 function process_mailboxes(string $triggerType): array
 {
     if (!function_exists('imap_open')) {
@@ -872,6 +1382,7 @@ function process_mailboxes(string $triggerType): array
         $run->execute([$triggerType]);
         $runId = (int) $pdo->lastInsertId();
         $summary = ['scanned' => 0, 'processed' => 0, 'review' => 0, 'ignored' => 0, 'errors' => 0];
+        $summary['reconciliation'] = reconcile_existing_mail_threads($pdo);
         $accounts = [
             [config('info_email_user'), config('info_email_password')],
             [config('operations_email_user'), config('operations_email_password')],
@@ -945,9 +1456,13 @@ function process_mailboxes(string $triggerType): array
                 if ($insert->rowCount() < 1) continue;
                 $mailId = (int) $pdo->lastInsertId();
                 $summary['scanned']++;
+                $threadUpdate = !empty($data['is_service'])
+                    && (float) ($data['confidence'] ?? 0) >= 0.88
+                    && in_array((string) ($data['request_action'] ?? 'new'), ['new', 'update'], true)
+                    && find_existing_thread_case_ref($pdo, $mailId, $subject) !== '';
                 if ($status === 'ignored') {
                     $summary['ignored']++;
-                } elseif (service_required_data_complete($data)) {
+                } elseif (service_required_data_complete($data) || $threadUpdate) {
                     try {
                         apply_service_email($mailId, $data);
                         $summary['processed']++;
