@@ -1473,7 +1473,9 @@ function process_mailboxes(string $triggerType): array
             }
             $uids = imap_search($imap, 'SINCE "' . date('d-M-Y', strtotime('-14 days')) . '"', SE_UID) ?: [];
             rsort($uids, SORT_NUMERIC);
-            foreach (array_slice($uids, 0, 30) as $uid) {
+            $recentUids = array_slice($uids, 0, 30);
+            sort($recentUids, SORT_NUMERIC);
+            foreach ($recentUids as $uid) {
                 $exists = $pdo->prepare('SELECT id FROM app_mail_items WHERE mailbox = ? AND imap_uid = ?');
                 $exists->execute([$username, $uid]);
                 if ($exists->fetchColumn()) continue;
@@ -1556,6 +1558,30 @@ function process_mailboxes(string $triggerType): array
                 }
             }
             imap_close($imap);
+        }
+        $pendingUpdates = $pdo->query(
+            "SELECT id, subject, extracted FROM app_mail_items
+             WHERE status = 'review' AND extracted IS NOT NULL
+             ORDER BY received_at ASC, id ASC LIMIT 100"
+        )->fetchAll();
+        foreach ($pendingUpdates as $pending) {
+            $data = json_decode((string) ($pending['extracted'] ?? ''), true);
+            if (!is_array($data) || (float) ($data['confidence'] ?? 0) < 0.82) continue;
+            if (!in_array((string) ($data['request_action'] ?? ''), ['new', 'update', 'information'], true)) continue;
+            if (empty($data['is_service']) && !port_call_data_has_schedule($data)) continue;
+            $mailId = (int) $pending['id'];
+            $related = find_existing_thread_case_ref($pdo, $mailId, (string) $pending['subject']);
+            if ($related === '') {
+                $related = find_correlated_case_ref($pdo, $data, (string) $pending['subject']);
+            }
+            if ($related === '') continue;
+            try {
+                apply_service_email($mailId, $data);
+                $summary['processed']++;
+                $summary['review'] = max(0, $summary['review'] - 1);
+            } catch (Throwable) {
+                // Si la correlación no es suficientemente segura, permanece para revisión humana.
+            }
         }
         $finish = $pdo->prepare(
             "UPDATE app_mail_runs SET status = ?, scanned = ?, processed = ?, review_count = ?,
