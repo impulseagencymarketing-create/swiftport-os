@@ -16,7 +16,7 @@ if ($id < 1 || !in_array($action, ['approve', 'ignore', 'reprocess'], true)) {
 
 if ($action === 'reprocess') {
     $statement = db()->prepare(
-        'SELECT subject, body, sender_name, sender_email FROM app_mail_items WHERE id = ? AND status <> ?'
+        'SELECT subject, body, sender_name, sender_email, received_at FROM app_mail_items WHERE id = ? AND status <> ?'
     );
     $statement->execute([$id, 'processed']);
     $mail = $statement->fetch();
@@ -26,9 +26,11 @@ if ($action === 'reprocess') {
     $data = extract_local_service($mail);
     $reasons = service_review_reasons($data);
     if (empty($data['is_service'])) {
-        $status = 'ignored';
-        $reason = 'No se ha detectado una solicitud operativa';
-    } elseif (!$reasons) {
+        $status = (float) ($data['confidence'] ?? 0) >= 0.90 ? 'ignored' : 'review';
+        $reason = $status === 'ignored'
+            ? 'No se ha detectado una solicitud operativa'
+            : 'Clasificación dudosa; revisar el mensaje';
+    } elseif (service_required_data_complete($data)) {
         try {
             $caseRef = apply_service_email($id, $data, (int) $user['id']);
             audit((int) $user['id'], 'mail.reprocess.auto', ['mailId' => $id, 'caseRef' => $caseRef]);
