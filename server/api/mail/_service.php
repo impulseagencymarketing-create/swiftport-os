@@ -1,5 +1,6 @@
 <?php
 declare(strict_types=1);
+require_once __DIR__ . '/_correlation.php';
 
 function mail_decode_header_value(string $value): string
 {
@@ -383,6 +384,11 @@ function call_openai_extraction(string $text, array $email): array
             'client' => ['type' => 'string'],
             'vessel' => ['type' => 'string'],
             'eta' => ['type' => 'string'],
+            'eta_time' => ['type' => 'string'],
+            'etb' => ['type' => 'string'],
+            'etb_time' => ['type' => 'string'],
+            'etd' => ['type' => 'string'],
+            'etd_time' => ['type' => 'string'],
             'port' => ['type' => 'string'],
             'priority' => ['type' => 'string', 'enum' => ['Baja', 'Media', 'Alta', 'Urgente']],
             'cargo_summary' => ['type' => 'string'],
@@ -411,7 +417,7 @@ function call_openai_extraction(string $text, array $email): array
                 'required' => ['required', 'date', 'time', 'pickup', 'delivery'],
             ],
         ],
-        'required' => ['is_service', 'confidence', 'request_action', 'service_kind', 'existing_reference', 'client', 'vessel', 'eta', 'port', 'priority', 'cargo_summary', 'operational_notes', 'reception', 'transport'],
+        'required' => ['is_service', 'confidence', 'request_action', 'service_kind', 'existing_reference', 'client', 'vessel', 'eta', 'eta_time', 'etb', 'etb_time', 'etd', 'etd_time', 'port', 'priority', 'cargo_summary', 'operational_notes', 'reception', 'transport'],
     ];
 
     $subject = clean_extracted_value((string) ($email['subject'] ?? ''));
@@ -435,14 +441,16 @@ CRITERIO OPERATIVO
 - Recibir o custodiar mercancía en almacén implica reception.required true.
 - Si se pide recibir primero y entregar después, usa service_kind "reception_and_delivery" y marca ambos bloques.
 - Distingue solicitud nueva de actualización, cancelación o mensaje informativo. Solo usa request_action "new" cuando realmente haya que abrir un trabajo nuevo.
+- Una actualización de ETA, ETB, atraque, salida o gabarra de un servicio ya solicitado usa request_action "update". Es información operativa del mismo trabajo, no un servicio nuevo.
 - Una petición de precio sin orden de ejecutar es information y debe quedar para revisión.
 
 EXTRACCIÓN
 - Extrae el buque aunque aparezca como MV, M/V, VSL, vessel, ship o en el asunto.
 - En asuntos del tipo "TORC - GABARRA - BARCELONA", el buque objetivo es TORC; GABARRA/BARGE describe la operativa y BARCELONA es el puerto.
 - Si se indica que el buque objetivo entrará después de la salida de otro buque, ese segundo buque es solo una referencia temporal. No lo uses como vessel.
-- En hilos iniciados por LIMANI, conserva LIMANI como cliente aunque las respuestas posteriores lleguen del consignatario copiado.
-- ETA es la llegada del buque; no confundas ETA con la fecha de recogida, recepción o entrega.
+- LIMANI suele enviar primero la solicitud y después abrir otro hilo copiando al consignatario para comunicar cambios de la misma escala. Conserva LIMANI como cliente y relaciona las actualizaciones con el buque objetivo.
+- ETA es la llegada prevista al puerto o zona de espera, ETB es la fecha/hora prevista de atraque y ETD es la salida prevista. Extrae cada fecha y cada hora en su campo; no las mezcles con la fecha de recogida, recepción o entrega.
+- Si el correo solo dice que TORC entrará tras la salida de LUCA IEVIOLI, no inventes la ETA o ETB de TORC: la salida de LUCA es contexto hasta que se indique una fecha u hora concreta para TORC.
 - Resuelve "hoy", "mañana" y días de la semana usando la fecha de recepción del mensaje.
 - Las fechas deben ser YYYY-MM-DD y las horas HH:MM. Si no constan o no pueden deducirse con seguridad, usa cadena vacía.
 - No inventes buque, ETA, puerto, cliente, fechas, horas ni direcciones.
@@ -559,6 +567,8 @@ function normalize_extracted_payload(array $payload): array
     $hasSignals = trim((string) ($payload['client'] ?? '')) !== ''
         || trim((string) ($payload['vessel'] ?? '')) !== ''
         || trim((string) ($payload['eta'] ?? '')) !== ''
+        || trim((string) ($payload['etb'] ?? '')) !== ''
+        || trim((string) ($payload['etd'] ?? '')) !== ''
         || trim((string) ($payload['port'] ?? '')) !== ''
         || !empty($reception['required']) || !empty($transport['required']);
     if ($isService && !$hasSignals && $confidence < 0.40) {
@@ -575,6 +585,11 @@ function normalize_extracted_payload(array $payload): array
         'client' => clean_extracted_value((string) ($payload['client'] ?? '')),
         'vessel' => mb_strtoupper(clean_extracted_value((string) ($payload['vessel'] ?? ''))),
         'eta' => trim((string) ($payload['eta'] ?? '')),
+        'eta_time' => trim((string) ($payload['eta_time'] ?? '')),
+        'etb' => trim((string) ($payload['etb'] ?? '')),
+        'etb_time' => trim((string) ($payload['etb_time'] ?? '')),
+        'etd' => trim((string) ($payload['etd'] ?? '')),
+        'etd_time' => trim((string) ($payload['etd_time'] ?? '')),
         'port' => mb_strtoupper(clean_extracted_value((string) ($payload['port'] ?? ''))),
         'priority' => trim((string) ($payload['priority'] ?? 'Media')) !== '' ? trim((string) ($payload['priority'] ?? 'Media')) : 'Media',
         'cargo_summary' => clean_extracted_value((string) ($payload['cargo_summary'] ?? '')),
@@ -625,14 +640,19 @@ function service_required_data_complete(array $data): bool
         }
     }
     if ($transportRequired) {
-        $transportDate = trim((string) ($data['transport']['date'] ?? ''));
-        $transportTime = trim((string) ($data['transport']['time'] ?? ''));
+        [$transportDate, $transportTime] = port_call_operational_slot($data, 'transport');
         if ($transportDate !== '' && !is_valid_service_date($transportDate)) {
             return false;
         }
         if ($transportTime !== '' && !is_valid_service_time($transportTime)) {
             return false;
         }
+    }
+    foreach (['eta', 'etb', 'etd'] as $field) {
+        $date = trim((string) ($data[$field] ?? ''));
+        $time = trim((string) ($data[$field . '_time'] ?? ''));
+        if ($date !== '' && !is_valid_service_date($date)) return false;
+        if ($time !== '' && !is_valid_service_time($time)) return false;
     }
     return true;
 }
@@ -652,6 +672,11 @@ function extract_local_service(array $email): array
             'client' => clean_extracted_value((string) ($email['sender_name'] ?? '')),
             'vessel' => '',
             'eta' => '',
+            'eta_time' => '',
+            'etb' => '',
+            'etb_time' => '',
+            'etd' => '',
+            'etd_time' => '',
             'port' => '',
             'priority' => 'Media',
             'cargo_summary' => '',
@@ -689,6 +714,11 @@ function extract_local_service(array $email): array
             'client' => clean_extracted_value((string) ($email['sender_name'] ?? '')),
             'vessel' => '',
             'eta' => '',
+            'eta_time' => '',
+            'etb' => '',
+            'etb_time' => '',
+            'etd' => '',
+            'etd_time' => '',
             'port' => '',
             'priority' => 'Media',
             'cargo_summary' => '',
@@ -735,16 +765,23 @@ function service_review_reasons(array $data): array
         }
     }
     if ($transport) {
-        $transportDate = trim((string) ($data['transport']['date'] ?? ''));
-        $transportTime = trim((string) ($data['transport']['time'] ?? ''));
+        [$transportDate, $transportTime] = port_call_operational_slot($data, 'transport');
         if ($transportDate === '') {
             $reasons[] = 'Fecha de transporte pendiente';
         } elseif (!is_valid_service_date($transportDate)) {
             $reasons[] = 'Fecha de transporte inválida';
         }
-        if ($transportTime !== '' && !is_valid_service_time($transportTime)) {
+        if ($transportTime === '') {
+            $reasons[] = 'Hora de transporte pendiente';
+        } elseif (!is_valid_service_time($transportTime)) {
             $reasons[] = 'Hora de transporte inválida';
         }
+    }
+    foreach (['eta' => 'ETA', 'etb' => 'ETB', 'etd' => 'ETD'] as $field => $label) {
+        $date = trim((string) ($data[$field] ?? ''));
+        $time = trim((string) ($data[$field . '_time'] ?? ''));
+        if ($date !== '' && !is_valid_service_date($date)) $reasons[] = "Fecha $label inválida";
+        if ($time !== '' && !is_valid_service_time($time)) $reasons[] = "Hora $label inválida";
     }
     if ((float) ($data['confidence'] ?? 0) < 0.88) $reasons[] = 'Revisión manual recomendada';
     return $reasons;
@@ -788,6 +825,15 @@ function append_operational_note(string $current, string $incoming): string
     return trim($current) === '' ? $incoming : trim($current) . ' · ' . $incoming;
 }
 
+function find_correlated_case_ref(PDO $pdo, array $data, string $subject): string
+{
+    $stateRow = $pdo->query('SELECT data FROM app_operational_state WHERE id = 1')->fetch();
+    if (!$stateRow) return '';
+    $state = json_decode((string) $stateRow['data'], true);
+    $cases = is_array($state['cases'] ?? null) ? $state['cases'] : [];
+    return find_correlated_case_ref_in_state($cases, $data, subject_target_vessel($subject));
+}
+
 function apply_thread_update_to_state(
     array &$state,
     string $caseRef,
@@ -814,6 +860,10 @@ function apply_thread_update_to_state(
     if (trim((string) ($data['eta'] ?? '')) !== '') {
         $case['eta'] = (string) $data['eta'];
     }
+    $case['portCall'] = merge_port_call_schedule(
+        is_array($case['portCall'] ?? null) ? $case['portCall'] : [],
+        $data
+    );
     if (trim((string) ($data['port'] ?? '')) !== '') {
         $case['puerto'] = mb_strtoupper(trim((string) $data['port']));
     }
@@ -846,13 +896,18 @@ function apply_thread_update_to_state(
     $sourceIds[] = $mailId;
     $case['sourceEmailIds'] = array_values(array_unique($sourceIds));
     $timeline = is_array($case['timelineCustom'] ?? null) ? $case['timelineCustom'] : [];
+    $scheduleLabel = port_call_schedule_label($case);
+    $updateDetail = trim((string) ($data['operational_notes'] ?? ''));
+    if ($scheduleLabel !== '') {
+        $updateDetail = trim(($updateDetail !== '' ? $updateDetail . ' · ' : '') . $scheduleLabel);
+    }
     array_unshift($timeline, [
         'id' => 'EMAIL-UPDATE-' . $mailId,
         'fecha' => date('d/m/Y'),
         'hora' => date('H:i'),
         'titulo' => 'Actualización recibida por email',
-        'detalle' => trim((string) ($data['operational_notes'] ?? '')) !== ''
-            ? mb_substr((string) $data['operational_notes'], 0, 240)
+        'detalle' => $updateDetail !== ''
+            ? mb_substr($updateDetail, 0, 300)
             : 'Hilo actualizado sin crear un expediente nuevo',
         'actor' => 'Gestor automático',
         'estado' => 'done',
@@ -862,8 +917,8 @@ function apply_thread_update_to_state(
 
     $receptionDate = trim((string) ($data['reception']['date'] ?? ''));
     $receptionTime = trim((string) ($data['reception']['time'] ?? ''));
-    if (!empty($data['reception']['required']) && $receptionDate !== '') {
-        $start = $receptionTime !== '' ? $receptionTime : '09:00';
+    if (!empty($data['reception']['required']) && $receptionDate !== '' && $receptionTime !== '') {
+        $start = $receptionTime;
         $found = false;
         foreach ($state['calendarEvents'] as &$event) {
             if (($event['expediente'] ?? '') === $caseRef && ($event['tipoServicio'] ?? '') === 'Recepción') {
@@ -886,10 +941,11 @@ function apply_thread_update_to_state(
         }
     }
 
-    if (!empty($data['transport']['required'])) {
-        $transportDate = trim((string) ($data['transport']['date'] ?? ''));
-        $transportTime = trim((string) ($data['transport']['time'] ?? ''));
-        $start = $transportTime !== '' ? $transportTime : '09:00';
+    $updatesTransport = !empty($data['transport']['required'])
+        || (port_call_data_has_schedule($data) && in_array('Transporte', $case['servicios'], true));
+    if ($updatesTransport) {
+        [$transportDate, $transportTime] = port_call_operational_slot($data, 'transport');
+        $start = $transportTime;
         $pickup = trim((string) ($data['transport']['pickup'] ?? ''));
         $delivery = trim((string) ($data['transport']['delivery'] ?? ''));
         $route = ($pickup !== '' || $delivery !== '')
@@ -900,7 +956,7 @@ function apply_thread_update_to_state(
             if (($transport['expediente'] ?? '') === $caseRef) {
                 $transportRef = (string) $transport['id'];
                 if ($route !== '') $transport['ruta'] = $route;
-                if ($transportDate !== '') {
+                if ($transportDate !== '' && $start !== '') {
                     $transport['fecha'] = $transportDate;
                     $transport['inicio'] = $start;
                     $transport['fin'] = plus_one_hour($start);
@@ -915,13 +971,13 @@ function apply_thread_update_to_state(
             $state['transports'][] = [
                 'id' => $transportRef, 'expediente' => $caseRef,
                 'ruta' => $route !== '' ? $route : 'Ruta por confirmar',
-                'hora' => $transportDate !== '' ? $transportDate . ' · ' . $start . '–' . plus_one_hour($start) : 'Por programar',
-                'fecha' => $transportDate, 'inicio' => $start, 'fin' => plus_one_hour($start),
+                'hora' => $transportDate !== '' && $start !== '' ? $transportDate . ' · ' . $start . '–' . plus_one_hour($start) : 'Por programar',
+                'fecha' => $transportDate, 'inicio' => $start, 'fin' => $start !== '' ? plus_one_hour($start) : '',
                 'conductor' => 'Sin asignar', 'vehiculo' => 'Por asignar', 'estado' => 'Sin asignar',
                 'sourceEmailId' => $mailId,
             ];
         }
-        if ($transportDate !== '') {
+        if ($transportDate !== '' && $start !== '') {
             $found = false;
             foreach ($state['calendarEvents'] as &$event) {
                 if (($event['expediente'] ?? '') === $caseRef && ($event['tipoServicio'] ?? '') === 'Transporte') {
@@ -958,17 +1014,6 @@ function apply_service_email(int $mailId, array $data, ?int $userId = null): str
         throw new RuntimeException('Correo no encontrado.');
     }
     $threadCaseRef = find_existing_thread_case_ref($pdo, $mailId, (string) $preview['subject']);
-    $threadUpdateAllowed = $threadCaseRef !== ''
-        && !empty($data['is_service'])
-        && (float) ($data['confidence'] ?? 0) >= 0.88
-        && in_array((string) ($data['request_action'] ?? 'new'), ['new', 'update'], true);
-    if (!service_required_data_complete($data) && !$threadUpdateAllowed) {
-        $critical = array_filter(
-            service_review_reasons($data),
-            static fn(string $reason): bool => $reason !== 'Revisión manual recomendada'
-        );
-        throw new InvalidArgumentException(($critical ? implode('. ', $critical) : 'Faltan datos obligatorios o la confianza es insuficiente.') . '.');
-    }
     $pdo->beginTransaction();
     try {
         $mailStatement = $pdo->prepare('SELECT status, case_ref, subject FROM app_mail_items WHERE id = ? FOR UPDATE');
@@ -984,9 +1029,26 @@ function apply_service_email(int $mailId, array $data, ?int $userId = null): str
         foreach (['cases', 'transports', 'warehouseEntries', 'customs', 'calendarEvents'] as $key) {
             $state[$key] = is_array($state[$key] ?? null) ? $state[$key] : [];
         }
-        if ($threadUpdateAllowed && apply_thread_update_to_state(
+        $correlatedCaseRef = find_correlated_case_ref_in_state(
+            $state['cases'],
+            $data,
+            subject_target_vessel((string) $mail['subject'])
+        );
+        $targetCaseRef = $threadCaseRef !== '' ? $threadCaseRef : $correlatedCaseRef;
+        $updateAllowed = $targetCaseRef !== ''
+            && (float) ($data['confidence'] ?? 0) >= 0.82
+            && in_array((string) ($data['request_action'] ?? 'new'), ['new', 'update', 'information'], true)
+            && (!empty($data['is_service']) || port_call_data_has_schedule($data));
+        if (!service_required_data_complete($data) && !$updateAllowed) {
+            $critical = array_filter(
+                service_review_reasons($data),
+                static fn(string $reason): bool => $reason !== 'Revisión manual recomendada'
+            );
+            throw new InvalidArgumentException(($critical ? implode('. ', $critical) : 'Faltan datos obligatorios o la confianza es insuficiente.') . '.');
+        }
+        if ($updateAllowed && apply_thread_update_to_state(
             $state,
-            $threadCaseRef,
+            $targetCaseRef,
             $mailId,
             (string) $mail['subject'],
             $data
@@ -1004,14 +1066,18 @@ function apply_service_email(int $mailId, array $data, ?int $userId = null): str
             );
             $mark->execute([
                 json_encode($data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
-                (float) ($data['confidence'] ?? 1), $threadCaseRef, $userId, $userId, $mailId,
+                (float) ($data['confidence'] ?? 1), $targetCaseRef, $userId, $userId, $mailId,
             ]);
-            audit($userId, 'mail.thread_update', ['mailId' => $mailId, 'caseRef' => $threadCaseRef]);
+            audit($userId, 'mail.port_call_update', [
+                'mailId' => $mailId,
+                'caseRef' => $targetCaseRef,
+                'matchedBy' => $threadCaseRef !== '' ? 'thread' : 'vessel_port_call',
+            ]);
             $pdo->commit();
-            return $threadCaseRef;
+            return $targetCaseRef;
         }
         $receptionDate = trim((string) ($data['reception']['date'] ?? ''));
-        $transportDate = trim((string) ($data['transport']['date'] ?? ''));
+        [$transportDate] = port_call_operational_slot($data, 'transport');
         $receptionTime = trim((string) ($data['reception']['time'] ?? ''));
         $transportTime = trim((string) ($data['transport']['time'] ?? ''));
         if (!empty($data['reception']['required'])) {
@@ -1040,6 +1106,7 @@ function apply_service_email(int $mailId, array $data, ?int $userId = null): str
             'cliente' => trim((string) ($data['client'] ?: 'Por identificar')),
             'puerto' => mb_strtoupper(trim((string) ($data['port'] ?: 'POR CONFIRMAR'))),
             'eta' => trim((string) ($data['eta'] ?? '')) !== '' ? (string) $data['eta'] : 'Por confirmar',
+            'portCall' => merge_port_call_schedule([], $data),
             'estado' => 'Nuevo',
             'prioridad' => (string) ($data['priority'] ?? 'Media'),
             'conductor' => 'Sin asignar',
@@ -1068,8 +1135,8 @@ function apply_service_email(int $mailId, array $data, ?int $userId = null): str
                 'estado' => 'done',
             ]],
         ]);
-        if (!empty($data['reception']['required']) && $receptionDate !== '') {
-            $start = $receptionTime !== '' ? $receptionTime : '09:00';
+        if (!empty($data['reception']['required']) && $receptionDate !== '' && $receptionTime !== '') {
+            $start = $receptionTime;
             $state['calendarEvents'][] = [
                 'id' => 'EV-MAIL-' . $mailId . '-R',
                 'titulo' => $data['cargo_summary'] ?: 'Recepción de mercancía',
@@ -1086,18 +1153,19 @@ function apply_service_email(int $mailId, array $data, ?int $userId = null): str
         }
         if (!empty($data['transport']['required'])) {
             $transportRef = next_transport_ref($state['transports']);
-            $start = $transportTime !== '' ? $transportTime : '09:00';
+            [$transportDate, $transportTime] = port_call_operational_slot($data, 'transport');
+            $start = $transportTime;
             $pickup = trim((string) $data['transport']['pickup']) ?: 'Origen por confirmar';
             $delivery = trim((string) ($data['transport']['delivery'] ?: $data['port'])) ?: 'Destino por confirmar';
             $route = $pickup . ' → ' . $delivery;
             $state['transports'][] = [
                 'id' => $transportRef, 'expediente' => $caseRef, 'ruta' => $route,
-                'hora' => $transportDate !== '' ? $transportDate . ' · ' . $start . '–' . plus_one_hour($start) : 'Por programar',
-                'fecha' => $transportDate, 'inicio' => $start, 'fin' => plus_one_hour($start),
+                'hora' => $transportDate !== '' && $start !== '' ? $transportDate . ' · ' . $start . '–' . plus_one_hour($start) : 'Por programar',
+                'fecha' => $transportDate, 'inicio' => $start, 'fin' => $start !== '' ? plus_one_hour($start) : '',
                 'conductor' => 'Sin asignar', 'vehiculo' => 'Por asignar', 'estado' => 'Sin asignar',
                 'sourceEmailId' => $mailId,
             ];
-            if ($transportDate !== '') {
+            if ($transportDate !== '' && $start !== '') {
                 $state['calendarEvents'][] = [
                     'id' => 'EV-MAIL-' . $mailId . '-T', 'titulo' => $route, 'tipoServicio' => 'Transporte',
                     'fecha' => $transportDate, 'inicio' => $start, 'fin' => plus_one_hour($start),
@@ -1436,7 +1504,11 @@ function process_mailboxes(string $triggerType): array
                 $confidence = (float) ($data['confidence'] ?? 0);
                 $isService = !empty($data['is_service']);
                 $aiUnavailable = !empty($data['ai_unavailable']);
-                $shouldIgnore = !$isService && $confidence >= 0.90;
+                $relatedCaseRef = find_correlated_case_ref($pdo, $data, $subject);
+                $isScheduleUpdate = $relatedCaseRef !== ''
+                    && port_call_data_has_schedule($data)
+                    && in_array((string) ($data['request_action'] ?? ''), ['update', 'information'], true);
+                $shouldIgnore = !$isService && !$isScheduleUpdate && $confidence >= 0.90;
                 $status = $aiUnavailable ? 'review' : ($shouldIgnore ? 'ignored' : 'review');
                 $reason = $aiUnavailable
                     ? format_ai_unavailable_reason($data)
@@ -1461,10 +1533,13 @@ function process_mailboxes(string $triggerType): array
                 if ($insert->rowCount() < 1) continue;
                 $mailId = (int) $pdo->lastInsertId();
                 $summary['scanned']++;
-                $threadUpdate = !empty($data['is_service'])
-                    && (float) ($data['confidence'] ?? 0) >= 0.88
-                    && in_array((string) ($data['request_action'] ?? 'new'), ['new', 'update'], true)
-                    && find_existing_thread_case_ref($pdo, $mailId, $subject) !== '';
+                $threadUpdate = (float) ($data['confidence'] ?? 0) >= 0.82
+                    && in_array((string) ($data['request_action'] ?? 'new'), ['new', 'update', 'information'], true)
+                    && (!empty($data['is_service']) || port_call_data_has_schedule($data))
+                    && (
+                        find_existing_thread_case_ref($pdo, $mailId, $subject) !== ''
+                        || $relatedCaseRef !== ''
+                    );
                 if ($status === 'ignored') {
                     $summary['ignored']++;
                 } elseif (service_required_data_complete($data) || $threadUpdate) {
