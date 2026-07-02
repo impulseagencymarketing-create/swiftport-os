@@ -450,6 +450,8 @@ EXTRACCIÓN
 - Si se indica que el buque objetivo entrará después de la salida de otro buque, ese segundo buque es solo una referencia temporal. No lo uses como vessel.
 - LIMANI suele enviar primero la solicitud y después abrir otro hilo copiando al consignatario para comunicar cambios de la misma escala. Conserva LIMANI como cliente y relaciona las actualizaciones con el buque objetivo.
 - ETA es la llegada prevista al puerto o zona de espera, ETB es la fecha/hora prevista de atraque y ETD es la salida prevista. Extrae cada fecha y cada hora en su campo; no las mezcles con la fecha de recogida, recepción o entrega.
+- Una entrega al buque se programa a su llegada ETA. Si no hay una hora de entrega explícita, usa la fecha y hora ETA para transport.date y transport.time. Nunca programes la entrega con ETD ni con la salida de otro buque.
+- ETB y ETD se conservan para que Operaciones conozca el margen portuario, pero no sustituyen la ETA como hora operativa del conductor.
 - Si el correo solo dice que TORC entrará tras la salida de LUCA IEVIOLI, no inventes la ETA o ETB de TORC: la salida de LUCA es contexto hasta que se indique una fecha u hora concreta para TORC.
 - Resuelve "hoy", "mañana" y días de la semana usando la fecha de recepción del mensaje.
 - Las fechas deben ser YYYY-MM-DD y las horas HH:MM. Si no constan o no pueden deducirse con seguridad, usa cadena vacía.
@@ -1471,14 +1473,17 @@ function process_mailboxes(string $triggerType): array
                 imap_errors();
                 continue;
             }
-            $uids = imap_search($imap, 'SINCE "' . date('d-M-Y', strtotime('-14 days')) . '"', SE_UID) ?: [];
-            rsort($uids, SORT_NUMERIC);
-            $recentUids = array_slice($uids, 0, 30);
-            sort($recentUids, SORT_NUMERIC);
+            $uids = imap_search($imap, 'SINCE "' . date('d-M-Y', strtotime('-365 days')) . '"', SE_UID) ?: [];
+            $knownStatement = $pdo->prepare('SELECT imap_uid FROM app_mail_items WHERE mailbox = ?');
+            $knownStatement->execute([$username]);
+            $knownUids = array_fill_keys(array_map('intval', $knownStatement->fetchAll(PDO::FETCH_COLUMN)), true);
+            $unseenUids = array_values(array_filter(
+                array_map('intval', $uids),
+                static fn(int $uid): bool => !isset($knownUids[$uid])
+            ));
+            sort($unseenUids, SORT_NUMERIC);
+            $recentUids = array_slice($unseenUids, 0, 10);
             foreach ($recentUids as $uid) {
-                $exists = $pdo->prepare('SELECT id FROM app_mail_items WHERE mailbox = ? AND imap_uid = ?');
-                $exists->execute([$username, $uid]);
-                if ($exists->fetchColumn()) continue;
                 $overview = imap_fetch_overview($imap, (string) $uid, FT_UID)[0] ?? null;
                 $structure = imap_fetchstructure($imap, $uid, FT_UID);
                 if (!$overview || !$structure) continue;

@@ -88,7 +88,7 @@ expect_same(
         'eta' => '2026-07-04',
         'eta_time' => '14:00',
     ], 'transport'),
-    'El transporte de gabarra sin hora propia debe planificarse con ETB antes que con ETA.'
+    'El transporte de entrega sin hora propia debe planificarse siempre con la llegada ETA.'
 );
 $updatedSchedule = merge_port_call_schedule(
     ['etaDate' => '2026-07-04', 'etaTime' => '14:00'],
@@ -96,5 +96,25 @@ $updatedSchedule = merge_port_call_schedule(
 );
 expect_same('15:00', $updatedSchedule['etaTime'], 'La nueva hora ETA debe sustituir la anterior.');
 expect_same('17:00', $updatedSchedule['etbTime'], 'La nueva ETB debe incorporarse al mismo expediente.');
+$rebuild = prepare_operational_rebuild([
+    'cases' => [
+        ['id' => 'SW-OPEN', 'estado' => 'En curso'],
+        ['id' => 'SW-DONE', 'estado' => 'Completado'],
+    ],
+    'transports' => [
+        ['id' => 'TR-1', 'expediente' => 'SW-OPEN'],
+        ['id' => 'TR-2', 'expediente' => 'SW-DONE'],
+    ],
+    'warehouseEntries' => [['id' => 'WH-1', 'expediente' => 'SW-OPEN']],
+    'customs' => [],
+    'calendarEvents' => [
+        ['id' => 'EV-1', 'expediente' => 'SW-OPEN'],
+        ['id' => 'EV-2', 'expediente' => 'SW-DONE'],
+    ],
+]);
+expect_same(['SW-OPEN'], $rebuild['openRefs'], 'La reconstrucción debe seleccionar únicamente expedientes abiertos.');
+expect_same(['SW-DONE'], array_column($rebuild['state']['cases'], 'id'), 'Los expedientes completados deben conservarse.');
+expect_same(['TR-2'], array_column($rebuild['state']['transports'], 'id'), 'Debe conservarse el transporte histórico completado.');
+expect_same(['EV-2'], array_column($rebuild['state']['calendarEvents'], 'id'), 'Debe conservarse el calendario histórico completado.');
 
 echo "mail_correlation_test: OK\n";

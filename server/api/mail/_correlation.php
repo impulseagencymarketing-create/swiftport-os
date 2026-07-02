@@ -66,8 +66,8 @@ function port_call_operational_slot(array $data, string $service): array
     $time = trim((string) ($serviceData['time'] ?? ''));
     if ($date !== '') return [$date, $time];
     if ($service === 'transport') {
-        $date = trim((string) ($data['etb'] ?? '')) ?: trim((string) ($data['eta'] ?? ''));
-        $time = trim((string) ($data['etb_time'] ?? '')) ?: trim((string) ($data['eta_time'] ?? ''));
+        $date = trim((string) ($data['eta'] ?? ''));
+        $time = trim((string) ($data['eta_time'] ?? ''));
     }
     return [$date, $time];
 }
@@ -136,4 +136,30 @@ function find_correlated_case_ref_in_state(array $cases, array $data, string $su
     usort($candidates, static fn(array $left, array $right): int => $right['score'] <=> $left['score']);
     if (count($candidates) > 1 && $candidates[0]['score'] === $candidates[1]['score']) return '';
     return $candidates[0]['score'] >= 120 ? $candidates[0]['id'] : '';
+}
+
+function prepare_operational_rebuild(array $state): array
+{
+    foreach (['cases', 'transports', 'warehouseEntries', 'customs', 'calendarEvents'] as $key) {
+        $state[$key] = is_array($state[$key] ?? null) ? $state[$key] : [];
+    }
+    $openRefs = [];
+    $completedCases = [];
+    foreach ($state['cases'] as $case) {
+        $ref = (string) ($case['id'] ?? '');
+        if (port_call_token((string) ($case['estado'] ?? '')) === 'COMPLETADO') {
+            $completedCases[] = $case;
+        } elseif ($ref !== '') {
+            $openRefs[] = $ref;
+        }
+    }
+    $openSet = array_fill_keys($openRefs, true);
+    $state['cases'] = $completedCases;
+    foreach (['transports', 'warehouseEntries', 'customs', 'calendarEvents'] as $collection) {
+        $state[$collection] = array_values(array_filter(
+            $state[$collection],
+            static fn(array $record): bool => !isset($openSet[(string) ($record['expediente'] ?? '')])
+        ));
+    }
+    return ['state' => $state, 'openRefs' => $openRefs, 'completedCases' => $completedCases];
 }

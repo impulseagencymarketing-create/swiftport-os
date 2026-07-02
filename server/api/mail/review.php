@@ -25,11 +25,15 @@ if ($action === 'reprocess') {
     }
     $data = extract_local_service($mail);
     $reasons = service_review_reasons($data);
-    $threadUpdate = !empty($data['is_service'])
-        && (float) ($data['confidence'] ?? 0) >= 0.88
-        && in_array((string) ($data['request_action'] ?? 'new'), ['new', 'update'], true)
-        && find_existing_thread_case_ref(db(), $id, (string) $mail['subject']) !== '';
-    if (empty($data['is_service'])) {
+    $relatedCaseRef = find_existing_thread_case_ref(db(), $id, (string) $mail['subject']);
+    if ($relatedCaseRef === '') {
+        $relatedCaseRef = find_correlated_case_ref(db(), $data, (string) $mail['subject']);
+    }
+    $threadUpdate = (float) ($data['confidence'] ?? 0) >= 0.82
+        && in_array((string) ($data['request_action'] ?? 'new'), ['new', 'update', 'information'], true)
+        && (!empty($data['is_service']) || port_call_data_has_schedule($data))
+        && $relatedCaseRef !== '';
+    if (empty($data['is_service']) && !$threadUpdate) {
         $status = (float) ($data['confidence'] ?? 0) >= 0.90 ? 'ignored' : 'review';
         $reason = $status === 'ignored'
             ? 'No se ha detectado una solicitud operativa'
