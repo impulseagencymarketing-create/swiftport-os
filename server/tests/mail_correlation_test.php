@@ -80,7 +80,7 @@ expect_same(
 expect_same(true, port_call_data_has_schedule(['etb' => '2026-07-04']), 'ETB debe considerarse una actualización operativa.');
 expect_same(false, port_call_data_has_schedule(['operational_notes' => 'Sin cambios']), 'Una nota sin horario no es una actualización de escala.');
 expect_same(
-    ['2026-07-04', '16:30'],
+    ['2026-07-04', '14:00'],
     port_call_operational_slot([
         'transport' => ['date' => '', 'time' => ''],
         'etb' => '2026-07-04',
