@@ -174,6 +174,16 @@ function ensure_schema(): void
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
     );
     $pdo->exec(
+        "CREATE TABLE IF NOT EXISTS app_operational_backups (
+            id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            label VARCHAR(120) NOT NULL,
+            data JSON NOT NULL,
+            created_by BIGINT UNSIGNED NULL,
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            INDEX idx_operational_backup_created (created_at)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+    );
+    $pdo->exec(
         "CREATE TABLE IF NOT EXISTS app_attachments (
             id CHAR(32) PRIMARY KEY,
             original_name VARCHAR(255) NOT NULL,
