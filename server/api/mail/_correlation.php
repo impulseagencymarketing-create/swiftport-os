@@ -71,8 +71,12 @@ function port_call_operational_slot(array $data, string $service): array
     $time = trim((string) ($serviceData['time'] ?? ''));
     if ($date !== '') return [$date, $time];
     if ($service === 'transport') {
-        $date = trim((string) ($data['eta'] ?? ''));
-        $time = trim((string) ($data['eta_time'] ?? ''));
+        $date = trim((string) ($data['etb'] ?? ''));
+        $time = trim((string) ($data['etb_time'] ?? ''));
+        if ($date === '') {
+            $date = trim((string) ($data['eta'] ?? ''));
+            $time = trim((string) ($data['eta_time'] ?? ''));
+        }
     }
     return [$date, $time];
 }

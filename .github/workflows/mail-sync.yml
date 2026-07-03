@@ -1,0 +1,34 @@
+name: Revisar correos cada 30 minutos
+
+on:
+  schedule:
+    - cron: "*/30 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: swiftport-mail-sync
+  cancel-in-progress: false
+
+jobs:
+  process-mail:
+    name: Interpretar buzones
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Procesar info y operations
+        env:
+          CRON_TOKEN: ${{ secrets.APP_SETUP_TOKEN }}
+        run: |
+          if [ -z "$CRON_TOKEN" ]; then
+            echo "::error::APP_SETUP_TOKEN no está configurado."
+            exit 1
+          fi
+          curl --fail --silent --show-error \
+            --request POST \
+            --header "X-Cron-Token: $CRON_TOKEN" \
+            --header "Content-Type: application/json" \
+            --data '{}' \
+            https://app.swiftportlogistic.com/api/mail/process.php

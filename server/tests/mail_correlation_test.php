@@ -104,7 +104,7 @@ $forwarded = sanitize_email_text(
 );
 expect_same(true, str_contains($forwarded, 'ETA: 04/07/2026 06:30'), 'La firma no debe ocultar la ETA del mensaje reenviado.');
 expect_same(
-    ['2026-07-04', '14:00'],
+    ['2026-07-04', '16:30'],
     port_call_operational_slot([
         'transport' => ['date' => '', 'time' => ''],
         'etb' => '2026-07-04',
@@ -112,7 +112,7 @@ expect_same(
         'eta' => '2026-07-04',
         'eta_time' => '14:00',
     ], 'transport'),
-    'El transporte de entrega sin hora propia debe planificarse siempre con la llegada ETA.'
+    'El transporte de entrega sin hora propia debe planificarse con ETB antes que ETA.'
 );
 $updatedSchedule = merge_port_call_schedule(
     ['etaDate' => '2026-07-04', 'etaTime' => '14:00'],

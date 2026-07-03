@@ -494,6 +494,8 @@ CRITERIO OPERATIVO
 - Entregar a un buque o desde un punto a otro implica transport.required true.
 - Recibir o custodiar mercancía en almacén implica reception.required true.
 - Si se pide recibir primero y entregar después, usa service_kind "reception_and_delivery" y marca ambos bloques.
+- Toda mercancía física gestionada por Swiftport pasa por su almacén: Bluespace, Carrer del Roure, 2, 08820 El Prat de Llobregat, Barcelona. Una mercancía entrante genera reception.required true y esa dirección como reception.location, salvo que el correo indique una recogida directa que todavía debe terminar en dicho almacén.
+- Una retirada de muestras desde un buque es un trayecto buque → almacén. Las entregas posteriores de esas muestras a laboratorios o direcciones del cliente son trayectos adicionales del mismo expediente.
 - Distingue solicitud nueva de actualización, cancelación o mensaje informativo. Solo usa request_action "new" cuando realmente haya que abrir un trabajo nuevo.
 - Una actualización de ETA, ETB, atraque, salida o gabarra de un servicio ya solicitado usa request_action "update". Es información operativa del mismo trabajo, no un servicio nuevo.
 - Una petición de precio sin orden de ejecutar es information y debe quedar para revisión.
@@ -505,10 +507,12 @@ EXTRACCIÓN
 - Una entrega directa al buque usa delivery_mode "vessel". Una entrega en terminal o muelle para colaboradores usa "shore". La tarea debe llamarse conceptualmente "Transporte a gabarra" o "Transporte a buque", sin sustituir el nombre del buque.
 - Si se indica que el buque objetivo entrará después de la salida de otro buque, ese segundo buque es solo una referencia temporal. No lo uses como vessel.
 - LIMANI suele enviar primero la solicitud y después abrir otro hilo copiando al consignatario para comunicar cambios de la misma escala. Conserva LIMANI como cliente y relaciona las actualizaciones con el buque objetivo.
+- El expediente representa una escala. Correos del mismo buque cuya ETA o ETB coincida o difiera como máximo dos días pertenecen normalmente al mismo expediente, aunque el asunto del hilo sea distinto.
 - ETA es la llegada prevista al puerto o zona de espera, ETB es la fecha/hora prevista de atraque y ETD es la salida prevista. Extrae cada fecha y cada hora en su campo; no las mezcles con la fecha de recogida, recepción o entrega.
 - port_stay conserva cuánto tiempo permanecerá el buque en puerto (por ejemplo "36 horas" o "2 días"). Es información operativa importante aunque no sea una fecha.
-- Una entrega al buque se programa a su llegada ETA. Si no hay una hora de entrega explícita, usa la fecha y hora ETA para transport.date y transport.time. Nunca programes la entrega con ETD ni con la salida de otro buque.
-- ETB y ETD se conservan para que Operaciones conozca el margen portuario, pero no sustituyen la ETA como hora operativa del conductor.
+- Una entrega al buque se programa con ETB. Si todavía no hay ETB, usa ETA. Nunca programes la entrega con ETD ni con la salida de otro buque.
+- ETD se conserva para que Operaciones conozca el margen portuario, pero no sustituye ETB o ETA como hora operativa del conductor.
+- Si falta la hora exacta de ETB y ETA, deja transport.time vacío y exige actualización; no inventes una hora ni conviertas el servicio en evento de día completo.
 - Si el correo solo dice que TORC entrará tras la salida de LUCA IEVIOLI, no inventes la ETA o ETB de TORC: la salida de LUCA es contexto hasta que se indique una fecha u hora concreta para TORC.
 - Resuelve "hoy", "mañana" y días de la semana usando la fecha de recepción del mensaje.
 - Las fechas deben ser YYYY-MM-DD y las horas HH:MM. Si no constan o no pueden deducirse con seguridad, usa cadena vacía.
@@ -1661,12 +1665,21 @@ function reconcile_existing_mail_threads(PDO $pdo): array
     }
 }
 
+function automatic_mail_publish_enabled(PDO $pdo): bool
+{
+    $row = $pdo->query('SELECT data FROM app_planning_state WHERE id = 1')->fetch();
+    if (!$row) return false;
+    $data = json_decode((string) $row['data'], true);
+    return is_array($data) && ($data['status'] ?? '') === 'live';
+}
+
 function process_mailboxes(string $triggerType): array
 {
     if (!function_exists('imap_open')) {
         throw new RuntimeException('La extensión PHP IMAP no está disponible.');
     }
     $pdo = db();
+    $autoPublish = automatic_mail_publish_enabled($pdo);
     if ((int) $pdo->query("SELECT GET_LOCK('swiftport_mail_processor', 2)")->fetchColumn() !== 1) {
         throw new RuntimeException('Ya hay otro procesamiento de correo en curso.');
     }
@@ -1767,7 +1780,7 @@ function process_mailboxes(string $triggerType): array
                     );
                 if ($status === 'ignored') {
                     $summary['ignored']++;
-                } elseif (service_required_data_complete($data) || $threadUpdate) {
+                } elseif ($autoPublish && (service_required_data_complete($data) || $threadUpdate)) {
                     try {
                         apply_service_email($mailId, $data);
                         $summary['processed']++;
@@ -1782,11 +1795,11 @@ function process_mailboxes(string $triggerType): array
             }
             imap_close($imap);
         }
-        $pendingUpdates = $pdo->query(
+        $pendingUpdates = $autoPublish ? $pdo->query(
             "SELECT id, subject, extracted FROM app_mail_items
              WHERE status = 'review' AND extracted IS NOT NULL
              ORDER BY received_at ASC, id ASC LIMIT 100"
-        )->fetchAll();
+        )->fetchAll() : [];
         foreach ($pendingUpdates as $pending) {
             $data = json_decode((string) ($pending['extracted'] ?? ''), true);
             if (!is_array($data) || (float) ($data['confidence'] ?? 0) < 0.82) continue;
