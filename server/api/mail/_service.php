@@ -591,7 +591,7 @@ PROMPT;
         'Content-Type: application/json',
         'Authorization: Bearer ' . $apiKey,
     ]);
-    curl_setopt($ch, CURLOPT_TIMEOUT, 45);
+    curl_setopt($ch, CURLOPT_TIMEOUT, 25);
     curl_setopt($ch, CURLOPT_POSTFIELDS, $body);
     $response = curl_exec($ch);
     $statusCode = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);

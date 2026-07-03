@@ -61,10 +61,16 @@ if ($action === 'preview_period') {
             'SELECT COUNT(*) FROM app_mail_items WHERE received_at >= ? AND received_at < ?'
         );
         $mailCount->execute([$start, $end]);
+        $pendingCount = db()->prepare(
+            "SELECT COUNT(*) FROM app_mail_items
+             WHERE status = 'review' AND extracted IS NULL AND received_at >= ? AND received_at < ?"
+        );
+        $pendingCount->execute([$start, $end]);
         respond([
             'ok' => true,
             'caseCount' => count(is_array($state['cases'] ?? null) ? $state['cases'] : []),
             'mailCount' => (int) $mailCount->fetchColumn(),
+            'pendingEmails' => (int) $pendingCount->fetchColumn(),
             'start' => $start,
             'end' => $end,
         ]);
@@ -147,7 +153,7 @@ if ($action === 'process_period_batch') {
         "SELECT id, subject, body, sender_name, sender_email, received_at
          FROM app_mail_items
          WHERE status = 'review' AND extracted IS NULL AND received_at >= ? AND received_at < ?
-         ORDER BY received_at ASC, id ASC LIMIT 3"
+         ORDER BY received_at ASC, id ASC LIMIT 1"
     );
     $select->execute([$start, $end]);
     $rows = $select->fetchAll();

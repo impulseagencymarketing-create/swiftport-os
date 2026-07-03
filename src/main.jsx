@@ -723,9 +723,17 @@ function Correos({csrfToken,notify,openCase,reloadOperational,canRebuild}){
     setRebuilding(true);setError('');setRebuildProgress('Preparando reconstrucción…');
     try{
       const period={start:'2026-06-01',end:'2026-07-06'};
+      const markerKey='swiftport-email-rebuild';
+      const canResume=localStorage.getItem(markerKey)===JSON.stringify(period);
+      let reset;
       const preview=await api('/api/admin/rebuild.php',{method:'POST',headers:{'X-CSRF-Token':csrfToken},body:JSON.stringify({action:'preview_period',...period})});
+      if(canResume){
+        reset={pendingEmails:Number(preview.pendingEmails||0),removedCases:0};
+      }else{
       if(!window.confirm(`Se borrarán ${preview.caseCount} expedientes, incluidos los completados, y toda su operativa. Se guardará una copia de seguridad y se reinterpretarán ${preview.mailCount} correos de junio. ¿Continuar?`)){setRebuildProgress('');return}
-      const reset=await api('/api/admin/rebuild.php',{method:'POST',headers:{'X-CSRF-Token':csrfToken},body:JSON.stringify({action:'reset_period',...period})});
+      reset=await api('/api/admin/rebuild.php',{method:'POST',headers:{'X-CSRF-Token':csrfToken},body:JSON.stringify({action:'reset_period',...period})});
+      }
+      localStorage.setItem(markerKey,JSON.stringify(period));
       let remaining=Number(reset.pendingEmails||0),interpreted=0,created=0,ignored=0;
       while(remaining>0){
         setRebuildProgress(`Interpretando junio con IA · ${remaining} pendientes`);
@@ -737,6 +745,7 @@ function Correos({csrfToken,notify,openCase,reloadOperational,canRebuild}){
         remaining=next;
       }
       setRebuildProgress('');
+      localStorage.removeItem(markerKey);
       notify(`${reset.removedCases} expedientes retirados · ${created} correos aplicados · ${ignored} fuera de junio o no operativos`);
       await Promise.all([load('all'),reloadOperational()]);
       setFilter('all');
