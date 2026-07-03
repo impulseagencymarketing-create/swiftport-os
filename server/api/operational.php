@@ -1,11 +1,13 @@
 <?php
 declare(strict_types=1);
 require __DIR__ . '/_bootstrap.php';
+require __DIR__ . '/mail/_service.php';
 
 ensure_schema();
 $user = require_auth();
 
 if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'GET') {
+    ensure_operational_schedule_coherence(db());
     $statement = db()->query('SELECT data, updated_at FROM app_operational_state WHERE id = 1');
     $row = $statement->fetch();
     respond([

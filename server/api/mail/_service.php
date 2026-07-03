@@ -1820,3 +1820,196 @@ function process_mailboxes(string $triggerType): array
         $pdo->query("SELECT RELEASE_LOCK('swiftport_mail_processor')");
     }
 }
+
+function schedule_time_minus(string $time, int $hours): string
+{
+    if (!is_valid_service_time($time)) return '08:00';
+    $value = DateTimeImmutable::createFromFormat('!H:i', $time);
+    return $value ? $value->modify('-' . $hours . ' hours')->format('H:i') : '08:00';
+}
+
+function ensure_operational_schedule_coherence(PDO $pdo): array
+{
+    $summary = ['createdReceptionEvents' => 0, 'createdTransportEvents' => 0, 'createdTransports' => 0];
+    $pdo->beginTransaction();
+    try {
+        $row = $pdo->query('SELECT data FROM app_operational_state WHERE id = 1 FOR UPDATE')->fetch();
+        if (!$row) {
+            $pdo->commit();
+            return $summary;
+        }
+        $state = json_decode((string) $row['data'], true, 512, JSON_THROW_ON_ERROR);
+        foreach (['cases', 'transports', 'calendarEvents'] as $collection) {
+            $state[$collection] = is_array($state[$collection] ?? null) ? $state[$collection] : [];
+        }
+        $needsRepair = false;
+        foreach ($state['cases'] as $case) {
+            $caseRef = (string) ($case['id'] ?? '');
+            if ($caseRef === '') continue;
+            $hasReception = false;
+            $hasTransportEvent = false;
+            foreach ($state['calendarEvents'] as $event) {
+                if (($event['expediente'] ?? '') !== $caseRef) continue;
+                if (($event['tipoServicio'] ?? '') === 'Recepción') $hasReception = true;
+                if (str_starts_with((string) ($event['tipoServicio'] ?? ''), 'Transporte')) $hasTransportEvent = true;
+            }
+            $hasTransportRecord = count(array_filter(
+                $state['transports'],
+                static fn(array $transport): bool => ($transport['expediente'] ?? '') === $caseRef
+            )) > 0;
+            if (!$hasReception || !$hasTransportEvent || !$hasTransportRecord) {
+                $needsRepair = true;
+                break;
+            }
+        }
+        if (!$needsRepair) {
+            $pdo->commit();
+            return $summary;
+        }
+        $mailRows = $pdo->query(
+            "SELECT case_ref, received_at, extracted FROM app_mail_items
+             WHERE status = 'processed' AND case_ref IS NOT NULL AND extracted IS NOT NULL
+             ORDER BY received_at ASC, id ASC"
+        )->fetchAll();
+        $mailByCase = [];
+        foreach ($mailRows as $mailRow) {
+            $decoded = json_decode((string) $mailRow['extracted'], true);
+            if (!is_array($decoded)) continue;
+            $mailByCase[(string) $mailRow['case_ref']][] = [
+                'data' => $decoded,
+                'receivedAt' => (string) ($mailRow['received_at'] ?? ''),
+            ];
+        }
+        $changed = false;
+        foreach ($state['cases'] as $caseIndex => $case) {
+            $caseRef = (string) ($case['id'] ?? '');
+            if ($caseRef === '') continue;
+            $mailHistory = $mailByCase[$caseRef] ?? [];
+            $latestData = $mailHistory ? $mailHistory[count($mailHistory) - 1]['data'] : [];
+            $portCall = is_array($case['portCall'] ?? null) ? $case['portCall'] : [];
+            $arrivalDate = trim((string) ($portCall['etaDate'] ?? ''));
+            if (!is_valid_service_date($arrivalDate)) $arrivalDate = trim((string) ($portCall['etbDate'] ?? ''));
+            if (!is_valid_service_date($arrivalDate)) $arrivalDate = trim((string) ($case['eta'] ?? ''));
+            $receivedDate = $mailHistory ? substr((string) $mailHistory[0]['receivedAt'], 0, 10) : '';
+            if (!is_valid_service_date($arrivalDate)) $arrivalDate = is_valid_service_date($receivedDate) ? $receivedDate : '';
+            if ($arrivalDate === '') continue;
+            $arrivalTime = trim((string) ($portCall['etaTime'] ?? ''));
+            if (!is_valid_service_time($arrivalTime)) $arrivalTime = trim((string) ($portCall['etbTime'] ?? ''));
+            $arrivalTimeConfirmed = is_valid_service_time($arrivalTime);
+            if (!$arrivalTimeConfirmed) $arrivalTime = '09:00';
+
+            $receptionDate = '';
+            $receptionTime = '';
+            foreach ($mailHistory as $mailEntry) {
+                $mailData = $mailEntry['data'];
+                $candidateDate = trim((string) ($mailData['reception']['date'] ?? ''));
+                $candidateTime = trim((string) ($mailData['reception']['time'] ?? ''));
+                if (is_valid_service_date($candidateDate)) $receptionDate = $candidateDate;
+                if (is_valid_service_time($candidateTime)) $receptionTime = $candidateTime;
+            }
+            $receptionConfirmed = $receptionDate !== '' && $receptionTime !== '';
+            if ($receptionDate === '') $receptionDate = $arrivalDate;
+            if ($receptionTime === '') $receptionTime = schedule_time_minus($arrivalTime, 2);
+
+            $services = is_array($case['servicios'] ?? null) ? $case['servicios'] : [];
+            $requiredServices = array_values(array_unique(array_merge($services, ['Recepción', 'Transporte'])));
+            if ($requiredServices !== $services) {
+                $state['cases'][$caseIndex]['servicios'] = $requiredServices;
+                $changed = true;
+            }
+
+            $transportIndex = null;
+            foreach ($state['transports'] as $index => $transport) {
+                if (($transport['expediente'] ?? '') === $caseRef) {
+                    $transportIndex = $index;
+                    break;
+                }
+            }
+            $transportType = ($case['deliveryMode'] ?? '') === 'barge'
+                ? 'Transporte a gabarra'
+                : 'Transporte a buque';
+            $pickup = trim((string) ($latestData['transport']['pickup'] ?? '')) ?: 'Origen por confirmar';
+            $delivery = trim((string) ($latestData['transport']['delivery'] ?? ''))
+                ?: trim((string) ($case['operationLocation'] ?? ''))
+                ?: trim((string) ($case['puerto'] ?? 'Destino por confirmar'));
+            $route = $pickup . ' → ' . $delivery;
+            if ($transportIndex === null) {
+                $transportRef = next_transport_ref($state['transports']);
+                $state['transports'][] = [
+                    'id' => $transportRef,
+                    'expediente' => $caseRef,
+                    'ruta' => $route,
+                    'hora' => $arrivalDate . ' · ' . $arrivalTime . '–' . plus_one_hour($arrivalTime),
+                    'fecha' => $arrivalDate,
+                    'inicio' => $arrivalTime,
+                    'fin' => plus_one_hour($arrivalTime),
+                    'tipoServicio' => $transportType,
+                    'conductor' => (string) ($case['conductor'] ?? 'Sin asignar'),
+                    'vehiculo' => 'Por asignar',
+                    'estado' => 'Sin asignar',
+                    'scheduleStatus' => $arrivalTimeConfirmed ? 'confirmed' : 'provisional',
+                ];
+                $summary['createdTransports']++;
+                $changed = true;
+            } else {
+                $transportRef = (string) $state['transports'][$transportIndex]['id'];
+            }
+
+            $hasReception = false;
+            $hasTransport = false;
+            foreach ($state['calendarEvents'] as $event) {
+                if (($event['expediente'] ?? '') !== $caseRef) continue;
+                if (($event['tipoServicio'] ?? '') === 'Recepción') $hasReception = true;
+                if (str_starts_with((string) ($event['tipoServicio'] ?? ''), 'Transporte')) $hasTransport = true;
+            }
+            if (!$hasReception) {
+                $state['calendarEvents'][] = [
+                    'id' => 'EV-SYNC-' . $caseRef . '-R',
+                    'titulo' => trim((string) ($case['resumenMercancia'] ?? '')) ?: 'Recepción de mercancía',
+                    'tipoServicio' => 'Recepción',
+                    'fecha' => $receptionDate,
+                    'inicio' => $receptionTime,
+                    'fin' => plus_one_hour($receptionTime),
+                    'asignado' => (string) ($case['conductor'] ?? 'Sin asignar'),
+                    'expediente' => $caseRef,
+                    'transporte' => '',
+                    'color' => 'gray',
+                    'scheduleStatus' => $receptionConfirmed ? 'confirmed' : 'provisional',
+                    'scheduleNote' => $receptionConfirmed ? '' : 'Fecha u hora inferida; confirmar con operaciones',
+                ];
+                $summary['createdReceptionEvents']++;
+                $changed = true;
+            }
+            if (!$hasTransport) {
+                $state['calendarEvents'][] = [
+                    'id' => 'EV-SYNC-' . $caseRef . '-T',
+                    'titulo' => $route,
+                    'tipoServicio' => $transportType,
+                    'fecha' => $arrivalDate,
+                    'inicio' => $arrivalTime,
+                    'fin' => plus_one_hour($arrivalTime),
+                    'asignado' => (string) ($case['conductor'] ?? 'Sin asignar'),
+                    'expediente' => $caseRef,
+                    'transporte' => $transportRef,
+                    'color' => 'gray',
+                    'scheduleStatus' => $arrivalTimeConfirmed ? 'confirmed' : 'provisional',
+                    'scheduleNote' => $arrivalTimeConfirmed ? '' : 'Entrega colocada a la llegada del buque; confirmar hora',
+                ];
+                $summary['createdTransportEvents']++;
+                $changed = true;
+            }
+        }
+        if ($changed) {
+            $save = $pdo->prepare('UPDATE app_operational_state SET data = ?, updated_by = NULL WHERE id = 1');
+            $save->execute([
+                json_encode($state, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR),
+            ]);
+            audit(null, 'operational.schedule_coherence', $summary);
+        }
+        $pdo->commit();
+        return $summary;
+    } catch (Throwable $error) {
+        if ($pdo->inTransaction()) $pdo->rollBack();
+        throw $error;
+    }
+}
