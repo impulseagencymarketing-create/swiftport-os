@@ -470,8 +470,27 @@ function call_openai_extraction(string $text, array $email): array
                 ],
                 'required' => ['required', 'date', 'time', 'pickup', 'delivery'],
             ],
+            'tasks' => [
+                'type' => 'array',
+                'items' => [
+                    'type' => 'object',
+                    'additionalProperties' => false,
+                    'properties' => [
+                        'kind' => ['type' => 'string', 'enum' => ['reception', 'pickup', 'delivery', 'samples', 'crew_transport', 'other']],
+                        'date' => ['type' => 'string'],
+                        'time' => ['type' => 'string'],
+                        'pickup' => ['type' => 'string'],
+                        'delivery' => ['type' => 'string'],
+                        'cargo' => ['type' => 'string'],
+                        'summary' => ['type' => 'string'],
+                        'evidence' => ['type' => 'string'],
+                        'confidence' => ['type' => 'number', 'minimum' => 0, 'maximum' => 1],
+                    ],
+                    'required' => ['kind', 'date', 'time', 'pickup', 'delivery', 'cargo', 'summary', 'evidence', 'confidence'],
+                ],
+            ],
         ],
-        'required' => ['is_service', 'confidence', 'request_action', 'service_kind', 'existing_reference', 'client', 'vessel', 'eta', 'eta_time', 'etb', 'etb_time', 'etd', 'etd_time', 'port_stay', 'delivery_mode', 'operation_location', 'port', 'priority', 'cargo_summary', 'operational_notes', 'reception', 'transport'],
+        'required' => ['is_service', 'confidence', 'request_action', 'service_kind', 'existing_reference', 'client', 'vessel', 'eta', 'eta_time', 'etb', 'etb_time', 'etd', 'etd_time', 'port_stay', 'delivery_mode', 'operation_location', 'port', 'priority', 'cargo_summary', 'operational_notes', 'reception', 'transport', 'tasks'],
     ];
 
     $subject = clean_extracted_value((string) ($email['subject'] ?? ''));
@@ -496,6 +515,9 @@ CRITERIO OPERATIVO
 - Si se pide recibir primero y entregar después, usa service_kind "reception_and_delivery" y marca ambos bloques.
 - Toda mercancía física gestionada por Swiftport pasa por su almacén: Bluespace, Carrer del Roure, 2, 08820 El Prat de Llobregat, Barcelona. Una mercancía entrante genera reception.required true y esa dirección como reception.location, salvo que el correo indique una recogida directa que todavía debe terminar en dicho almacén.
 - Una retirada de muestras desde un buque es un trayecto buque → almacén. Las entregas posteriores de esas muestras a laboratorios o direcciones del cliente son trayectos adicionales del mismo expediente.
+- Devuelve en tasks una tarea independiente por cada acción ejecutable del hilo. Un mismo correo puede generar recepción, recogida y entrega, o varias entregas a destinos distintos.
+- Cada task debe indicar origen pickup y destino delivery. Para recepción en almacén, delivery será la dirección de Bluespace. Para entrega al buque, delivery será el buque, terminal, muelle o gabarra indicada.
+- evidence contiene una frase breve del correo que justifica la tarea. No crees una task sin evidencia en el mensaje.
 - Distingue solicitud nueva de actualización, cancelación o mensaje informativo. Solo usa request_action "new" cuando realmente haya que abrir un trabajo nuevo.
 - Una actualización de ETA, ETB, atraque, salida o gabarra de un servicio ya solicitado usa request_action "update". Es información operativa del mismo trabajo, no un servicio nuevo.
 - Una petición de precio sin orden de ejecutar es information y debe quedar para revisión.
@@ -625,6 +647,23 @@ function normalize_extracted_payload(array $payload): array
 {
     $reception = is_array($payload['reception'] ?? null) ? $payload['reception'] : [];
     $transport = is_array($payload['transport'] ?? null) ? $payload['transport'] : [];
+    $tasks = [];
+    foreach (is_array($payload['tasks'] ?? null) ? $payload['tasks'] : [] as $task) {
+        if (!is_array($task)) continue;
+        $kind = (string) ($task['kind'] ?? 'other');
+        if (!in_array($kind, ['reception', 'pickup', 'delivery', 'samples', 'crew_transport', 'other'], true)) $kind = 'other';
+        $tasks[] = [
+            'kind' => $kind,
+            'date' => trim((string) ($task['date'] ?? '')),
+            'time' => trim((string) ($task['time'] ?? '')),
+            'pickup' => clean_extracted_value((string) ($task['pickup'] ?? '')),
+            'delivery' => clean_extracted_value((string) ($task['delivery'] ?? '')),
+            'cargo' => clean_extracted_value((string) ($task['cargo'] ?? '')),
+            'summary' => clean_extracted_value((string) ($task['summary'] ?? '')),
+            'evidence' => clean_extracted_value((string) ($task['evidence'] ?? '')),
+            'confidence' => min(1.0, max(0.0, (float) ($task['confidence'] ?? 0))),
+        ];
+    }
     $isService = (bool) ($payload['is_service'] ?? false);
     $confidence = min(1.0, max(0.0, (float) ($payload['confidence'] ?? 0.0)));
     $hasSignals = trim((string) ($payload['client'] ?? '')) !== ''
@@ -674,6 +713,7 @@ function normalize_extracted_payload(array $payload): array
             'pickup' => clean_extracted_value((string) ($transport['pickup'] ?? '')),
             'delivery' => clean_extracted_value((string) ($transport['delivery'] ?? '')),
         ],
+        'tasks' => $tasks,
     ];
 }
 
