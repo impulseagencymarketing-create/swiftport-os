@@ -733,7 +733,8 @@ function service_required_data_complete(array $data): bool
     }
     $receptionRequired = !empty($data['reception']['required']);
     $transportRequired = !empty($data['transport']['required']);
-    if (!$receptionRequired && !$transportRequired) {
+    $tasks = is_array($data['tasks'] ?? null) ? $data['tasks'] : [];
+    if (!$receptionRequired && !$transportRequired && !$tasks) {
         return false;
     }
     if ($receptionRequired) {
@@ -754,6 +755,13 @@ function service_required_data_complete(array $data): bool
         if ($transportTime !== '' && !is_valid_service_time($transportTime)) {
             return false;
         }
+    }
+    foreach ($tasks as $task) {
+        if (!is_array($task)) return false;
+        $date = trim((string) ($task['date'] ?? ''));
+        $time = trim((string) ($task['time'] ?? ''));
+        if ($date !== '' && !is_valid_service_date($date)) return false;
+        if ($time !== '' && !is_valid_service_time($time)) return false;
     }
     foreach (['eta', 'etb', 'etd'] as $field) {
         $date = trim((string) ($data[$field] ?? ''));
@@ -975,6 +983,207 @@ function append_operational_note(string $current, string $incoming): string
     return trim($current) === '' ? $incoming : trim($current) . ' · ' . $incoming;
 }
 
+function extracted_task_service_name(array $task, array $data): string
+{
+    return match ((string) ($task['kind'] ?? 'other')) {
+        'reception' => 'Recepción',
+        'pickup' => 'Recogida',
+        'samples' => 'Recogida de muestras',
+        'crew_transport' => 'Transporte de tripulación',
+        'delivery' => transport_service_name($data),
+        default => 'Transporte',
+    };
+}
+
+function append_extracted_tasks_to_state(
+    array &$state,
+    string $caseRef,
+    int $mailId,
+    array $data
+): void {
+    $tasks = is_array($data['tasks'] ?? null) ? $data['tasks'] : [];
+    foreach ($tasks as $index => $task) {
+        if (!is_array($task)) continue;
+        $taskIndex = $index + 1;
+        $kind = (string) ($task['kind'] ?? 'other');
+        $date = trim((string) ($task['date'] ?? ''));
+        $time = trim((string) ($task['time'] ?? ''));
+        $validDate = is_valid_service_date($date);
+        $validTime = is_valid_service_time($time);
+        $validSlot = $validDate && $validTime;
+        $pickup = trim((string) ($task['pickup'] ?? ''));
+        $delivery = trim((string) ($task['delivery'] ?? ''));
+        $cargo = trim((string) ($task['cargo'] ?? ''));
+        $summary = trim((string) ($task['summary'] ?? ''));
+        $evidence = trim((string) ($task['evidence'] ?? ''));
+        $serviceName = extracted_task_service_name($task, $data);
+        $route = ($pickup !== '' ? $pickup : 'Origen por confirmar')
+            . ' → '
+            . ($delivery !== '' ? $delivery : 'Destino por confirmar');
+
+        if ($kind === 'reception') {
+            if (!$validDate) continue;
+            $eventId = 'EV-MAIL-' . $mailId . '-TASK-' . $taskIndex;
+            $exists = false;
+            foreach ($state['calendarEvents'] as $event) {
+                if (($event['id'] ?? '') === $eventId) {
+                    $exists = true;
+                    break;
+                }
+            }
+            if (!$exists) {
+                $state['calendarEvents'][] = [
+                    'id' => $eventId,
+                    'titulo' => $summary !== '' ? $summary : ($cargo !== '' ? $cargo : 'Recepción de mercancía'),
+                    'tipoServicio' => 'Recepción',
+                    'fecha' => $date,
+                    'inicio' => $validTime ? $time : '',
+                    'fin' => $validTime ? plus_one_hour($time) : '',
+                    'asignado' => 'Sin asignar',
+                    'expediente' => $caseRef,
+                    'transporte' => '',
+                    'color' => 'gray',
+                    'ruta' => $route,
+                    'sourceEmailId' => $mailId,
+                    'sourceTaskIndex' => $taskIndex,
+                    'evidence' => $evidence,
+                    'confidence' => (float) ($task['confidence'] ?? 0),
+                    'scheduleStatus' => $validSlot ? 'confirmed' : 'pending',
+                ];
+            }
+            continue;
+        }
+
+        $transportRef = '';
+        foreach ($state['transports'] as $transport) {
+            if (
+                (int) ($transport['sourceEmailId'] ?? 0) === $mailId
+                && (int) ($transport['sourceTaskIndex'] ?? 0) === $taskIndex
+            ) {
+                $transportRef = (string) ($transport['id'] ?? '');
+                break;
+            }
+        }
+        if ($transportRef === '') {
+            $transportRef = next_transport_ref($state['transports']);
+            $state['transports'][] = [
+                'id' => $transportRef,
+                'expediente' => $caseRef,
+                'ruta' => $route,
+                'hora' => $validSlot ? $date . ' · ' . $time . '–' . plus_one_hour($time) : 'Por programar',
+                'fecha' => $validDate ? $date : '',
+                'inicio' => $validTime ? $time : '',
+                'fin' => $validSlot ? plus_one_hour($time) : '',
+                'tipoServicio' => $serviceName,
+                'conductor' => 'Sin asignar',
+                'vehiculo' => 'Por asignar',
+                'estado' => 'Sin asignar',
+                'descripcion' => $summary !== '' ? $summary : $cargo,
+                'sourceEmailId' => $mailId,
+                'sourceTaskIndex' => $taskIndex,
+                'evidence' => $evidence,
+                'confidence' => (float) ($task['confidence'] ?? 0),
+            ];
+        }
+        if (!$validDate) continue;
+        $eventId = 'EV-MAIL-' . $mailId . '-TASK-' . $taskIndex;
+        $exists = false;
+        foreach ($state['calendarEvents'] as $event) {
+            if (($event['id'] ?? '') === $eventId) {
+                $exists = true;
+                break;
+            }
+        }
+        if (!$exists) {
+            $state['calendarEvents'][] = [
+                'id' => $eventId,
+                'titulo' => $summary !== '' ? $summary : $route,
+                'tipoServicio' => $serviceName,
+                'fecha' => $date,
+                'inicio' => $validTime ? $time : '',
+                'fin' => $validTime ? plus_one_hour($time) : '',
+                'asignado' => 'Sin asignar',
+                'expediente' => $caseRef,
+                'transporte' => $transportRef,
+                'color' => 'gray',
+                'ruta' => $route,
+                'sourceEmailId' => $mailId,
+                'sourceTaskIndex' => $taskIndex,
+                'evidence' => $evidence,
+                'confidence' => (float) ($task['confidence'] ?? 0),
+                'scheduleStatus' => $validSlot ? 'confirmed' : 'pending',
+            ];
+        }
+    }
+}
+
+function update_case_tasks_from_schedule(
+    array &$state,
+    string $caseRef,
+    int $mailId,
+    array $data
+): void {
+    $tasks = is_array($data['tasks'] ?? null) ? $data['tasks'] : [];
+    foreach ($tasks as $index => $task) {
+        if (!is_array($task)) continue;
+        $date = trim((string) ($task['date'] ?? ''));
+        $time = trim((string) ($task['time'] ?? ''));
+        if (!is_valid_service_date($date) || !is_valid_service_time($time)) continue;
+        $kind = (string) ($task['kind'] ?? 'other');
+        $serviceName = extracted_task_service_name($task, $data);
+        $pickup = trim((string) ($task['pickup'] ?? ''));
+        $delivery = trim((string) ($task['delivery'] ?? ''));
+        $route = ($pickup !== '' ? $pickup : 'Origen por confirmar')
+            . ' → '
+            . ($delivery !== '' ? $delivery : 'Destino por confirmar');
+
+        if ($kind === 'reception') {
+            foreach ($state['calendarEvents'] as &$event) {
+                if (($event['expediente'] ?? '') !== $caseRef || ($event['tipoServicio'] ?? '') !== 'Recepción') continue;
+                $event['fecha'] = $date;
+                $event['inicio'] = $time;
+                $event['fin'] = plus_one_hour($time);
+                $event['lastUpdateEmailId'] = $mailId;
+                break;
+            }
+            unset($event);
+            continue;
+        }
+
+        $transportRef = '';
+        foreach ($state['transports'] as &$transport) {
+            if (($transport['expediente'] ?? '') !== $caseRef) continue;
+            $sameType = mb_strtolower((string) ($transport['tipoServicio'] ?? '')) === mb_strtolower($serviceName);
+            $sameRoute = ($pickup !== '' && str_contains(mb_strtolower((string) ($transport['ruta'] ?? '')), mb_strtolower($pickup)))
+                || ($delivery !== '' && str_contains(mb_strtolower((string) ($transport['ruta'] ?? '')), mb_strtolower($delivery)));
+            if (!$sameType && !$sameRoute) continue;
+            $transportRef = (string) ($transport['id'] ?? '');
+            $transport['fecha'] = $date;
+            $transport['inicio'] = $time;
+            $transport['fin'] = plus_one_hour($time);
+            $transport['hora'] = $date . ' · ' . $time . '–' . plus_one_hour($time);
+            if ($pickup !== '' || $delivery !== '') $transport['ruta'] = $route;
+            $transport['lastUpdateEmailId'] = $mailId;
+            break;
+        }
+        unset($transport);
+        if ($transportRef === '') continue;
+        foreach ($state['calendarEvents'] as &$event) {
+            if (($event['transporte'] ?? '') !== $transportRef) continue;
+            $event['fecha'] = $date;
+            $event['inicio'] = $time;
+            $event['fin'] = plus_one_hour($time);
+            if ($pickup !== '' || $delivery !== '') {
+                $event['ruta'] = $route;
+                $event['titulo'] = trim((string) ($task['summary'] ?? '')) ?: $route;
+            }
+            $event['lastUpdateEmailId'] = $mailId;
+            break;
+        }
+        unset($event);
+    }
+}
+
 function find_correlated_case_ref(PDO $pdo, array $data, string $subject): string
 {
     $stateRow = $pdo->query('SELECT data FROM app_operational_state WHERE id = 1')->fetch();
@@ -1049,6 +1258,10 @@ function apply_thread_update_to_state(
     $services = is_array($case['servicios'] ?? null) ? $case['servicios'] : [];
     if (!empty($data['reception']['required'])) $services[] = 'Recepción';
     if (!empty($data['transport']['required'])) $services[] = 'Transporte';
+    foreach (is_array($data['tasks'] ?? null) ? $data['tasks'] : [] as $task) {
+        if (($task['kind'] ?? '') === 'reception') $services[] = 'Recepción';
+        else $services[] = 'Transporte';
+    }
     $case['servicios'] = array_values(array_unique($services));
     $sourceIds = is_array($case['sourceEmailIds'] ?? null) ? $case['sourceEmailIds'] : [];
     if (!empty($case['sourceEmailId'])) $sourceIds[] = (int) $case['sourceEmailId'];
@@ -1074,9 +1287,16 @@ function apply_thread_update_to_state(
     $case['timelineCustom'] = $timeline;
     $state['cases'][$caseIndex] = $case;
 
+    $hasExtractedTasks = !empty($data['tasks']) && is_array($data['tasks']);
+    if (($data['request_action'] ?? '') === 'new' && $hasExtractedTasks) {
+        append_extracted_tasks_to_state($state, $caseRef, $mailId, $data);
+    } elseif ($hasExtractedTasks) {
+        update_case_tasks_from_schedule($state, $caseRef, $mailId, $data);
+    }
+
     $receptionDate = trim((string) ($data['reception']['date'] ?? ''));
     $receptionTime = trim((string) ($data['reception']['time'] ?? ''));
-    if (!empty($data['reception']['required']) && $receptionDate !== '' && $receptionTime !== '') {
+    if (!$hasExtractedTasks && !empty($data['reception']['required']) && $receptionDate !== '' && $receptionTime !== '') {
         $start = $receptionTime;
         $found = false;
         foreach ($state['calendarEvents'] as &$event) {
@@ -1102,7 +1322,7 @@ function apply_thread_update_to_state(
 
     $updatesTransport = !empty($data['transport']['required'])
         || (port_call_data_has_schedule($data) && in_array('Transporte', $case['servicios'], true));
-    if ($updatesTransport) {
+    if (!$hasExtractedTasks && $updatesTransport) {
         $transportType = transport_service_name($data);
         [$transportDate, $transportTime] = port_call_operational_slot($data, 'transport');
         $start = $transportTime;
@@ -1263,6 +1483,11 @@ function apply_service_email(int $mailId, array $data, ?int $userId = null): str
         $services = [];
         if (!empty($data['reception']['required'])) $services[] = 'Recepción';
         if (!empty($data['transport']['required'])) $services[] = 'Transporte';
+        foreach (is_array($data['tasks'] ?? null) ? $data['tasks'] : [] as $task) {
+            if (($task['kind'] ?? '') === 'reception') $services[] = 'Recepción';
+            else $services[] = 'Transporte';
+        }
+        $services = array_values(array_unique($services));
         array_unshift($state['cases'], [
             'id' => $caseRef,
             'buque' => mb_strtoupper(trim((string) $data['vessel'])),
@@ -1301,7 +1526,8 @@ function apply_service_email(int $mailId, array $data, ?int $userId = null): str
                 'estado' => 'done',
             ]],
         ]);
-        if (!empty($data['reception']['required']) && $receptionDate !== '' && $receptionTime !== '') {
+        $hasExtractedTasks = !empty($data['tasks']) && is_array($data['tasks']);
+        if (!$hasExtractedTasks && !empty($data['reception']['required']) && $receptionDate !== '' && $receptionTime !== '') {
             $start = $receptionTime;
             $state['calendarEvents'][] = [
                 'id' => 'EV-MAIL-' . $mailId . '-R',
@@ -1317,7 +1543,7 @@ function apply_service_email(int $mailId, array $data, ?int $userId = null): str
                 'sourceEmailId' => $mailId,
             ];
         }
-        if (!empty($data['transport']['required'])) {
+        if (!$hasExtractedTasks && !empty($data['transport']['required'])) {
             $transportRef = next_transport_ref($state['transports']);
             $transportType = transport_service_name($data);
             [$transportDate, $transportTime] = port_call_operational_slot($data, 'transport');
@@ -1341,6 +1567,9 @@ function apply_service_email(int $mailId, array $data, ?int $userId = null): str
                     'color' => 'gray', 'sourceEmailId' => $mailId,
                 ];
             }
+        }
+        if ($hasExtractedTasks) {
+            append_extracted_tasks_to_state($state, $caseRef, $mailId, $data);
         }
         $encoded = json_encode($state, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
         $save = $pdo->prepare(

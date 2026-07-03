@@ -119,7 +119,8 @@ function find_correlated_case_ref_in_state(array $cases, array $data, string $su
         $caseReference = port_call_token((string) ($case['referenciaCliente'] ?? ''));
         $distance = port_call_date_distance($incomingEta, port_call_case_eta($case));
 
-        if ($distance !== null && $distance > 21) continue;
+        $sameReference = $incomingReference !== '' && $incomingReference === $caseReference;
+        if ($distance !== null && $distance > 2 && !$sameReference) continue;
         if (
             port_call_known_value($incomingPort)
             && port_call_known_value($casePort)
@@ -136,8 +137,8 @@ function find_correlated_case_ref_in_state(array $cases, array $data, string $su
         if ($incomingClient !== '' && $incomingClient === $caseClient) $score += 30;
         if ($caseClient === 'LIMANI') $score += 20;
         if (port_call_known_value($incomingPort) && $incomingPort === $casePort) $score += 20;
-        if ($incomingReference !== '' && $incomingReference === $caseReference) $score += 80;
-        if ($distance !== null) $score += $distance <= 2 ? 30 : 10;
+        if ($sameReference) $score += 80;
+        if ($distance !== null && $distance <= 2) $score += 30;
         $candidates[] = ['id' => (string) ($case['id'] ?? ''), 'score' => $score];
     }
 

@@ -44,6 +44,11 @@ function rebuild_data_matches_period(array $data, string $start, string $end): b
     foreach ($dates as $date) {
         if (rebuild_date_in_period($date, $start, $end)) return true;
     }
+    foreach (is_array($data['tasks'] ?? null) ? $data['tasks'] : [] as $task) {
+        if (is_array($task) && rebuild_date_in_period((string) ($task['date'] ?? ''), $start, $end)) {
+            return true;
+        }
+    }
     return false;
 }
 

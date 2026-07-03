@@ -91,6 +91,65 @@ expect_same(
 );
 expect_same('TORC', subject_target_vessel('RE: TORC - GABARRA - BARCELONA'), 'GABARRA nunca debe sustituir al buque TORC.');
 expect_same('Transporte a gabarra', transport_service_name(['delivery_mode' => 'barge']), 'La tarea debe mostrar Transporte a gabarra.');
+expect_same(
+    '',
+    find_correlated_case_ref_in_state([
+        ['id' => 'SW-OLD-CALL', 'buque' => 'TORC', 'cliente' => 'LIMANI', 'puerto' => 'BARCELONA', 'eta' => '2026-06-20', 'estado' => 'En curso'],
+    ], [
+        'vessel' => 'TORC', 'client' => 'LIMANI', 'port' => 'BARCELONA', 'eta' => '2026-06-25', 'existing_reference' => '',
+    ]),
+    'Dos escalas del mismo buque separadas por más de dos días no deben unirse.'
+);
+
+$taskState = ['transports' => [], 'calendarEvents' => []];
+append_extracted_tasks_to_state($taskState, 'SW-TASKS', 77, [
+    'delivery_mode' => 'vessel',
+    'tasks' => [
+        [
+            'kind' => 'reception', 'date' => '2026-06-03', 'time' => '10:00',
+            'pickup' => 'Proveedor', 'delivery' => 'Bluespace', 'cargo' => '2 pallets',
+            'summary' => 'Recepción de dos pallets', 'evidence' => 'Delivery on June 3',
+            'confidence' => 0.96,
+        ],
+        [
+            'kind' => 'delivery', 'date' => '2026-06-04', 'time' => '12:30',
+            'pickup' => 'Bluespace', 'delivery' => 'MV TEST', 'cargo' => '2 pallets',
+            'summary' => 'Entrega a bordo', 'evidence' => 'Deliver on board',
+            'confidence' => 0.97,
+        ],
+        [
+            'kind' => 'samples', 'date' => '', 'time' => '',
+            'pickup' => 'MV TEST', 'delivery' => 'Bluespace', 'cargo' => 'Muestras',
+            'summary' => 'Recoger muestras', 'evidence' => 'Collect samples',
+            'confidence' => 0.95,
+        ],
+    ],
+]);
+expect_same(2, count($taskState['transports']), 'Cada trayecto debe crear un transporte independiente.');
+expect_same(2, count($taskState['calendarEvents']), 'Solo las tareas con fecha y hora exactas deben entrar al calendario.');
+expect_same('Por programar', $taskState['transports'][1]['hora'], 'Una tarea sin hora debe mantenerse pendiente sin inventar horario.');
+append_extracted_tasks_to_state($taskState, 'SW-TASKS', 77, [
+    'delivery_mode' => 'vessel',
+    'tasks' => [
+        [
+            'kind' => 'reception', 'date' => '2026-06-03', 'time' => '10:00',
+            'pickup' => 'Proveedor', 'delivery' => 'Bluespace', 'cargo' => '',
+            'summary' => '', 'evidence' => '', 'confidence' => 0.96,
+        ],
+        [
+            'kind' => 'delivery', 'date' => '2026-06-04', 'time' => '12:30',
+            'pickup' => 'Bluespace', 'delivery' => 'MV TEST', 'cargo' => '',
+            'summary' => '', 'evidence' => '', 'confidence' => 0.97,
+        ],
+        [
+            'kind' => 'samples', 'date' => '', 'time' => '',
+            'pickup' => 'MV TEST', 'delivery' => 'Bluespace', 'cargo' => '',
+            'summary' => '', 'evidence' => '', 'confidence' => 0.95,
+        ],
+    ],
+]);
+expect_same(2, count($taskState['transports']), 'Reprocesar el mismo correo no debe duplicar transportes.');
+expect_same(2, count($taskState['calendarEvents']), 'Reprocesar el mismo correo no debe duplicar eventos.');
 $scheduleFallback = extract_port_call_fallbacks(
     "GC SAPPHIRE prospects\nETA: 04/07/2026 06:30\nETB: 04/07/2026 09:00\nETD: 05/07/2026 18:00\nPort stay: 36 hours",
     '2026-07-02 10:43:00'

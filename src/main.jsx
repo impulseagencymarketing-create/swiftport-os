@@ -480,7 +480,7 @@ function Calendario({events,team,cases,transports,providers,warehouseEntries,sav
   const hours=Array.from({length:16},(_,index)=>index+6);
   const dayLabel=new Intl.DateTimeFormat('es-ES',{weekday:'short',day:'numeric',month:'short'});
   const newEvent=()=>setEditing({id:'EV-'+Date.now(),titulo:'',tipoServicio:'Recepción',fecha:isoDate(days[0]),inicio:'09:00',fin:'10:00',asignado:'Sin asignar',expediente:'',transporte:'',color:'gray'});
-  const visibleEvents=mineOnly?events.filter(event=>event.asignado===currentUser.fullName):events;
+  const visibleEvents=(mineOnly?events.filter(event=>event.asignado===currentUser.fullName):events).filter(event=>event.inicio);
   return <><section className="calendar-toolbar"><div className="calendar-nav"><button className="button tertiary" onClick={()=>setWeekStart(addDays(weekStart,-7))}>‹</button><button className="button tertiary" onClick={()=>setWeekStart(startOfWeek(new Date()))}>Hoy</button><button className="button tertiary" onClick={()=>setWeekStart(addDays(weekStart,7))}>›</button><h2>{days[0].toLocaleDateString('es-ES',{day:'numeric',month:'long'})} – {days[6].toLocaleDateString('es-ES',{day:'numeric',month:'long',year:'numeric'})}</h2></div><div className="calendar-actions">{currentUser.role==='operations'&&<button className={'button '+(mineOnly?'secondary':'tertiary')} onClick={()=>setMineOnly(!mineOnly)}><UserRound/> Mis servicios</button>}<button className="button primary" onClick={newEvent}><Plus/> Nueva tarea</button></div></section><section className="calendar-shell panel"><div className="calendar-scroll"><div className="calendar-head"><span className="calendar-zone">GMT+2</span>{days.map(day=><div key={isoDate(day)} className={isoDate(day)===isoDate(new Date())?'today':''}><b>{dayLabel.format(day).replace('.','')}</b></div>)}</div><div className="calendar-body"><div className="calendar-hours">{hours.map(hour=><span key={hour}>{String(hour).padStart(2,'0')}:00</span>)}</div>{days.map(day=><div className="calendar-day" key={isoDate(day)}>{hours.map(hour=><i className="calendar-line" key={hour}/>)}
     {visibleEvents.filter(event=>event.fecha===isoDate(day)).map(event=>{const [startHour,startMinute]=event.inicio.split(':').map(Number);const [endHour,endMinute]=event.fin.split(':').map(Number);const top=((startHour*60+startMinute)-360)/60*64;const height=Math.max(108,((endHour*60+endMinute)-(startHour*60+startMinute))/60*64);return <article key={event.id} className={'calendar-event '+event.color} style={{top,height}}><button className="calendar-event-open" onClick={()=>setEditing(event)}><CalendarEventContent event={event} cases={cases}/></button><select aria-label={'Asignar conductor a '+(event.titulo||event.id)} value={event.asignado||'Sin asignar'} onChange={change=>saveEvent({...event,asignado:change.target.value})}><option>Sin asignar</option>{team.map(member=><option key={member.id} value={member.fullName}>{member.fullName}</option>)}</select></article>})}</div>)}</div></div></section>{editing&&<CalendarEventModal item={editing} team={team} cases={cases} transports={transports} providers={providers} close={()=>setEditing(null)} submit={item=>{saveEvent(item);setEditing(null)}} openCase={openCase}/>}</>;
 }
@@ -722,7 +722,7 @@ function Correos({csrfToken,notify,openCase,reloadOperational,canRebuild}){
   const rebuild=async()=>{
     setRebuilding(true);setError('');setRebuildProgress('Preparando reconstrucción…');
     try{
-      const period={start:'2026-06-01',end:'2026-07-01'};
+      const period={start:'2026-06-01',end:'2026-07-06'};
       const preview=await api('/api/admin/rebuild.php',{method:'POST',headers:{'X-CSRF-Token':csrfToken},body:JSON.stringify({action:'preview_period',...period})});
       if(!window.confirm(`Se borrarán ${preview.caseCount} expedientes, incluidos los completados, y toda su operativa. Se guardará una copia de seguridad y se reinterpretarán ${preview.mailCount} correos de junio. ¿Continuar?`)){setRebuildProgress('');return}
       const reset=await api('/api/admin/rebuild.php',{method:'POST',headers:{'X-CSRF-Token':csrfToken},body:JSON.stringify({action:'reset_period',...period})});
@@ -743,6 +743,19 @@ function Correos({csrfToken,notify,openCase,reloadOperational,canRebuild}){
     }catch(reason){setError(reason.message)}
     finally{setRebuilding(false)}
   };
+  useEffect(()=>{
+    if(!canRebuild)return;
+    const host=document.querySelector('.mail-hero-actions');
+    if(!host)return;
+    const button=document.createElement('button');
+    button.type='button';
+    button.className='button secondary';
+    button.disabled=processing||rebuilding;
+    button.textContent=rebuilding?(rebuildProgress||'Creando prueba automática…'):'Crear todo automáticamente';
+    button.onclick=rebuild;
+    host.prepend(button);
+    return()=>button.remove();
+  },[canRebuild,processing,rebuilding,rebuildProgress]);
   const ignore=async item=>{
     try{await api('/api/mail/review.php',{method:'PUT',headers:{'X-CSRF-Token':csrfToken},body:JSON.stringify({id:item.id,action:'ignore'})});notify('Correo descartado');load(filter)}
     catch(reason){setError(reason.message)}
