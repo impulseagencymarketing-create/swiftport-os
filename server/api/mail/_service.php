@@ -1707,10 +1707,7 @@ function reconcile_existing_mail_threads(PDO $pdo): array
 
 function automatic_mail_publish_enabled(PDO $pdo): bool
 {
-    $row = $pdo->query('SELECT data FROM app_planning_state WHERE id = 1')->fetch();
-    if (!$row) return false;
-    $data = json_decode((string) $row['data'], true);
-    return is_array($data) && ($data['status'] ?? '') === 'live';
+    return false;
 }
 
 function process_mailboxes(string $triggerType): array
