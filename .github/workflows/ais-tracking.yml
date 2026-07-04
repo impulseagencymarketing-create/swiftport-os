@@ -1,0 +1,32 @@
+name: Seguimiento AIS gratuito
+
+on:
+  schedule:
+    - cron: "7,37 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: swiftport-ais-tracking
+  cancel-in-progress: true
+
+jobs:
+  track-vessels:
+    name: Actualizar posiciones de buques
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Descargar el código
+        uses: actions/checkout@v5
+      - name: Preparar Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - name: Consultar AISStream
+        env:
+          AISSTREAM_API_KEY: ${{ secrets.AISSTREAM_API_KEY }}
+          CRON_TOKEN: ${{ secrets.APP_SETUP_TOKEN }}
+          APP_URL: https://app.swiftportlogistic.com
+        run: node scripts/aisstream-sync.mjs

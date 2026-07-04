@@ -8,8 +8,20 @@ $user = require_auth();
 if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'GET') {
     $statement = db()->query('SELECT data, updated_at FROM app_operational_state WHERE id = 1');
     $row = $statement->fetch();
+    $data = $row ? json_decode($row['data'], true, 512, JSON_THROW_ON_ERROR) : null;
+    if (is_array($data) && is_array($data['cases'] ?? null)) {
+        $positions = [];
+        foreach (db()->query('SELECT case_ref, data FROM app_ais_positions')->fetchAll() as $position) {
+            $positions[(string) $position['case_ref']] = json_decode((string) $position['data'], true);
+        }
+        foreach ($data['cases'] as &$case) {
+            $caseRef = (string) ($case['id'] ?? '');
+            if (isset($positions[$caseRef])) $case['aisTracking'] = $positions[$caseRef];
+        }
+        unset($case);
+    }
     respond([
-        'data' => $row ? json_decode($row['data'], true, 512, JSON_THROW_ON_ERROR) : null,
+        'data' => $data,
         'updatedAt' => $row['updated_at'] ?? null,
     ]);
 }

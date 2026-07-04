@@ -434,6 +434,8 @@ function call_openai_extraction(string $text, array $email): array
             'existing_reference' => ['type' => 'string'],
             'client' => ['type' => 'string'],
             'vessel' => ['type' => 'string'],
+            'imo' => ['type' => 'string'],
+            'mmsi' => ['type' => 'string'],
             'eta' => ['type' => 'string'],
             'eta_time' => ['type' => 'string'],
             'etb' => ['type' => 'string'],
@@ -490,7 +492,7 @@ function call_openai_extraction(string $text, array $email): array
                 ],
             ],
         ],
-        'required' => ['is_service', 'confidence', 'request_action', 'service_kind', 'existing_reference', 'client', 'vessel', 'eta', 'eta_time', 'etb', 'etb_time', 'etd', 'etd_time', 'port_stay', 'delivery_mode', 'operation_location', 'port', 'priority', 'cargo_summary', 'operational_notes', 'reception', 'transport', 'tasks'],
+        'required' => ['is_service', 'confidence', 'request_action', 'service_kind', 'existing_reference', 'client', 'vessel', 'imo', 'mmsi', 'eta', 'eta_time', 'etb', 'etb_time', 'etd', 'etd_time', 'port_stay', 'delivery_mode', 'operation_location', 'port', 'priority', 'cargo_summary', 'operational_notes', 'reception', 'transport', 'tasks'],
     ];
 
     $subject = clean_extracted_value((string) ($email['subject'] ?? ''));
@@ -524,6 +526,7 @@ CRITERIO OPERATIVO
 
 EXTRACCIÓN
 - Extrae el buque aunque aparezca como MV, M/V, VSL, vessel, ship o en el asunto.
+- Extrae IMO (7 dÃ­gitos) y MMSI (9 dÃ­gitos) cuando aparezcan. No los inventes ni confundas con pedidos, telÃ©fonos o referencias.
 - En asuntos del tipo "TORC - GABARRA - BARCELONA", el buque objetivo es TORC; GABARRA/BARGE describe la operativa y BARCELONA es el puerto.
 - GABARRA/BARGE nunca es el buque ni el cliente. El buque sigue siendo el indicado en el asunto o cuerpo. Para una entrega mediante gabarra usa delivery_mode "barge", transport.required true y operation_location con el muelle, punto de carga, nombre o ubicación de la gabarra.
 - Una entrega directa al buque usa delivery_mode "vessel". Una entrega en terminal o muelle para colaboradores usa "shore". La tarea debe llamarse conceptualmente "Transporte a gabarra" o "Transporte a buque", sin sustituir el nombre del buque.
@@ -686,6 +689,8 @@ function normalize_extracted_payload(array $payload): array
         'existing_reference' => mb_strtoupper(clean_extracted_value((string) ($payload['existing_reference'] ?? ''))),
         'client' => clean_extracted_value((string) ($payload['client'] ?? '')),
         'vessel' => port_call_vessel_name(clean_extracted_value((string) ($payload['vessel'] ?? ''))),
+        'imo' => preg_replace('/\D/', '', (string) ($payload['imo'] ?? '')),
+        'mmsi' => preg_replace('/\D/', '', (string) ($payload['mmsi'] ?? '')),
         'eta' => trim((string) ($payload['eta'] ?? '')),
         'eta_time' => trim((string) ($payload['eta_time'] ?? '')),
         'etb' => trim((string) ($payload['etb'] ?? '')),
@@ -786,6 +791,8 @@ function extract_local_service(array $email): array
             'existing_reference' => '',
             'client' => clean_extracted_value((string) ($email['sender_name'] ?? '')),
             'vessel' => '',
+            'imo' => '',
+            'mmsi' => '',
             'eta' => '',
             'eta_time' => '',
             'etb' => '',
@@ -859,6 +866,8 @@ function extract_local_service(array $email): array
             'existing_reference' => '',
             'client' => clean_extracted_value((string) ($email['sender_name'] ?? '')),
             'vessel' => '',
+            'imo' => '',
+            'mmsi' => '',
             'eta' => '',
             'eta_time' => '',
             'etb' => '',
@@ -1216,6 +1225,12 @@ function apply_thread_update_to_state(
     if ($subjectVessel !== '') {
         $case['buque'] = $subjectVessel;
     }
+    if (strlen((string) ($data['imo'] ?? '')) === 7) {
+        $case['imo'] = (string) $data['imo'];
+    }
+    if (strlen((string) ($data['mmsi'] ?? '')) === 9) {
+        $case['mmsi'] = (string) $data['mmsi'];
+    }
     if (trim((string) ($data['eta'] ?? '')) !== '') {
         $case['eta'] = (string) $data['eta'];
     }
@@ -1491,6 +1506,8 @@ function apply_service_email(int $mailId, array $data, ?int $userId = null): str
         array_unshift($state['cases'], [
             'id' => $caseRef,
             'buque' => mb_strtoupper(trim((string) $data['vessel'])),
+            'imo' => strlen((string) ($data['imo'] ?? '')) === 7 ? (string) $data['imo'] : '',
+            'mmsi' => strlen((string) ($data['mmsi'] ?? '')) === 9 ? (string) $data['mmsi'] : '',
             'cliente' => trim((string) ($data['client'] ?: 'Por identificar')),
             'puerto' => mb_strtoupper(trim((string) ($data['port'] ?: 'POR CONFIRMAR'))),
             'eta' => trim((string) ($data['eta'] ?? '')) !== '' ? (string) $data['eta'] : 'Por confirmar',

@@ -463,6 +463,19 @@ function SectionHeader({title,subtitle,action}){return <div className="section-h
 function Empty({text}){return <div className="empty"><Search/><b>Sin resultados</b><p>{text}</p></div>}
 function PortCallPanel({item}){const schedule=portCallSchedule(item);const destination=item.deliveryMode==='barge'?'TRANSPORTE A GABARRA':item.deliveryMode==='vessel'?'TRANSPORTE A BUQUE':'';return <section className="port-call-panel"><div><Ship/><span><small>LLEGADA · ETA</small><b>{schedule.eta}</b></span></div><div><MapPin/><span><small>ATRAQUE · ETB</small><b>{schedule.etb}</b></span></div><div><Clock3/><span><small>SALIDA · ETD</small><b>{schedule.etd}</b></span></div><div><Timer/><span><small>ESTANCIA EN PUERTO</small><b>{item.portStay||'POR CONFIRMAR'}</b></span></div>{destination&&<footer><Truck/><span><small>DESTINO OPERATIVO</small><b>{destination}{item.operationLocation?` · ${item.operationLocation}`:''}</b></span></footer>}</section>}
 
+function AisTrackingPanel({item}){
+  const tracking=item.aisTracking;
+  if(!item.mmsi)return <section className="ais-panel ais-empty"><Navigation/><div><small>SEGUIMIENTO AIS GRATUITO</small><b>Añade el MMSI para localizar el buque</b><p>Edita el expediente e introduce los 9 dígitos del MMSI.</p></div></section>;
+  if(!tracking)return <section className="ais-panel ais-empty"><Navigation/><div><small>SEGUIMIENTO AIS GRATUITO · MMSI {item.mmsi}</small><b>Esperando la primera señal</b><p>La posición se comprobará automáticamente cada 30 minutos.</p></div></section>;
+  const lat=Number(tracking.latitude),lon=Number(tracking.longitude);
+  const delta=.12;
+  const bbox=[lon-delta,lat-delta,lon+delta,lat+delta].join(',');
+  const map=`https://www.openstreetmap.org/export/embed.html?bbox=${encodeURIComponent(bbox)}&layer=mapnik&marker=${encodeURIComponent(lat+','+lon)}`;
+  const last=tracking.sourceTimestamp||tracking.receivedAt;
+  const stale=last&&Date.now()-new Date(last).getTime()>2*60*60*1000;
+  return <section className="ais-panel"><div className="ais-map"><iframe title={'Posición AIS de '+item.buque} src={map} loading="lazy"/></div><div className="ais-info"><span className="overline"><Navigation/> AISSTREAM · PRUEBA GRATUITA</span><div className="ais-status"><i className={stale?'stale':tracking.status==='Atraque probable'?'moored':'live'}/><span><small>ESTADO ESTIMADO</small><b>{stale?'Señal sin actualizar':tracking.status}</b></span></div><div className="ais-metrics"><span><small>DISTANCIA AL PUERTO</small><b>{tracking.distanceToPortNm==null?'No calculada':tracking.distanceToPortNm+' mn'}</b></span><span><small>VELOCIDAD</small><b>{tracking.speed} kn</b></span><span><small>RUMBO</small><b>{tracking.course}°</b></span><span><small>ÚLTIMA SEÑAL</small><b>{last?new Date(last).toLocaleString('es-ES'):'—'}</b></span></div><p>Orientativo: confirma el atraque con el consignatario o la autoridad portuaria.</p></div></section>;
+}
+
 const isoDate=date=>date.toISOString().slice(0,10);
 const addDays=(date,days)=>{const next=new Date(date);next.setDate(next.getDate()+days);return next};
 const startOfWeek=date=>{const value=new Date(date);value.setHours(12,0,0,0);return addDays(value,-((value.getDay()+6)%7))};
@@ -618,7 +631,7 @@ function ActualTimeline({item}){
 function OperationChecklist({item}){
   const flow=operationFlow(item);
   const current=nextOperationStep(item);
-  return <section className="operation-checklist"><div><b>FLUJO OPERATIVO</b><small>Siempre en el mismo orden</small></div><ol>{OPERATION_STEPS.map((step,index)=><li key={step.key} className={flow[step.key]?'done':current?.key===step.key?'current':''}><span>{flow[step.key]?<CheckCircle2/>:index+1}</span><b>{step.title}</b></li>)}<li className={flow.billingReady?'done':''}><span>{flow.billingReady?<CheckCircle2/>:OPERATION_STEPS.length+1}</span><b>Listo para facturar</b></li></ol></section>;
+  return <><AisTrackingPanel item={item}/><section className="operation-checklist"><div><b>FLUJO OPERATIVO</b><small>Siempre en el mismo orden</small></div><ol>{OPERATION_STEPS.map((step,index)=><li key={step.key} className={flow[step.key]?'done':current?.key===step.key?'current':''}><span>{flow[step.key]?<CheckCircle2/>:index+1}</span><b>{step.title}</b></li>)}<li className={flow.billingReady?'done':''}><span>{flow.billingReady?<CheckCircle2/>:OPERATION_STEPS.length+1}</span><b>Listo para facturar</b></li></ol></section></>;
 }
 
 function OperationStepModal({item,warehouseEntries,transports,csrfToken,close,submit}){
@@ -789,7 +802,7 @@ function MailTaskProposal({tasks}){
 function MailReviewModal({item,close,submit}){
   const base=item.extracted||{};
   const [form,setForm]=useState({
-    client:base.client||'',vessel:base.vessel||'',eta:base.eta||'',eta_time:base.eta_time||'',etb:base.etb||'',etb_time:base.etb_time||'',etd:base.etd||'',etd_time:base.etd_time||'',port_stay:base.port_stay||'',delivery_mode:base.delivery_mode||'unknown',operation_location:base.operation_location||'',port:base.port||'',priority:base.priority||'Media',cargo_summary:base.cargo_summary||'',
+    client:base.client||'',vessel:base.vessel||'',imo:base.imo||'',mmsi:base.mmsi||'',eta:base.eta||'',eta_time:base.eta_time||'',etb:base.etb||'',etb_time:base.etb_time||'',etd:base.etd||'',etd_time:base.etd_time||'',port_stay:base.port_stay||'',delivery_mode:base.delivery_mode||'unknown',operation_location:base.operation_location||'',port:base.port||'',priority:base.priority||'Media',cargo_summary:base.cargo_summary||'',
     operational_notes:base.operational_notes||'',existing_reference:base.existing_reference||'',request_action:'new',service_kind:base.service_kind||'other',
     reception:{required:Boolean(base.reception?.required),date:base.reception?.date||'',time:base.reception?.time||'',location:base.reception?.location||''},
     transport:{required:Boolean(base.transport?.required),date:base.transport?.date||'',time:base.transport?.time||'',pickup:base.transport?.pickup||'',delivery:base.transport?.delivery||''},
@@ -815,6 +828,20 @@ function Usuarios({csrfToken,notify,onPreview,onUsersChanged}){
 }
 
 function CaseEditModal({item,close,submit}){
+  const call=item.portCall||{};
+  const legacyEta=String(item.eta||'').match(/^20\d{2}-\d{2}-\d{2}/)?.[0]||'';
+  const [form,setForm]=useState({...item,imo:item.imo||'',mmsi:item.mmsi||'',servicios:(item.servicios||[]).join(', '),etaDate:call.etaDate||legacyEta,etaTime:call.etaTime||'',etbDate:call.etbDate||'',etbTime:call.etbTime||'',etdDate:call.etdDate||'',etdTime:call.etdTime||''});
+  const update=event=>setForm({...form,[event.target.name]:event.target.value});
+  const save=event=>{
+    event.preventDefault();
+    const mmsi=String(form.mmsi||'').replace(/\D/g,'');
+    if(mmsi&&mmsi.length!==9)return;
+    submit({...item,...form,imo:String(form.imo||'').replace(/\D/g,''),mmsi,eta:form.etaDate||'Por confirmar',portCall:{etaDate:form.etaDate,etaTime:form.etaTime,etbDate:form.etbDate,etbTime:form.etbTime,etdDate:form.etdDate,etdTime:form.etdTime,updatedAt:new Date().toISOString()},bultos:Number(form.bultos)||0,progreso:Math.max(0,Math.min(100,Number(form.progreso)||0)),servicios:form.servicios.split(',').map(value=>value.trim()).filter(Boolean)});
+  };
+  return <div className="modal-backdrop" onMouseDown={event=>{if(event.target===event.currentTarget)close()}}><section className="modal" role="dialog" aria-modal="true"><div className="modal-head"><div><span className="overline">Expediente {item.id}</span><h2>Editar información</h2><p>Los cambios se compartirán con todos los usuarios.</p></div><button className="icon-button" onClick={close}><X/></button></div><form onSubmit={save}><label className="field"><span>Buque</span><input name="buque" value={form.buque} onChange={update} required/></label><label className="field"><span>Cliente</span><select name="cliente" value={form.cliente} onChange={update}>{clientNames.map(name=><option key={name}>{name}</option>)}</select></label><label className="field"><span>Puerto</span><input name="puerto" value={form.puerto} onChange={update} required/></label><label className="field"><span>IMO</span><input name="imo" inputMode="numeric" value={form.imo} onChange={update} placeholder="7 dígitos"/></label><label className="field"><span>MMSI para seguimiento AIS</span><input name="mmsi" inputMode="numeric" pattern="\d{9}" value={form.mmsi} onChange={update} placeholder="9 dígitos"/></label><label className="field"><span>ETA · fecha</span><input name="etaDate" type="date" value={form.etaDate} onChange={update}/></label><label className="field"><span>ETA · hora</span><input name="etaTime" type="time" value={form.etaTime} onChange={update}/></label><label className="field"><span>ETB · fecha</span><input name="etbDate" type="date" value={form.etbDate} onChange={update}/></label><label className="field"><span>ETB · hora</span><input name="etbTime" type="time" value={form.etbTime} onChange={update}/></label><label className="field"><span>ETD · fecha</span><input name="etdDate" type="date" value={form.etdDate} onChange={update}/></label><label className="field"><span>ETD · hora</span><input name="etdTime" type="time" value={form.etdTime} onChange={update}/></label><label className="field"><span>Estado</span><select name="estado" value={form.estado} onChange={update}>{['Nuevo','Planificado','En curso','Bloqueado','Completado'].map(value=><option key={value}>{value}</option>)}</select></label><label className="field"><span>Prioridad</span><select name="prioridad" value={form.prioridad} onChange={update}>{['Baja','Media','Alta','Urgente'].map(value=><option key={value}>{value}</option>)}</select></label><label className="field"><span>Bultos</span><input name="bultos" type="number" min="0" value={form.bultos} onChange={update}/></label><label className="field"><span>Peso</span><input name="peso" value={form.peso} onChange={update}/></label><label className="field"><span>Progreso (%)</span><input name="progreso" type="number" min="0" max="100" value={form.progreso} onChange={update}/></label><label className="field"><span>Siguiente acción</span><input name="siguiente" value={form.siguiente} onChange={update}/></label><label className="field wide"><span>Servicios (separados por comas)</span><input name="servicios" value={form.servicios} onChange={update}/></label><div className="modal-actions wide"><button type="button" className="button tertiary" onClick={close}>Cancelar</button><button className="button primary"><Save/> Guardar cambios</button></div></form></section></div>;
+}
+
+function LegacyCaseEditModal({item,close,submit}){
   const call=item.portCall||{};
   const legacyEta=String(item.eta||'').match(/^20\d{2}-\d{2}-\d{2}/)?.[0]||'';
   const [form,setForm]=useState({...item,servicios:item.servicios.join(', '),etaDate:call.etaDate||legacyEta,etaTime:call.etaTime||'',etbDate:call.etbDate||'',etbTime:call.etbTime||'',etdDate:call.etdDate||'',etdTime:call.etdTime||''});
