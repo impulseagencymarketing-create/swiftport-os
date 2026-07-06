@@ -169,6 +169,73 @@ async function uploadAttachment(file,category,csrfToken){
   if(!response.ok)throw new Error(body.error||`No se pudo subir ${file.name}.`);
   return body.file;
 }
+
+const bytesJoin=parts=>{
+  const size=parts.reduce((total,part)=>total+part.length,0);
+  const result=new Uint8Array(size);
+  let offset=0;
+  parts.forEach(part=>{result.set(part,offset);offset+=part.length});
+  return result;
+};
+
+const imageFromFile=file=>new Promise((resolve,reject)=>{
+  const url=URL.createObjectURL(file);
+  const image=new Image();
+  image.onload=()=>{URL.revokeObjectURL(url);resolve(image)};
+  image.onerror=()=>{URL.revokeObjectURL(url);reject(new Error('No se pudo leer la fotografía del POD.'))};
+  image.src=url;
+});
+
+async function scannedPodPdf(file,caseId){
+  const source=await imageFromFile(file);
+  const maximum=2200;
+  const scale=Math.min(1,maximum/Math.max(source.naturalWidth,source.naturalHeight));
+  const width=Math.max(1,Math.round(source.naturalWidth*scale));
+  const height=Math.max(1,Math.round(source.naturalHeight*scale));
+  const canvas=document.createElement('canvas');
+  canvas.width=width;
+  canvas.height=height;
+  const context=canvas.getContext('2d',{alpha:false});
+  context.fillStyle='#fff';
+  context.fillRect(0,0,width,height);
+  context.filter='grayscale(1) contrast(1.28) brightness(1.08)';
+  context.drawImage(source,0,0,width,height);
+  const jpeg=await new Promise((resolve,reject)=>canvas.toBlob(blob=>blob?resolve(blob):reject(new Error('No se pudo preparar el escaneo.')),'image/jpeg',.88));
+  const jpegBytes=new Uint8Array(await jpeg.arrayBuffer());
+  const encoder=new TextEncoder();
+  const portrait=height>=width;
+  const pageWidth=portrait?595:842;
+  const pageHeight=portrait?842:595;
+  const margin=24;
+  const ratio=Math.min((pageWidth-margin*2)/width,(pageHeight-margin*2)/height);
+  const drawWidth=Math.round(width*ratio*100)/100;
+  const drawHeight=Math.round(height*ratio*100)/100;
+  const left=Math.round((pageWidth-drawWidth)/2*100)/100;
+  const bottom=Math.round((pageHeight-drawHeight)/2*100)/100;
+  const content=encoder.encode(`q\n${drawWidth} 0 0 ${drawHeight} ${left} ${bottom} cm\n/Scan Do\nQ\n`);
+  const objects=[
+    encoder.encode('<< /Type /Catalog /Pages 2 0 R >>'),
+    encoder.encode('<< /Type /Pages /Kids [3 0 R] /Count 1 >>'),
+    encoder.encode(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${pageWidth} ${pageHeight}] /Resources << /XObject << /Scan 4 0 R >> >> /Contents 5 0 R >>`),
+    bytesJoin([encoder.encode(`<< /Type /XObject /Subtype /Image /Width ${width} /Height ${height} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${jpegBytes.length} >>\nstream\n`),jpegBytes,encoder.encode('\nendstream')]),
+    bytesJoin([encoder.encode(`<< /Length ${content.length} >>\nstream\n`),content,encoder.encode('endstream')])
+  ];
+  const parts=[encoder.encode('%PDF-1.4\n%\xE2\xE3\xCF\xD3\n')];
+  const offsets=[0];
+  let position=parts[0].length;
+  objects.forEach((object,index)=>{
+    offsets.push(position);
+    const wrapped=bytesJoin([encoder.encode(`${index+1} 0 obj\n`),object,encoder.encode('\nendobj\n')]);
+    parts.push(wrapped);
+    position+=wrapped.length;
+  });
+  const xrefPosition=position;
+  const xref=['xref',`0 ${objects.length+1}`,'0000000000 65535 f '];
+  offsets.slice(1).forEach(offset=>xref.push(`${String(offset).padStart(10,'0')} 00000 n `));
+  xref.push('trailer',`<< /Size ${objects.length+1} /Root 1 0 R >>`,'startxref',String(xrefPosition),'%%EOF');
+  parts.push(encoder.encode(xref.join('\n')));
+  return new File([bytesJoin(parts)],`POD-${String(caseId||'EXPEDIENTE').replace(/[^a-z0-9-]/gi,'_')}.pdf`,{type:'application/pdf'});
+}
 const localDateTimeValue=()=>{
   const date=new Date();
   date.setMinutes(date.getMinutes()-date.getTimezoneOffset());
@@ -586,7 +653,7 @@ function DriverTaskModal({event,item,transport,warehouseEntries,currentUser,csrf
     documents:'Comprueba que están listos los documentos necesarios antes de salir a entregar.',
     delivery:'Entrega toda la mercancía, confirma quién la recibe y fotografía o escanea el POD firmado. Al confirmar quedará lista para facturar.'
   };
-  const uploadEvidence=async file=>{if(!file)return;setUploading(true);setError('');try{const uploaded=await uploadAttachment(file,file.type==='application/pdf'?'document':'photo',csrfToken);setEvidenceFiles(current=>step.key==='cargo'?[...current,uploaded]:[uploaded])}catch(reason){setError(reason.message)}finally{setUploading(false)}};
+  const uploadEvidence=async file=>{if(!file)return;setUploading(true);setError('');try{const prepared=step.key==='delivery'&&file.type.startsWith('image/')?await scannedPodPdf(file,item.id):file;const uploaded=await uploadAttachment(prepared,prepared.type==='application/pdf'?'document':'photo',csrfToken);setEvidenceFiles(current=>step.key==='cargo'?[...current,uploaded]:[uploaded]);if(step.key==='delivery'&&file.type.startsWith('image/'))notify?.('POD escaneado y guardado como PDF')}catch(reason){setError(reason.message)}finally{setUploading(false)}};
   const needsEvidence=['cargo','delivery'].includes(step?.key);
   const evidenceTitle=step?.key==='cargo'?'Fotografiar mercancía recibida':'Escanear POD firmado';
   return <div className="modal-backdrop driver-task-backdrop" onMouseDown={mouse=>{if(mouse.target===mouse.currentTarget)close()}}><section className="modal driver-task-modal"><div className="modal-head"><div><span className="overline">{event.inicio}–{event.fin} · {event.tipoServicio}</span><h2>{item.buque}</h2><p>{caseLabel(item)}</p></div><button className="icon-button" onClick={close}><X/></button></div><div className="driver-task-body"><div className="driver-route"><MapPin/><span><small>PUERTO / RUTA</small><b>{transport?.ruta||item.puerto}</b></span></div>{!mine&&<div className="driver-owner-alert"><UserRound/><span><b>{event.asignado&&event.asignado!=='Sin asignar'?`Asignado a ${event.asignado}`:'Trabajo sin conductor'}</b><small>Asígnatelo antes de registrar avances.</small></span><button className="button secondary" onClick={claim}>Asignarme</button></div>}<OperationChecklist item={item} csrfToken={csrfToken} reloadOperational={reloadOperational} notify={notify}/><CargoManifest item={item}/>{step?<><div className="driver-next-action"><span>{OPERATION_STEPS.findIndex(entry=>entry.key===step.key)+1}</span><div><small>AHORA TOCA</small><b>{step.title}</b><p>{instructions[step.key]}</p></div></div>{needsEvidence&&<div className="pod-scanner"><div><Camera/><span><b>{evidenceTitle}</b><small>{step.key==='cargo'?'Haz al menos una foto clara. Puedes añadir varias.':'La cámara se abrirá directamente en el móvil.'}</small></span></div><div className="pod-scanner-actions"><label className="button primary"><Camera/> {uploading?'Subiendo…':step.key==='cargo'?'Hacer foto':'Abrir cámara'}<input type="file" accept="image/*" capture="environment" disabled={uploading||!mine} onChange={change=>uploadEvidence(change.target.files?.[0])}/></label>{step.key==='delivery'&&<label className="button tertiary"><FileText/> Adjuntar PDF<input type="file" accept="application/pdf" disabled={uploading||!mine} onChange={change=>uploadEvidence(change.target.files?.[0])}/></label>}</div>{evidenceFiles.length>0&&<div className="evidence-file-list">{evidenceFiles.map((file,index)=><a className="pod-uploaded" href={file.url} target="_blank" rel="noreferrer" key={file.id}><CheckCircle2/><span><b>{step.key==='cargo'?`Foto ${index+1}`:'POD adjuntado'}</b><small>{file.name}</small></span><ExternalLink/></a>)}</div>}{error&&<p className="form-error"><CircleAlert/>{error}</p>}</div>}<label className="field"><span>Observación del trabajo (opcional)</span><input value={note} disabled={!mine} onChange={change=>setNote(change.target.value)} placeholder="Persona que recibe, incidencia, referencia…"/></label><button className="button primary full driver-confirm" disabled={!mine||uploading||(needsEvidence&&!evidenceFiles.length)} onClick={()=>submit(step.key,note,step.key==='cargo'?evidenceFiles:evidenceFiles[0]||null)}><CheckCircle2/> {needsEvidence&&!evidenceFiles.length?(step.key==='cargo'?'Haz una foto para confirmar':'Escanea el POD para confirmar'):`Confirmar: ${step.title}`}</button></>:<div className="driver-finished"><CheckCircle2/><span><b>Trabajo terminado</b><small>POD recibido y expediente listo para facturación.</small></span></div>}{mine&&lastCompleted&&<button className="button tertiary full driver-undo-step" onClick={()=>undo(lastCompleted.key)}><Undo2/> Deshacer: {lastCompleted.title}</button>}<button className="button tertiary full" onClick={close}>{flow.billingReady?'Cerrar':'Volver al calendario'}</button></div></section></div>;
@@ -668,7 +735,7 @@ function OperationStepModal({item,warehouseEntries,transports,csrfToken,close,su
     documents:'Comprueba packing list, CMR, delivery note y documento aduanero cuando corresponda.',
     delivery:'Entrega toda la mercancía y adjunta el POD firmado. La salida quedará archivada y el expediente pasará a Facturación.'
   };
-  const uploadEvidence=async file=>{if(!file)return;setUploading(true);setError('');try{const uploaded=await uploadAttachment(file,file.type==='application/pdf'?'document':'photo',csrfToken);setEvidenceFiles(current=>step.key==='cargo'?[...current,uploaded]:[uploaded])}catch(reason){setError(reason.message)}finally{setUploading(false)}};
+  const uploadEvidence=async file=>{if(!file)return;setUploading(true);setError('');try{const prepared=step.key==='delivery'&&file.type.startsWith('image/')?await scannedPodPdf(file,item.id):file;const uploaded=await uploadAttachment(prepared,prepared.type==='application/pdf'?'document':'photo',csrfToken);setEvidenceFiles(current=>step.key==='cargo'?[...current,uploaded]:[uploaded])}catch(reason){setError(reason.message)}finally{setUploading(false)}};
   const needsEvidence=['cargo','delivery'].includes(step.key);
   return <div className="modal-backdrop" onMouseDown={event=>{if(event.target===event.currentTarget)close()}}><section className="modal operation-modal"><div className="modal-head"><div><span className="overline">Paso operativo</span><h2>{step.title}</h2><p>{item.id} · {item.buque}</p></div><button className="icon-button" onClick={close}><X/></button></div><div className="operation-modal-body"><OperationChecklist item={item}/><div className="operation-guidance"><ClipboardCheck/><div><b>Qué debes comprobar</b><p>{guidance[step.key]}</p>{step.key==='delivery'&&transport&&<small>{transport.id} · {transport.ruta}</small>}</div></div>{needsEvidence&&<div className="pod-scanner"><div><Camera/><span><b>{step.key==='cargo'?'Fotografiar mercancía recibida':'Escanear POD firmado'}</b><small>{step.key==='cargo'?'La foto es obligatoria y quedará en el expediente.':'Usa la cámara del móvil o adjunta el PDF recibido.'}</small></span></div><div className="pod-scanner-actions"><label className="button primary"><Camera/> {uploading?'Subiendo…':step.key==='cargo'?'Hacer foto':'Abrir cámara'}<input type="file" accept="image/*" capture="environment" disabled={uploading} onChange={event=>uploadEvidence(event.target.files?.[0])}/></label>{step.key==='delivery'&&<label className="button tertiary"><FileText/> Adjuntar PDF<input type="file" accept="application/pdf" disabled={uploading} onChange={event=>uploadEvidence(event.target.files?.[0])}/></label>}</div>{evidenceFiles.length>0&&<div className="evidence-file-list">{evidenceFiles.map((file,index)=><a className="pod-uploaded" href={file.url} target="_blank" rel="noreferrer" key={file.id}><CheckCircle2/><span><b>{step.key==='cargo'?`Foto ${index+1}`:'POD adjuntado'}</b><small>{file.name}</small></span><ExternalLink/></a>)}</div>}{error&&<p className="form-error"><CircleAlert/>{error}</p>}</div>}<label className="field"><span>Observación (opcional)</span><input value={note} onChange={event=>setNote(event.target.value)} placeholder="Incidencias, persona que recibe, referencia…"/></label><div className="modal-actions"><button className="button tertiary" onClick={close}>Cancelar</button><button className="button primary" disabled={uploading||(needsEvidence&&!evidenceFiles.length)} onClick={()=>submit(step.key,note,step.key==='cargo'?evidenceFiles:evidenceFiles[0]||null)}><CheckCircle2/> {needsEvidence&&!evidenceFiles.length?(step.key==='cargo'?'Haz una foto':'Escanea el POD'):'Confirmar paso'}</button></div></div></section></div>;
 }
