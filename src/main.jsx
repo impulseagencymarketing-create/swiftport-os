@@ -463,8 +463,18 @@ function SectionHeader({title,subtitle,action}){return <div className="section-h
 function Empty({text}){return <div className="empty"><Search/><b>Sin resultados</b><p>{text}</p></div>}
 function PortCallPanel({item}){const schedule=portCallSchedule(item);const destination=item.deliveryMode==='barge'?'TRANSPORTE A GABARRA':item.deliveryMode==='vessel'?'TRANSPORTE A BUQUE':'';return <section className="port-call-panel"><div><Ship/><span><small>LLEGADA · ETA</small><b>{schedule.eta}</b></span></div><div><MapPin/><span><small>ATRAQUE · ETB</small><b>{schedule.etb}</b></span></div><div><Clock3/><span><small>SALIDA · ETD</small><b>{schedule.etd}</b></span></div><div><Timer/><span><small>ESTANCIA EN PUERTO</small><b>{item.portStay||'POR CONFIRMAR'}</b></span></div>{destination&&<footer><Truck/><span><small>DESTINO OPERATIVO</small><b>{destination}{item.operationLocation?` · ${item.operationLocation}`:''}</b></span></footer>}</section>}
 
+function VesselFinderMap({item}){
+  const imo=String(item.imo||'').replace(/\D/g,'');
+  const mmsi=String(item.mmsi||'').replace(/\D/g,'');
+  const identifier=imo.length===7?`var imo="${imo}";`:mmsi.length===9?`var mmsi="${mmsi}";`:'';
+  if(!identifier)return null;
+  const html=`<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#dbe7f3}body>iframe{display:block!important;width:100%!important;height:100%!important;border:0!important}</style></head><body><script>var width="100%";var height="300";var names=true;${identifier}var show_track=true;<\/script><script src="https://www.vesselfinder.com/aismap.js"><\/script></body></html>`;
+  return <div className="ais-map"><iframe title={'Mapa VesselFinder de '+item.buque} srcDoc={html} sandbox="allow-scripts allow-popups allow-popups-to-escape-sandbox" referrerPolicy="strict-origin-when-cross-origin"/></div>;
+}
+
 function AisTrackingPanel({item,csrfToken,reloadOperational,notify}){
   const tracking=item.aisTracking;
+  const hasIdentifier=String(item.imo||'').replace(/\D/g,'').length===7||String(item.mmsi||'').replace(/\D/g,'').length===9;
   const [refreshing,setRefreshing]=useState(false);
   const refresh=async()=>{
     if(refreshing||!item.mmsi)return;
@@ -477,15 +487,11 @@ function AisTrackingPanel({item,csrfToken,reloadOperational,notify}){
     finally{setRefreshing(false)}
   };
   const refreshButton=<button className="button secondary ais-refresh" onClick={refresh} disabled={refreshing}><RefreshCw className={refreshing?'spinning':''}/>{refreshing?'Buscando señal AIS…':'Actualizar posición ahora'}</button>;
-  if(!item.mmsi)return <section className="ais-panel ais-empty"><Navigation/><div><small>SEGUIMIENTO AIS GRATUITO</small><b>Añade el MMSI para localizar el buque</b><p>Edita el expediente e introduce los 9 dígitos del MMSI.</p></div></section>;
-  if(!tracking)return <section className="ais-panel ais-empty"><Navigation/><div><small>SEGUIMIENTO AIS GRATUITO · MMSI {item.mmsi}</small><b>Esperando la primera señal</b><p>Actualización automática cada 30 minutos o manual cuando la necesites.</p>{refreshButton}</div></section>;
-  const lat=Number(tracking.latitude),lon=Number(tracking.longitude);
-  const delta=.12;
-  const bbox=[lon-delta,lat-delta,lon+delta,lat+delta].join(',');
-  const map=`https://www.openstreetmap.org/export/embed.html?bbox=${encodeURIComponent(bbox)}&layer=mapnik&marker=${encodeURIComponent(lat+','+lon)}`;
+  if(!hasIdentifier)return <section className="ais-panel ais-empty"><Navigation/><div><small>SEGUIMIENTO DEL BUQUE</small><b>Añade el IMO o MMSI para localizarlo</b><p>Edita el expediente e introduce el IMO de 7 dígitos o el MMSI de 9 dígitos.</p></div></section>;
+  if(!tracking)return <section className="ais-panel"><VesselFinderMap item={item}/><div className="ais-info"><span className="overline"><Navigation/> MAPA OFICIAL VESSELFINDER</span><div className="ais-status"><i className="stale"/><span><small>DATOS DE SWIFTPORT</small><b>Esperando señal propia</b></span></div><p>El mapa muestra la última posición disponible en VesselFinder. Swiftport seguirá consultando AISStream para calcular métricas y alertas.</p>{item.mmsi?refreshButton:<p>Añade también el MMSI para activar la actualización automática de Swiftport.</p>}</div></section>;
   const last=tracking.sourceTimestamp||tracking.receivedAt;
   const stale=last&&Date.now()-new Date(last).getTime()>2*60*60*1000;
-  return <section className="ais-panel"><div className="ais-map"><iframe title={'Posición AIS de '+item.buque} src={map} loading="lazy"/></div><div className="ais-info"><span className="overline"><Navigation/> AISSTREAM · PRUEBA GRATUITA</span><div className="ais-status"><i className={stale?'stale':tracking.status==='Atraque probable'?'moored':'live'}/><span><small>ESTADO ESTIMADO</small><b>{stale?'Señal sin actualizar':tracking.status}</b></span></div><div className="ais-metrics"><span><small>DISTANCIA AL PUERTO</small><b>{tracking.distanceToPortNm==null?'No calculada':tracking.distanceToPortNm+' mn'}</b></span><span><small>VELOCIDAD</small><b>{tracking.speed} kn</b></span><span><small>RUMBO</small><b>{tracking.course}°</b></span><span><small>ÚLTIMA SEÑAL</small><b>{last?new Date(last).toLocaleString('es-ES'):'—'}</b></span></div><div className="ais-actions">{refreshButton}<p>Automático cada 30 minutos · confirma el atraque con el consignatario.</p></div></div></section>;
+  return <section className="ais-panel"><VesselFinderMap item={item}/><div className="ais-info"><span className="overline"><Navigation/> VESSELFINDER + AISSTREAM</span><div className="ais-status"><i className={stale?'stale':tracking.status==='Atraque probable'?'moored':'live'}/><span><small>ESTADO ESTIMADO</small><b>{stale?'Señal sin actualizar':tracking.status}</b></span></div><div className="ais-metrics"><span><small>DISTANCIA AL PUERTO</small><b>{tracking.distanceToPortNm==null?'No calculada':tracking.distanceToPortNm+' mn'}</b></span><span><small>VELOCIDAD</small><b>{tracking.speed} kn</b></span><span><small>RUMBO</small><b>{tracking.course}°</b></span><span><small>ÚLTIMA SEÑAL</small><b>{last?new Date(last).toLocaleString('es-ES'):'—'}</b></span></div><div className="ais-actions">{refreshButton}<p>Automático cada 30 minutos · confirma el atraque con el consignatario.</p></div></div></section>;
 }
 
 const isoDate=date=>date.toISOString().slice(0,10);
