@@ -466,10 +466,11 @@ function PortCallPanel({item}){const schedule=portCallSchedule(item);const desti
 function VesselFinderMap({item}){
   const imo=String(item.imo||'').replace(/\D/g,'');
   const mmsi=String(item.mmsi||'').replace(/\D/g,'');
-  const identifier=imo.length===7?`var imo="${imo}";`:mmsi.length===9?`var mmsi="${mmsi}";`:'';
-  if(!identifier)return null;
-  const html=`<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#dbe7f3}body>iframe{display:block!important;width:100%!important;height:100%!important;border:0!important}</style></head><body><script>var width="100%";var height="300";var names=true;${identifier}var show_track=true;<\/script><script src="https://www.vesselfinder.com/aismap.js"><\/script></body></html>`;
-  return <div className="ais-map"><iframe title={'Mapa VesselFinder de '+item.buque} srcDoc={html} sandbox="allow-scripts allow-popups allow-popups-to-escape-sandbox" referrerPolicy="strict-origin-when-cross-origin"/></div>;
+  if(imo.length!==7&&mmsi.length!==9)return null;
+  const params=new URLSearchParams({zoom:'undefined',lat:'undefined',lon:'undefined',width:'100%',height:'400',names:'true',track:'true',fleet:'false',fleet_name:'false',clicktoact:'false',store_pos:'true'});
+  if(imo.length===7)params.set('imo',imo);
+  else params.set('mmsi',mmsi);
+  return <div className="ais-map"><iframe title={'Mapa VesselFinder de '+item.buque} src={'https://www.vesselfinder.com/aismap?'+params.toString()} loading="eager" referrerPolicy="strict-origin-when-cross-origin"/></div>;
 }
 
 function AisTrackingPanel({item,csrfToken,reloadOperational,notify}){
