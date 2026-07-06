@@ -30,13 +30,30 @@ function ais_distance_nm(float $lat1, float $lon1, float $lat2, float $lon2): fl
     return $earthRadiusNm * 2 * atan2(sqrt($a), sqrt(1 - $a));
 }
 
-function ais_operational_status(?float $distance, float $speed, int $navigationStatus): string
+function ais_course_difference(float $left, float $right): float
 {
-    if ($distance !== null && $distance <= 1.5 && ($navigationStatus === 5 || $speed <= 0.5)) {
-        return 'Atraque probable';
-    }
+    $difference = abs(fmod($left - $right + 540, 360) - 180);
+    return min(180, $difference);
+}
+
+function ais_bearing(float $lat1, float $lon1, float $lat2, float $lon2): float
+{
+    $lat1Rad = deg2rad($lat1);
+    $lat2Rad = deg2rad($lat2);
+    $deltaLon = deg2rad($lon2 - $lon1);
+    $y = sin($deltaLon) * cos($lat2Rad);
+    $x = cos($lat1Rad) * sin($lat2Rad) - sin($lat1Rad) * cos($lat2Rad) * cos($deltaLon);
+    return fmod(rad2deg(atan2($y, $x)) + 360, 360);
+}
+
+function ais_operational_status(?float $distance, float $speed, int $navigationStatus, bool $approaching): string
+{
+    if ($distance !== null && $distance <= 3 && $navigationStatus === 5) return 'Atracado';
+    if ($distance !== null && $distance <= 20 && $navigationStatus === 1) return 'En fondeo';
+    if ($distance !== null && $distance <= 1.5 && $speed <= 0.5) return 'Atraque probable';
     if ($distance !== null && $distance <= 5) return 'En zona portuaria';
     if ($distance !== null && $distance <= 20) return 'Cerca del puerto';
+    if ($distance !== null && $distance <= 50 && $speed >= 1 && $approaching) return 'Rumbo al puerto';
     return 'En navegación';
 }
 
@@ -60,6 +77,7 @@ function ais_save_positions(array $positions): int
         'INSERT INTO app_ais_positions (case_ref, mmsi, data) VALUES (?, ?, ?)
          ON DUPLICATE KEY UPDATE mmsi = VALUES(mmsi), data = VALUES(data), updated_at = CURRENT_TIMESTAMP'
     );
+    $previousQuery = db()->prepare('SELECT data FROM app_ais_positions WHERE case_ref = ?');
     $saved = 0;
     foreach ($positions as $position) {
         if (!is_array($position)) continue;
@@ -70,21 +88,55 @@ function ais_save_positions(array $positions): int
         if (!isset($cases[$caseRef]) || strlen($mmsi) !== 9 || $latitude === false || $longitude === false) continue;
         if ($latitude < -90 || $latitude > 90 || $longitude < -180 || $longitude > 180) continue;
         $speed = max(0, (float) ($position['speed'] ?? 0));
+        $course = round((float) ($position['course'] ?? 0), 1);
         $navigationStatus = (int) ($position['navigationStatus'] ?? -1);
         $portCoordinates = ais_port_coordinates((string) ($cases[$caseRef]['puerto'] ?? ''));
         $distance = $portCoordinates
             ? ais_distance_nm((float) $latitude, (float) $longitude, $portCoordinates[0], $portCoordinates[1])
             : null;
+        $previousQuery->execute([$caseRef]);
+        $previousRow = $previousQuery->fetch();
+        $previous = $previousRow ? json_decode((string) $previousRow['data'], true) : [];
+        if (!is_array($previous)) $previous = [];
+        $previousDistance = isset($previous['distanceToPortNm']) && is_numeric($previous['distanceToPortNm'])
+            ? (float) $previous['distanceToPortNm']
+            : null;
+        $bearing = $portCoordinates
+            ? ais_bearing((float) $latitude, (float) $longitude, $portCoordinates[0], $portCoordinates[1])
+            : null;
+        $approaching = $distance !== null && (
+            ($previousDistance !== null && $distance < $previousDistance - 0.2)
+            || ($bearing !== null && ais_course_difference($course, $bearing) <= 50)
+        );
+        $status = ais_operational_status($distance, $speed, $navigationStatus, $approaching);
+        $alertStatuses = ['Rumbo al puerto', 'Cerca del puerto', 'En zona portuaria', 'En fondeo', 'Atracado'];
+        $statusChanged = $status !== (string) ($previous['status'] ?? '')
+            || (empty($previous['alertKey']) && in_array($status, $alertStatuses, true));
+        $alertKey = (string) ($previous['alertKey'] ?? '');
+        $alertMessage = (string) ($previous['alertMessage'] ?? '');
+        $statusChangedAt = (string) ($previous['statusChangedAt'] ?? '');
+        if ($statusChanged) {
+            $statusChangedAt = gmdate(DATE_ATOM);
+            if (in_array($status, $alertStatuses, true)) {
+                $alertKey = $caseRef . '-' . mb_strtolower(str_replace(' ', '-', $status)) . '-' . time();
+                $distanceLabel = $distance === null ? '' : ' a ' . round($distance, 1) . ' mn del puerto';
+                $alertMessage = trim((string) ($cases[$caseRef]['buque'] ?? 'El buque')) . ': ' . mb_strtolower($status) . $distanceLabel . '.';
+            }
+        }
         $tracking = [
             'mmsi' => $mmsi,
             'latitude' => round((float) $latitude, 6),
             'longitude' => round((float) $longitude, 6),
             'speed' => round($speed, 1),
-            'course' => round((float) ($position['course'] ?? 0), 1),
+            'course' => $course,
             'heading' => (int) ($position['heading'] ?? 0),
             'navigationStatus' => $navigationStatus,
             'distanceToPortNm' => $distance === null ? null : round($distance, 1),
-            'status' => ais_operational_status($distance, $speed, $navigationStatus),
+            'status' => $status,
+            'approachingPort' => $approaching,
+            'alertKey' => $alertKey,
+            'alertMessage' => $alertMessage,
+            'statusChangedAt' => $statusChangedAt,
             'sourceTimestamp' => trim((string) ($position['timestamp'] ?? '')),
             'receivedAt' => gmdate(DATE_ATOM),
             'source' => 'AISStream · prueba gratuita',

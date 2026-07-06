@@ -172,6 +172,18 @@ async function api(path,options={}){
   return body;
 }
 
+async function showDeviceNotification(title,body,tag){
+  if(!('Notification' in window)||Notification.permission!=='granted')return false;
+  const options={body,tag,renotify:true,icon:'/swiftport-icon.svg',badge:'/swiftport-icon.svg',data:{url:'/'}};
+  if('serviceWorker' in navigator){
+    const registration=await navigator.serviceWorker.ready;
+    await registration.showNotification(title,options);
+    return true;
+  }
+  new Notification(title,options);
+  return true;
+}
+
 async function uploadAttachment(file,category,csrfToken){
   const data=new FormData();
   data.append('file',file);
@@ -337,6 +349,7 @@ function App({auth,finance,onFinanceChange,onLogout}){
   const scheduleAlertsKey=`swiftport-driver-alerts-${user.id}`;
   const [scheduleAlerts,setScheduleAlerts]=useState(()=>{if(user.role!=='driver')return[];try{const stored=JSON.parse(localStorage.getItem(scheduleAlertsKey)||'[]');return Array.isArray(stored)?stored:[]}catch{return[]}});
   const scheduleSnapshotRef=useRef(null);
+  const aisAlertSnapshotRef=useRef(null);
   const casesWithFinance=useMemo(()=>cases.map(item=>({...item,importe:finance.caseAmounts[item.id]||0})),[cases,finance.caseAmounts]);
   const selected=casesWithFinance.find(item=>item.id===selectedId)||casesWithFinance[0];
   const notify=message=>{setToast(message);window.clearTimeout(window.__swiftportToast);window.__swiftportToast=window.setTimeout(()=>setToast(''),2600)};
@@ -359,6 +372,29 @@ function App({auth,finance,onFinanceChange,onLogout}){
     setOperationalLoaded(true)
   }).catch(reason=>{setOperationalLoaded(true);notify(reason.message)});
   useEffect(()=>{loadTeam();api('/api/clients/directory.php').then(result=>setClientOptions(result.clients.map(item=>item.name))).catch(()=>{});loadOperational();const timer=window.setInterval(loadOperational,45000);window.addEventListener('focus',loadOperational);return()=>{window.clearInterval(timer);window.removeEventListener('focus',loadOperational)}},[]);
+  useEffect(()=>{
+    if(!operationalLoaded)return;
+    const storageKey=`swiftport-ais-alerts-${user.id}`;
+    let previous=aisAlertSnapshotRef.current;
+    let hadSnapshot=previous!==null;
+    if(previous===null){try{const stored=localStorage.getItem(storageKey);previous=stored?JSON.parse(stored):{};hadSnapshot=stored!==null}catch{previous={}}}
+    const current={};
+    const alerts=[];
+    cases.forEach(item=>{
+      const tracking=item.aisTracking||{};
+      if(!tracking.alertKey)return;
+      current[item.id]=tracking.alertKey;
+      const visibleToDriver=user.role!=='driver'||calendarEvents.some(event=>event.expediente===item.id&&(!event.asignado||event.asignado==='Sin asignar'||event.asignado===user.fullName));
+      if(hadSnapshot&&visibleToDriver&&previous[item.id]!==tracking.alertKey)alerts.push({item,tracking});
+    });
+    aisAlertSnapshotRef.current=current;
+    try{localStorage.setItem(storageKey,JSON.stringify(current))}catch{}
+    if(!alerts.length)return;
+    const {item,tracking}=alerts[0];
+    const message=tracking.alertMessage||`${item.buque}: ${tracking.status}.`;
+    notify(message);
+    if(localStorage.getItem('swiftport-device-alerts')==='1')showDeviceNotification(`Swiftport · ${item.buque}`,message,tracking.alertKey).catch(()=>{});
+  },[cases,calendarEvents,operationalLoaded]);
   const saveOperational=(nextCases=cases,nextTransports=transports,nextWarehouse=warehouseEntries,nextCustoms=customs,nextCalendar=calendarEvents,nextProviders=providers)=>api('/api/operational.php',{method:'PUT',headers:{'X-CSRF-Token':auth.csrfToken},body:JSON.stringify({data:{cases:nextCases,transports:nextTransports,warehouseEntries:nextWarehouse,customs:nextCustoms,calendarEvents:nextCalendar,providers:nextProviders}})}).catch(reason=>notify(reason.message));
   const operationalTeam=useMemo(()=>team.filter(member=>['operations','driver'].includes(member.role)),[team]);
   useEffect(()=>{if(effectiveRole==='driver'&&tab!=='calendario')setTab('calendario')},[effectiveRole,tab]);
@@ -587,6 +623,7 @@ function AisTrackingPanel({item,csrfToken,reloadOperational,notify}){
   const tracking=item.aisTracking;
   const hasIdentifier=String(item.imo||'').replace(/\D/g,'').length===7||String(item.mmsi||'').replace(/\D/g,'').length===9;
   const [refreshing,setRefreshing]=useState(false);
+  const [deviceAlerts,setDeviceAlerts]=useState(()=>localStorage.getItem('swiftport-device-alerts')==='1'&&('Notification' in window)&&Notification.permission==='granted');
   const refresh=async()=>{
     if(refreshing||!item.mmsi)return;
     setRefreshing(true);
@@ -597,12 +634,22 @@ function AisTrackingPanel({item,csrfToken,reloadOperational,notify}){
     }catch(reason){notify(reason.message)}
     finally{setRefreshing(false)}
   };
+  const enableDeviceAlerts=async()=>{
+    if(!('Notification' in window)){notify('Este navegador no admite avisos. En iPhone, añade Swiftport a la pantalla de inicio.');return}
+    const permission=await Notification.requestPermission();
+    if(permission!=='granted'){notify('Debes permitir las notificaciones de Swiftport en el teléfono.');return}
+    localStorage.setItem('swiftport-device-alerts','1');
+    setDeviceAlerts(true);
+    await showDeviceNotification('Swiftport OS','Avisos AIS activados en este dispositivo.','swiftport-ais-enabled');
+    notify('Avisos de aproximación activados en este teléfono');
+  };
   const refreshButton=<button className="button secondary ais-refresh" onClick={refresh} disabled={refreshing}><RefreshCw className={refreshing?'spinning':''}/>{refreshing?'Buscando señal AIS…':'Actualizar posición ahora'}</button>;
+  const alertButton=<button className={'button '+(deviceAlerts?'device-alert-enabled':'tertiary')} onClick={enableDeviceAlerts} disabled={deviceAlerts}><Bell/>{deviceAlerts?'Avisos activos':'Activar avisos en este móvil'}</button>;
   if(!hasIdentifier)return <section className="ais-panel ais-empty"><Navigation/><div><small>SEGUIMIENTO DEL BUQUE</small><b>Añade el IMO o MMSI para localizarlo</b><p>Edita el expediente e introduce el IMO de 7 dígitos o el MMSI de 9 dígitos.</p></div></section>;
-  if(!tracking)return <section className="ais-panel"><VesselFinderMap item={item}/><div className="ais-info"><span className="overline"><Navigation/> MAPA OFICIAL VESSELFINDER</span><div className="ais-status"><i className="stale"/><span><small>DATOS DE SWIFTPORT</small><b>Esperando señal propia</b></span></div><p>El mapa muestra la última posición disponible en VesselFinder. Swiftport seguirá consultando AISStream para calcular métricas y alertas.</p>{item.mmsi?refreshButton:<p>Añade también el MMSI para activar la actualización automática de Swiftport.</p>}</div></section>;
+  if(!tracking)return <section className="ais-panel"><VesselFinderMap item={item}/><div className="ais-info"><span className="overline"><Navigation/> MAPA OFICIAL VESSELFINDER</span><div className="ais-status"><i className="stale"/><span><small>DATOS DE SWIFTPORT</small><b>Esperando señal propia</b></span></div><p>El mapa muestra la última posición disponible en VesselFinder. Swiftport seguirá consultando AISStream para calcular métricas y alertas.</p><div className="ais-actions">{item.mmsi?refreshButton:<p>Añade también el MMSI para activar la actualización automática de Swiftport.</p>}{alertButton}</div></div></section>;
   const last=tracking.sourceTimestamp||tracking.receivedAt;
   const stale=last&&Date.now()-new Date(last).getTime()>2*60*60*1000;
-  return <section className="ais-panel"><VesselFinderMap item={item}/><div className="ais-info"><span className="overline"><Navigation/> VESSELFINDER + AISSTREAM</span><div className="ais-status"><i className={stale?'stale':tracking.status==='Atraque probable'?'moored':'live'}/><span><small>ESTADO ESTIMADO</small><b>{stale?'Señal sin actualizar':tracking.status}</b></span></div><div className="ais-metrics"><span><small>DISTANCIA AL PUERTO</small><b>{tracking.distanceToPortNm==null?'No calculada':tracking.distanceToPortNm+' mn'}</b></span><span><small>VELOCIDAD</small><b>{tracking.speed} kn</b></span><span><small>RUMBO</small><b>{tracking.course}°</b></span><span><small>ÚLTIMA SEÑAL</small><b>{last?new Date(last).toLocaleString('es-ES'):'—'}</b></span></div><div className="ais-actions">{refreshButton}<p>Automático cada 30 minutos · confirma el atraque con el consignatario.</p></div></div></section>;
+  return <section className="ais-panel"><VesselFinderMap item={item}/><div className="ais-info"><span className="overline"><Navigation/> VESSELFINDER + AISSTREAM</span><div className="ais-status"><i className={stale?'stale':['Atracado','En fondeo','Atraque probable'].includes(tracking.status)?'moored':'live'}/><span><small>ESTADO ESTIMADO</small><b>{stale?'Señal sin actualizar':tracking.status}</b></span></div><div className="ais-metrics"><span><small>DISTANCIA AL PUERTO</small><b>{tracking.distanceToPortNm==null?'No calculada':tracking.distanceToPortNm+' mn'}</b></span><span><small>VELOCIDAD</small><b>{tracking.speed} kn</b></span><span><small>RUMBO</small><b>{tracking.course}°</b></span><span><small>ÚLTIMA SEÑAL</small><b>{last?new Date(last).toLocaleString('es-ES'):'—'}</b></span></div><div className="ais-actions">{refreshButton}{alertButton}<p>Automático cada 30 minutos · confirma el atraque con el consignatario.</p></div></div></section>;
 }
 
 const isoDate=date=>date.toISOString().slice(0,10);
@@ -1133,4 +1180,5 @@ function WarehouseEditModal({item,cases,close,submit}){
   return <div className="modal-backdrop" onMouseDown={event=>{if(event.target===event.currentTarget)close()}}><section className="modal" role="dialog" aria-modal="true"><div className="modal-head"><div><span className="overline">{item.ref}</span><h2>Editar entrada de almacén</h2></div><button className="icon-button" onClick={close}><X/></button></div><form onSubmit={save}><label className="field wide"><span>Expediente</span><select name="expediente" value={form.expediente} onChange={update}>{cases.map(entry=><option key={entry.id} value={entry.id}>{entry.id} · {entry.buque}</option>)}</select></label><label className="field"><span>Ubicación</span><input name="zona" value={form.zona} onChange={update} required/></label><label className="field"><span>Fecha de entrada</span><input name="entrada" value={form.entrada} onChange={update} required/></label><label className="field"><span>Bultos</span><input name="bultos" type="number" min="0" value={form.bultos} onChange={update}/></label><label className="field"><span>Peso</span><input name="peso" value={form.peso} onChange={update}/></label><label className="field"><span>Días de storage</span><input name="dias" type="number" min="0" value={form.dias} onChange={update}/></label><label className="field"><span>Estado</span><select name="estado" value={form.estado} onChange={update}>{['En stock','Retenido','Preparado','Expedido'].map(value=><option key={value}>{value}</option>)}</select></label><div className="modal-actions wide"><button type="button" className="button tertiary" onClick={close}>Cancelar</button><button className="button primary"><Save/> Guardar entrada</button></div></form></section></div>;
 }
 
+if('serviceWorker' in navigator)window.addEventListener('load',()=>navigator.serviceWorker.register('/sw.js').catch(()=>{}));
 createRoot(document.getElementById('root')).render(<AuthRoot/>);
