@@ -184,6 +184,18 @@ function ensure_schema(): void
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
     );
     $pdo->exec(
+        "CREATE TABLE IF NOT EXISTS app_ais_refresh_requests (
+            case_ref VARCHAR(40) PRIMARY KEY,
+            mmsi VARCHAR(12) NOT NULL,
+            status VARCHAR(20) NOT NULL DEFAULT 'pending',
+            attempts INT UNSIGNED NOT NULL DEFAULT 0,
+            requested_by BIGINT UNSIGNED NULL,
+            requested_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            processed_at DATETIME NULL,
+            INDEX idx_ais_refresh_pending (status, requested_at)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+    );
+    $pdo->exec(
         "CREATE TABLE IF NOT EXISTS app_operational_backups (
             id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
             label VARCHAR(120) NOT NULL,

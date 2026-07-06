@@ -1,0 +1,34 @@
+name: Solicitudes AIS manuales
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: swiftport-ais-manual
+  cancel-in-progress: false
+
+jobs:
+  refresh-requested-vessels:
+    name: Atender actualizaciones solicitadas
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Descargar el código
+        uses: actions/checkout@v5
+      - name: Preparar Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - name: Consultar solicitudes pendientes
+        env:
+          AISSTREAM_API_KEY: ${{ secrets.AISSTREAM_API_KEY }}
+          CRON_TOKEN: ${{ secrets.APP_SETUP_TOKEN }}
+          APP_URL: https://app.swiftportlogistic.com
+          TARGETS_ENDPOINT: /api/ais/manual-targets.php
+          AIS_WAIT_MS: 55000
+        run: node scripts/aisstream-sync.mjs

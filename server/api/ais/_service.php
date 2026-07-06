@@ -94,6 +94,12 @@ function ais_save_positions(array $positions): int
             $mmsi,
             json_encode($tracking, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR),
         ]);
+        $complete = db()->prepare(
+            "UPDATE app_ais_refresh_requests
+             SET status = 'completed', processed_at = CURRENT_TIMESTAMP
+             WHERE case_ref = ?"
+        );
+        $complete->execute([$caseRef]);
         $saved++;
     }
     return $saved;

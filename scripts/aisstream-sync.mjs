@@ -1,6 +1,8 @@
 const apiKey = process.env.AISSTREAM_API_KEY || '';
 const cronToken = process.env.CRON_TOKEN || '';
 const appUrl = (process.env.APP_URL || 'https://app.swiftportlogistic.com').replace(/\/$/, '');
+const targetsEndpoint = process.env.TARGETS_ENDPOINT || '/api/ais/targets.php';
+const waitMs = Math.max(10000, Math.min(70000, Number(process.env.AIS_WAIT_MS) || 70000));
 
 if (!apiKey || !cronToken) {
   console.log('Seguimiento AIS pendiente de configurar; no se realiza ninguna consulta.');
@@ -8,7 +10,7 @@ if (!apiKey || !cronToken) {
 }
 
 const headers = {'X-Cron-Token': cronToken, 'Content-Type': 'application/json'};
-const targetResponse = await fetch(`${appUrl}/api/ais/targets.php`, {headers});
+const targetResponse = await fetch(`${appUrl}${targetsEndpoint}`, {headers});
 if (!targetResponse.ok) throw new Error(`No se pudieron consultar los buques (${targetResponse.status}).`);
 const {targets = []} = await targetResponse.json();
 if (!targets.length) {
@@ -29,7 +31,7 @@ await new Promise((resolve, reject) => {
   const timer = setTimeout(() => {
     socket.close();
     resolve();
-  }, 70000);
+  }, waitMs);
 
   socket.addEventListener('open', () => {
     socket.send(JSON.stringify({

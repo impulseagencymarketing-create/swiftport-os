@@ -29,16 +29,31 @@ if ($lastRefresh > 0 && time() - $lastRefresh < 20) {
 }
 $_SESSION['ais_refresh'][$caseRef] = time();
 
-@set_time_limit(55);
+$queue = db()->prepare(
+    "INSERT INTO app_ais_refresh_requests
+        (case_ref, mmsi, status, attempts, requested_by, requested_at, processed_at)
+     VALUES (?, ?, 'pending', 0, ?, CURRENT_TIMESTAMP, NULL)
+     ON DUPLICATE KEY UPDATE
+        mmsi = VALUES(mmsi),
+        status = 'pending',
+        attempts = 0,
+        requested_by = VALUES(requested_by),
+        requested_at = CURRENT_TIMESTAMP,
+        processed_at = NULL"
+);
+$queue->execute([$caseRef, $mmsi, (int) $user['id']]);
+
+@set_time_limit(30);
 try {
-    $position = ais_fetch_position($apiKey, $mmsi, 35);
+    $position = ais_fetch_position($apiKey, $mmsi, 10);
     if ($position === null) {
-        audit((int) $user['id'], 'ais.manual_refresh_empty', ['caseRef' => $caseRef, 'mmsi' => $mmsi]);
+        audit((int) $user['id'], 'ais.manual_refresh_queued', ['caseRef' => $caseRef, 'mmsi' => $mmsi]);
         respond([
             'ok' => true,
             'updated' => false,
-            'message' => 'No se recibió una señal nueva. Se mantiene la última posición disponible.',
-        ]);
+            'queued' => true,
+            'message' => 'Solicitud AIS enviada. Se actualizará en los próximos minutos.',
+        ], 202);
     }
     $position['caseRef'] = $caseRef;
     $saved = ais_save_positions([$position]);
@@ -50,5 +65,11 @@ try {
     ]);
 } catch (Throwable $error) {
     error_log('Swiftport manual AIS refresh failed: ' . $error->getMessage());
-    respond(['error' => 'No se pudo consultar AISStream en este momento.'], 502);
+    audit((int) $user['id'], 'ais.manual_refresh_queued', ['caseRef' => $caseRef, 'mmsi' => $mmsi]);
+    respond([
+        'ok' => true,
+        'updated' => false,
+        'queued' => true,
+        'message' => 'Solicitud AIS enviada. Se actualizará en los próximos minutos.',
+    ], 202);
 }
