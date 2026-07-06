@@ -88,7 +88,7 @@ for (const [mmsi, position] of latest) {
 }
 if (!positions.length) {
   console.log(`Sin señal AIS nueva para ${targets.length} expediente(s).`);
-  process.exit(0);
+  process.exit(process.env.RETRY_ON_EMPTY === '1' ? 10 : 0);
 }
 
 const updateResponse = await fetch(`${appUrl}/api/ais/update.php`, {

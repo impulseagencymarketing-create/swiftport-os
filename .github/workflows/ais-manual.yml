@@ -19,7 +19,7 @@ jobs:
   refresh-requested-vessels:
     name: Atender actualizaciones solicitadas
     runs-on: ubuntu-latest
-    timeout-minutes: 3
+    timeout-minutes: 6
     steps:
       - name: Descargar el código
         uses: actions/checkout@v5
@@ -34,4 +34,20 @@ jobs:
           APP_URL: https://app.swiftportlogistic.com
           TARGETS_ENDPOINT: /api/ais/manual-targets.php
           AIS_WAIT_MS: 55000
-        run: node scripts/aisstream-sync.mjs
+          RETRY_ON_EMPTY: 1
+        run: |
+          set +e
+          for attempt in 1 2 3 4; do
+            echo "Intento AIS manual $attempt de 4"
+            node scripts/aisstream-sync.mjs
+            status=$?
+            if [ "$status" -eq 0 ]; then
+              exit 0
+            fi
+            if [ "$status" -ne 10 ]; then
+              exit "$status"
+            fi
+            sleep 5
+          done
+          echo "No se recibió una señal AIS durante la ventana manual."
+          exit 0
