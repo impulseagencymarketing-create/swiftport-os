@@ -53,8 +53,9 @@ jobs:
           OPERATIONS_EMAIL_USER: ${{ secrets.OPERATIONS_EMAIL_USER }}
           OPERATIONS_EMAIL_PASSWORD: ${{ secrets.OPERATIONS_EMAIL_PASSWORD }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          AISSTREAM_API_KEY: ${{ secrets.AISSTREAM_API_KEY }}
         run: |
-          for variable in DB_HOST DB_NAME DB_USER DB_PASSWORD APP_SETUP_TOKEN INFO_EMAIL_USER INFO_EMAIL_PASSWORD OPERATIONS_EMAIL_USER OPERATIONS_EMAIL_PASSWORD OPENAI_API_KEY; do
+          for variable in DB_HOST DB_NAME DB_USER DB_PASSWORD APP_SETUP_TOKEN INFO_EMAIL_USER INFO_EMAIL_PASSWORD OPERATIONS_EMAIL_USER OPERATIONS_EMAIL_PASSWORD OPENAI_API_KEY AISSTREAM_API_KEY; do
             if [ -z "${!variable}" ]; then
               echo "::error::El secreto $variable está vacío o no existe."
               exit 1
@@ -77,6 +78,7 @@ jobs:
               "operations_email_user": os.environ["OPERATIONS_EMAIL_USER"],
               "operations_email_password": os.environ["OPERATIONS_EMAIL_PASSWORD"],
               "openai_api_key": os.environ["OPENAI_API_KEY"],
+              "aisstream_api_key": os.environ["AISSTREAM_API_KEY"],
           }
           payload = json.dumps(values, ensure_ascii=False)
           config = "<?php\nreturn json_decode(<<<'JSON'\n" + payload + "\nJSON, true, 512, JSON_THROW_ON_ERROR);\n"
