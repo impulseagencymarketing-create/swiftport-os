@@ -20,8 +20,6 @@ const NAV = [
   ['calendario','Calendario',CalendarDays],
   ['expedientes','Expedientes',FolderKanban],
   ['almacen','Almacén',WarehouseIcon],
-  ['transportes','Transportes',Truck],
-  ['aduanas','Aduanas',FileCheck2],
   ['correos','Correos',Mail],
   ['clientes','Clientes / Tarifas',UsersRound],
   ['facturacion','Facturación',ReceiptText],
@@ -41,6 +39,7 @@ const TITLES = {
 };
 const ROLE_LABELS={driver:'Transportista',operations:'Operaciones',finance:'Finanzas',admin:'Administración'};
 const canAccess=(role,id)=>{
+  if(['transportes','aduanas'].includes(id))return false;
   if(role==='driver')return id==='calendario';
   if (['clientes','facturacion'].includes(id)) return ['finance','admin'].includes(role);
   if (id==='correos') return ['operations','admin'].includes(role);
@@ -767,7 +766,7 @@ function Dashboard({cases,warehouseEntries,calendarEvents,openCase,navigate,show
     <div className="dashboard-grid">
       <section className="panel attention-panel"><SectionHeader title="Requieren acción" subtitle="Ordenado por prioridad" action={<button className="text-button" onClick={()=>navigate('expedientes')}>Ver todos</button>}/><div className="attention-list">
         <ActionItem tone="danger" title="Autorización aduanera pendiente" meta="POLARIS MILA · vence hoy 17:00" action={()=>openCase('SW-2026-0047')}/>
-        <ActionItem tone="warning" title="Transporte sin conductor" meta="TR-1044 · Tarragona · mañana 15:30" action={()=>navigate('transportes')}/>
+        <ActionItem tone="warning" title="Transporte sin conductor" meta="TR-1044 · Tarragona · mañana 15:30" action={()=>navigate('calendario')}/>
         <ActionItem tone="info" title="Validar packing list" meta="ATLANTIC STAR · ETA 03 Jul 06:30" action={()=>openCase('SW-2026-0045')}/>
       </div></section>
       <section className="panel today-panel"><SectionHeader title="Agenda operativa" subtitle="Hoy, 29 de junio"/><div className="schedule">
