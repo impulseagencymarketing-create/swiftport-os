@@ -40,7 +40,7 @@ const TITLES = {
 const ROLE_LABELS={driver:'Transportista',operations:'Operaciones',finance:'Finanzas',admin:'Administración'};
 const canAccess=(role,id)=>{
   if(['transportes','aduanas'].includes(id))return false;
-  if(role==='driver')return id==='calendario';
+  if(role==='driver')return ['calendario','almacen'].includes(id);
   if (['clientes','facturacion'].includes(id)) return ['finance','admin'].includes(role);
   if (id==='correos') return ['operations','admin'].includes(role);
   if (id==='usuarios') return role==='admin';
@@ -163,6 +163,10 @@ const normalizeMerchandise=item=>{
   const next=nextOperationStep(normalized);
   return {...normalized,progreso:normalized.operationalFlow.billingReady?100:progress,siguiente:normalized.operationalFlow.billingReady?'Listo para facturar':next?.next||item.siguiente};
 };
+const numericWeight=value=>{const raw=String(value||'').replace(/[^\d.,]/g,'');if(raw.includes(',')&&raw.includes('.'))return Number(raw.replace(/\./g,'').replace(',','.'))||0;if(raw.includes(','))return Number(raw.replace(',','.'))||0;return Number(raw)||0};
+const merchandiseWeight=lines=>(lines||[]).reduce((sum,line)=>sum+numericWeight(line.peso),0);
+const merchandiseCount=lines=>(lines||[]).reduce((sum,line)=>sum+(Number(line.cantidad)||0),0);
+const merchandiseWeightLabel=lines=>`${merchandiseWeight(lines).toLocaleString('es-ES',{maximumFractionDigits:2})} kg`;
 
 async function api(path,options={}){
   const response=await fetch(path,{credentials:'same-origin',...options,headers:{'Content-Type':'application/json',...(options.headers||{})}});
@@ -396,7 +400,40 @@ function App({auth,finance,onFinanceChange,onLogout}){
   },[cases,calendarEvents,operationalLoaded]);
   const saveOperational=(nextCases=cases,nextTransports=transports,nextWarehouse=warehouseEntries,nextCustoms=customs,nextCalendar=calendarEvents,nextProviders=providers)=>api('/api/operational.php',{method:'PUT',headers:{'X-CSRF-Token':auth.csrfToken},body:JSON.stringify({data:{cases:nextCases,transports:nextTransports,warehouseEntries:nextWarehouse,customs:nextCustoms,calendarEvents:nextCalendar,providers:nextProviders}})}).catch(reason=>notify(reason.message));
   const operationalTeam=useMemo(()=>team.filter(member=>['operations','driver'].includes(member.role)),[team]);
-  useEffect(()=>{if(effectiveRole==='driver'&&tab!=='calendario')setTab('calendario')},[effectiveRole,tab]);
+  useEffect(()=>{if(effectiveRole==='driver'&&!['calendario','almacen'].includes(tab))setTab('calendario')},[effectiveRole,tab]);
+  useEffect(()=>{
+    if(!operationalLoaded)return;
+    const missing=cases.flatMap((item,index)=>{
+      if(warehouseEntries.some(entry=>entry.expediente===item.id))return[];
+      const reception=(item.recepciones||[])[0];
+      if(!reception)return[];
+      const merchandise=(reception.mercancias||[]).length?reception.mercancias:(item.mercancias||[]);
+      if(!(reception.fotos||[]).length&&!merchandise.length)return[];
+      const completed=item.estado==='Completado';
+      return [{
+        ref:String(reception.ref||'').startsWith('ALM-')?reception.ref:`ALM-${Date.now()}-${index+1}`,
+        expediente:item.id,
+        sinExpediente:false,
+        buque:item.buque,
+        zona:reception.zona||'PENDIENTE',
+        entrada:formatReceptionDate(reception.fecha||new Date().toISOString()),
+        fechaRecepcion:reception.fecha||new Date().toISOString(),
+        bultos:merchandiseCount(merchandise)||Math.max(1,Number(item.bultos)||1),
+        peso:reception.peso||merchandiseWeightLabel(merchandise),
+        mercancias:merchandise,
+        fotos:reception.fotos||[],
+        documentosRecepcion:reception.documentos||[],
+        dias:0,
+        estado:completed?'Expedido':'En stock',
+        archivado:completed
+      }];
+    });
+    if(!missing.length)return;
+    const next=[...missing,...warehouseEntries];
+    setWarehouseEntries(next);
+    saveOperational(cases,transports,next);
+    notify(`${missing.length} ${missing.length===1?'recepción sincronizada':'recepciones sincronizadas'} con Almacén`);
+  },[operationalLoaded]);
   useEffect(()=>{
     if(!operationalLoaded||!team.length)return;
     const names=new Set(operationalTeam.map(member=>member.fullName));
@@ -424,10 +461,38 @@ function App({auth,finance,onFinanceChange,onLogout}){
     setCases(nextCases);setTransports(nextTransports);setCalendarEvents(nextCalendar);saveOperational(nextCases,nextTransports,warehouseEntries,customs,nextCalendar);setSelectedId(item.id);setNewOpen(false);setTab('expedientes');notify(`Expediente ${item.id} creado con ${nextCalendar.length-calendarEvents.length} trabajos programados`);
   };
   const updateTransport=updated=>{const parts=routeParts(updated);const normalized={...updated,...parts,ruta:`${parts.origen} → ${parts.destino}`,hora:formatSchedule(updated.fecha,updated.inicio,updated.fin)};const nextTransports=transports.map(item=>item.id===updated.id?normalized:item);const nextCases=cases.map(item=>item.id===updated.expediente?{...item,conductor:updated.conductor}:item);const linkedEvent=calendarEvents.find(item=>item.transporte===updated.id);const synchronized={titulo:normalized.ruta,origen:normalized.origen,destino:normalized.destino,tipoServicio:'Transporte',fecha:updated.fecha,inicio:updated.inicio,fin:updated.fin,asignado:updated.conductor,proveedorId:updated.proveedorId||'',expediente:updated.expediente,transporte:updated.id,color:driverTone(updated.conductor,operationalTeam)};const nextCalendar=linkedEvent?calendarEvents.map(item=>item.transporte===updated.id?{...item,...synchronized}:item):[...calendarEvents,{id:'EV-'+Date.now(),...synchronized}];setTransports(nextTransports);setCases(nextCases);setCalendarEvents(nextCalendar);saveOperational(nextCases,nextTransports,warehouseEntries,customs,nextCalendar);notify('Ruta, transporte y calendario actualizados')};
-  const updateCase=updated=>{const {importe,...rawCase}=updated;const operationalCase=normalizeMerchandise(rawCase);const next=cases.map(item=>item.id===operationalCase.id?operationalCase:item);setCases(next);saveOperational(next,transports,warehouseEntries);notify('Expediente actualizado')};
+  const updateCase=updated=>{const {importe,...rawCase}=updated;const operationalCase=normalizeMerchandise(rawCase);const next=cases.map(item=>item.id===operationalCase.id?operationalCase:item);const activeEntries=warehouseEntries.filter(entry=>entry.expediente===operationalCase.id&&!entry.archivado);const nextWarehouse=warehouseEntries.map(entry=>activeEntries.length===1&&entry.ref===activeEntries[0].ref?{...entry,buque:operationalCase.buque,mercancias:operationalCase.mercancias,bultos:merchandiseCount(operationalCase.mercancias),peso:merchandiseWeightLabel(operationalCase.mercancias)}:entry);setCases(next);setWarehouseEntries(nextWarehouse);saveOperational(next,transports,nextWarehouse);notify(activeEntries.length===1?'Expediente y almacén actualizados':'Expediente actualizado')};
   const updateClient=updated=>{const next={...finance,clients:finance.clients.map(item=>item.codigo===updated.codigo?updated:item)};onFinanceChange(next).then(()=>notify('Cliente y tarifas actualizados')).catch(reason=>notify(reason.message))};
   const updateInvoice=updated=>{const next={...finance,invoices:finance.invoices.map(item=>item.id===updated.id?updated:item)};onFinanceChange(next).then(()=>notify('Documento actualizado')).catch(reason=>notify(reason.message))};
-  const updateWarehouseEntry=updated=>{const next=warehouseEntries.map(item=>item.ref===updated.ref?updated:item);setWarehouseEntries(next);saveOperational(cases,transports,next);notify('Entrada de almacén actualizada')};
+  const updateWarehouseEntry=updated=>{
+    const previous=warehouseEntries.find(item=>item.ref===updated.ref);
+    const relatedCase=cases.find(item=>item.id===updated.expediente);
+    const normalized={...updated,buque:relatedCase?.buque||updated.buque||'Mercancía sin identificar',expediente:updated.expediente||'',sinExpediente:!updated.expediente};
+    const next=warehouseEntries.map(item=>item.ref===updated.ref?normalized:item);
+    let nextCases=cases;
+    if(relatedCase&&previous?.expediente!==updated.expediente){
+      const reception={ref:normalized.ref,fecha:normalized.fechaRecepcion||normalized.entrada,zona:normalized.zona,peso:normalized.peso,mercancias:normalized.mercancias||[],fotos:normalized.fotos||[],documentos:normalized.documentosRecepcion||[]};
+      const now=new Date();
+      nextCases=cases.map(item=>item.id===relatedCase.id?normalizeMerchandise({
+        ...item,
+        mercancias:[...(item.mercancias||[]),...(normalized.mercancias||[])],
+        recepciones:[reception,...(item.recepciones||[])],
+        operationalFlow:{...operationFlow(item),review:true,cargo:true},
+        estado:'En curso',
+        timelineCustom:[{
+          id:`WAREHOUSE-LINK-${normalized.ref}-${Date.now()}`,
+          fecha:now.toLocaleDateString('es-ES'),
+          hora:now.toLocaleTimeString('es-ES',{hour:'2-digit',minute:'2-digit'}),
+          titulo:'Mercancía vinculada desde almacén',
+          detalle:`${normalized.ref} · ${normalized.bultos} bultos · ${normalized.peso} · Zona ${normalized.zona}`,
+          actor:visibleUser.fullName,
+          estado:'done'
+        },...(item.timelineCustom||[])]
+      }):item);
+    }
+    setWarehouseEntries(next);setCases(nextCases);saveOperational(nextCases,transports,next);
+    notify(relatedCase&&previous?.expediente!==updated.expediente?'Mercancía vinculada al expediente':'Entrada de almacén actualizada');
+  };
   const updateCustom=updated=>{const next=customs.map(item=>item.id===updated.id?updated:item);setCustoms(next);saveOperational(cases,transports,warehouseEntries,next);notify('Trámite aduanero actualizado')};
   const saveCalendarEvent=event=>{
     let colored={...event,tipoServicio:event.tipoServicio||(event.transporte?'Transporte':'Recepción'),color:driverTone(event.asignado,operationalTeam)};
@@ -464,10 +529,15 @@ function App({auth,finance,onFinanceChange,onLogout}){
     const now=new Date();
     const timelineEntry={id:`FLOW-${id}-${stepKey}-${Date.now()}`,fecha:now.toLocaleDateString('es-ES'),hora:now.toLocaleTimeString('es-ES',{hour:'2-digit',minute:'2-digit'}),titulo:expected.title,detalle:note||'Paso confirmado sin incidencias',actor:visibleUser.fullName,archivo:ready?evidenceFiles[0]||null:null,archivos:stepKey==='cargo'?evidenceFiles:[],estado:'done'};
     const linkedTransport=transports.find(item=>item.expediente===id);
-    const cargoReception=stepKey==='cargo'?{ref:`REC-${Date.now()}`,fecha:now.toISOString(),zona:linkedTransport?.ruta||'RECOGIDA / RECEPCIÓN',peso:target.peso,mercancias:target.mercancias||[],fotos:evidenceFiles.map((file,index)=>({...file,tipo:index===0?'VISTA GENERAL':'ESTADO DE EMBALAJE',mercancia:`${target.bultos||0} BULTOS · ${target.peso||'PESO PENDIENTE'}`,nota:`Registrado por ${visibleUser.fullName}`})),documentos:[]}:null;
-    const nextCases=cases.map(item=>item.id===id?normalizeMerchandise({...item,operationalFlow:flow,progreso:ready?100:OPERATION_STEPS.filter(step=>flow[step.key]).length*25,siguiente:ready?'Listo para facturar':nextStep?.next||'',estado:ready?'Completado':'En curso',recepciones:cargoReception?[cargoReception,...(item.recepciones||[])]:item.recepciones,documentacionMercancia:ready?{...item.documentacionMercancia,podDisponible:true,podArchivo:evidenceFiles[0]||item.documentacionMercancia?.podArchivo||null}:item.documentacionMercancia,timelineCustom:[timelineEntry,...(item.timelineCustom||[])]}):item);
+    const cargoMerchandise=(target.mercancias||[]).length?target.mercancias:[{id:`${id}-AUTO-${Date.now()}`,tipo:'CAJA',cantidad:Math.max(1,Number(target.bultos)||1),seguimiento:'',peso:target.peso&&!/registrar|pendiente/i.test(target.peso)?target.peso:'PESO PENDIENTE',documentos:[]}];
+    const cargoPhotos=evidenceFiles.map((file,index)=>({...file,tipo:index===0?'VISTA GENERAL':'ESTADO DE EMBALAJE',mercancia:cargoMerchandise.map(line=>`${line.cantidad} ${line.tipo}${line.cantidad===1?'':'S'} · ${line.peso||'PESO PENDIENTE'}`).join(' · '),nota:`Registrado por ${visibleUser.fullName}`}));
+    const cargoReference=`ALM-${Date.now()}`;
+    const cargoReception=stepKey==='cargo'?{ref:cargoReference,source:'driver-flow',fecha:now.toISOString(),zona:linkedTransport?.origen||'PENDIENTE DE UBICAR',peso:merchandiseWeightLabel(cargoMerchandise),mercancias:cargoMerchandise,fotos:cargoPhotos,documentos:[]}:null;
+    const nextCases=cases.map(item=>item.id===id?normalizeMerchandise({...item,mercancias:stepKey==='cargo'?cargoMerchandise:item.mercancias,operationalFlow:flow,progreso:ready?100:OPERATION_STEPS.filter(step=>flow[step.key]).length*25,siguiente:ready?'Listo para facturar':nextStep?.next||'',estado:ready?'Completado':'En curso',recepciones:cargoReception?[cargoReception,...(item.recepciones||[])]:item.recepciones,documentacionMercancia:ready?{...item.documentacionMercancia,podDisponible:true,podArchivo:evidenceFiles[0]||item.documentacionMercancia?.podArchivo||null}:item.documentacionMercancia,timelineCustom:[timelineEntry,...(item.timelineCustom||[])]}):item);
     const nextTransports=ready?transports.map(item=>item.expediente===id?{...item,estado:'Entregado'}:item):transports;
-    const nextWarehouse=ready?warehouseEntries.map(item=>item.expediente===id?{...item,estado:'Expedido',archivado:true,salida:new Date().toISOString()}:item):warehouseEntries;
+    const alreadyInWarehouse=warehouseEntries.some(item=>item.expediente===id&&!item.archivado&&item.estado!=='Expedido');
+    const automaticWarehouseEntry=stepKey==='cargo'&&!alreadyInWarehouse?{ref:cargoReference,source:'driver-flow',expediente:id,buque:target.buque,zona:'PENDIENTE',entrada:formatReceptionDate(now.toISOString()),fechaRecepcion:now.toISOString(),bultos:merchandiseCount(cargoMerchandise),peso:merchandiseWeightLabel(cargoMerchandise),mercancias:cargoMerchandise,fotos:cargoPhotos,documentosRecepcion:[],dias:0,estado:'En stock',archivado:false}:null;
+    const nextWarehouse=ready?warehouseEntries.map(item=>item.expediente===id?{...item,estado:'Expedido',archivado:true,salida:new Date().toISOString()}:item):automaticWarehouseEntry?[automaticWarehouseEntry,...warehouseEntries]:warehouseEntries;
     setCases(nextCases);setTransports(nextTransports);setWarehouseEntries(nextWarehouse);
     saveOperational(nextCases,nextTransports,nextWarehouse);
     notify(ready?'POD registrado: expediente listo para facturar':expected.title+' registrado');
@@ -485,9 +555,9 @@ function App({auth,finance,onFinanceChange,onLogout}){
     const progress=OPERATION_STEPS.filter(step=>flow[step.key]).length*25;
     const now=new Date();
     const timelineEntry={id:`UNDO-${id}-${stepKey}-${Date.now()}`,fecha:now.toLocaleDateString('es-ES'),hora:now.toLocaleTimeString('es-ES',{hour:'2-digit',minute:'2-digit'}),titulo:`Paso reabierto: ${reopened.title}`,detalle:'El conductor deshizo la confirmación para corregir o repetir este paso',actor:visibleUser.fullName,estado:'done'};
-    const nextCases=cases.map(item=>item.id===id?normalizeMerchandise({...item,operationalFlow:flow,progreso:progress,siguiente:reopened.next,estado:'En curso',recepciones:stepKey==='cargo'?(item.recepciones||[]).filter((reception,index)=>index>0||!String(reception.ref||'').startsWith('REC-')):item.recepciones,documentacionMercancia:stepKey==='delivery'?{...item.documentacionMercancia,podDisponible:false,podArchivo:null}:item.documentacionMercancia,timelineCustom:[timelineEntry,...(item.timelineCustom||[])]}):item);
+    const nextCases=cases.map(item=>item.id===id?normalizeMerchandise({...item,operationalFlow:flow,progreso:progress,siguiente:reopened.next,estado:'En curso',recepciones:stepKey==='cargo'?(item.recepciones||[]).filter(reception=>reception.source!=='driver-flow'):item.recepciones,documentacionMercancia:stepKey==='delivery'?{...item.documentacionMercancia,podDisponible:false,podArchivo:null}:item.documentacionMercancia,timelineCustom:[timelineEntry,...(item.timelineCustom||[])]}):item);
     const nextTransports=stepKey==='delivery'?transports.map(item=>item.expediente===id?{...item,estado:item.conductor&&item.conductor!=='Sin asignar'?'Asignado':'Sin asignar'}:item):transports;
-    const nextWarehouse=stepKey==='delivery'?warehouseEntries.map(item=>item.expediente===id?{...item,estado:'En stock',archivado:false,salida:null}:item):warehouseEntries;
+    const nextWarehouse=stepKey==='delivery'?warehouseEntries.map(item=>item.expediente===id?{...item,estado:'En stock',archivado:false,salida:null}:item):stepKey==='cargo'?warehouseEntries.filter(item=>!(item.expediente===id&&item.source==='driver-flow')):warehouseEntries;
     setCases(nextCases);setTransports(nextTransports);setWarehouseEntries(nextWarehouse);
     saveOperational(nextCases,nextTransports,nextWarehouse);
     notify(`${reopened.title} reabierto`);
@@ -497,7 +567,7 @@ function App({auth,finance,onFinanceChange,onLogout}){
     const nextReference=319+warehouseEntries.length-movimientosAlmacen.length;
     const reference='ALM-'+nextReference;
     const merchandise=form.mercancias.map((line,index)=>({
-      id:`${form.expediente}-${reference}-M${index+1}`,
+      id:`${form.expediente||'SIN-EXP'}-${reference}-M${index+1}`,
       tipo:line.tipo,
       cantidad:Number(line.cantidad)||1,
       seguimiento:line.seguimiento.trim().toUpperCase(),
@@ -509,8 +579,9 @@ function App({auth,finance,onFinanceChange,onLogout}){
     const totalWeight=form.mercancias.reduce((sum,line)=>sum+(Number(line.peso)||0),0);
     const item={
       ref:reference,
-      expediente:form.expediente,
-      buque:relatedCase?.buque||'Sin buque',
+      expediente:form.expediente||'',
+      sinExpediente:!relatedCase,
+      buque:relatedCase?.buque||form.identificacion?.trim()||'Mercancía sin identificar',
       zona:form.zona.toUpperCase(),
       entrada:formatReceptionDate(form.fechaRecepcion),
       bultos:totalPackages,
@@ -545,7 +616,7 @@ function App({auth,finance,onFinanceChange,onLogout}){
       });
     });
     const next=[item,...warehouseEntries];setWarehouseEntries(next);setCases(nextCases);saveOperational(nextCases,transports,next);
-    notify('Entrada '+item.ref+' registrada en '+item.zona);
+    notify(relatedCase?`Entrada ${item.ref} vinculada a ${relatedCase.id}`:`Entrada ${item.ref} guardada sin expediente`);
   };
   const [title,subtitle]=TITLES[tab];
   const startPreview=member=>{setPreviewUser(member);setTab('dashboard');notify('Vista previa activada')};
@@ -866,10 +937,37 @@ function Almacen({items,cases,openCase,registerEntry,updateEntry,showFinance,sto
   const [editing,setEditing]=useState(null);
   const [view,setView]=useState('Activos');
   const visibleItems=items.filter(item=>view==='Archivados'?item.archivado||item.estado==='Expedido':!item.archivado&&item.estado!=='Expedido');
-  const totalPackages=items.filter(item=>item.estado!=='Expedido').reduce((sum,item)=>sum+item.bultos,0);
+  const totalPackages=items.filter(item=>item.estado!=='Expedido').reduce((sum,item)=>sum+(Number(item.bultos)||0),0);
   const totalWeight=items.filter(item=>item.estado!=='Expedido').reduce((sum,item)=>sum+(Number(String(item.peso).replace(/\./g,'').replace(',','.').replace(/[^\d.]/g,''))||0),0);
   const submit=form=>{registerEntry(form);setEntryOpen(false)};
-  return <><section className={'summary-strip '+(!showFinance?'summary-strip-three':'')}><Summary icon={Box} label="Bultos en stock" value={String(totalPackages)}/><Summary icon={Scale} label="Peso total" value={totalWeight.toLocaleString('es-ES')+' kg'}/><Summary icon={Layers3} label="Ocupación" value={Math.min(95,Math.round(48+totalPackages*1.5))+'%'}/>{showFinance&&<Summary icon={CircleDollarSign} label="Storage acumulado" value={money(storageTotal)}/>}</section><section className="panel"><SectionHeader title="Mercancía y ubicaciones" subtitle="Las entregas completadas salen del stock y quedan archivadas" action={<button className="button secondary" onClick={()=>setEntryOpen(true)}><Plus/> Registrar entrada</button>}/><div className="warehouse-view-tabs"><button className={view==='Activos'?'active':''} onClick={()=>setView('Activos')}>En almacén <span>{items.filter(item=>!item.archivado&&item.estado!=='Expedido').length}</span></button><button className={view==='Archivados'?'active':''} onClick={()=>setView('Archivados')}>Archivados <span>{items.filter(item=>item.archivado||item.estado==='Expedido').length}</span></button></div><div className="responsive-table warehouse-table"><div className="table-head"><span>Referencia / expediente</span><span>Ubicación</span><span>Entrada</span><span>Mercancía</span><span>Storage</span><span>Estado</span></div>{visibleItems.map(item=><button className="table-row" key={item.ref} onClick={()=>setEditing(item)}><span className="primary-cell"><span className="box-icon"><Box/></span><span><b>{item.buque}</b><small>{item.ref} · {item.expediente}</small></span></span><span data-label="Ubicación"><b>{item.zona}</b></span><span data-label="Entrada">{item.entrada}</span><span data-label="Mercancía">{item.bultos} bultos<small>{item.peso}</small></span><span data-label="Storage">{item.dias} día{item.dias===1?'':'s'}</span><span data-label="Estado"><Badge>{item.estado}</Badge></span></button>)}</div></section>{entryOpen&&<WarehouseEntryModal cases={cases} csrfToken={csrfToken} close={()=>setEntryOpen(false)} submit={submit}/>} {editing&&<WarehouseEditModal item={editing} cases={cases} close={()=>setEditing(null)} submit={item=>{updateEntry(item);setEditing(null)}}/>}</>;
+  return <>
+    <section className={'summary-strip '+(!showFinance?'summary-strip-three':'')}>
+      <Summary icon={Box} label="Bultos en stock" value={String(totalPackages)}/>
+      <Summary icon={Scale} label="Peso total" value={totalWeight.toLocaleString('es-ES')+' kg'}/>
+      <Summary icon={Layers3} label="Ocupación" value={Math.min(95,Math.round(48+totalPackages*1.5))+'%'}/>
+      {showFinance&&<Summary icon={CircleDollarSign} label="Storage acumulado" value={money(storageTotal)}/>}
+    </section>
+    <section className="panel">
+      <SectionHeader title="Mercancía y ubicaciones" subtitle="Cada recepción queda en stock, tenga o no expediente" action={<button className="button secondary" onClick={()=>setEntryOpen(true)}><Plus/> Registrar entrada</button>}/>
+      <div className="warehouse-view-tabs">
+        <button className={view==='Activos'?'active':''} onClick={()=>setView('Activos')}>En almacén <span>{items.filter(item=>!item.archivado&&item.estado!=='Expedido').length}</span></button>
+        <button className={view==='Archivados'?'active':''} onClick={()=>setView('Archivados')}>Archivados <span>{items.filter(item=>item.archivado||item.estado==='Expedido').length}</span></button>
+      </div>
+      <div className="responsive-table warehouse-table">
+        <div className="table-head"><span>Referencia / expediente</span><span>Ubicación</span><span>Entrada</span><span>Mercancía</span><span>Storage</span><span>Estado</span></div>
+        {visibleItems.map(item=><button className="table-row" key={item.ref} onClick={()=>setEditing(item)}>
+          <span className="primary-cell"><span className="box-icon"><Box/></span><span><b>{item.buque}</b><small>{item.ref} · {item.expediente||'SIN EXPEDIENTE'}</small></span></span>
+          <span data-label="Ubicación"><b>{item.zona}</b></span>
+          <span data-label="Entrada">{item.entrada}</span>
+          <span data-label="Mercancía">{item.bultos} bultos<small>{item.peso}</small></span>
+          <span data-label="Storage">{item.dias} día{item.dias===1?'':'s'}</span>
+          <span data-label="Estado"><Badge>{item.expediente?item.estado:'Por vincular'}</Badge></span>
+        </button>)}
+      </div>
+    </section>
+    {entryOpen&&<WarehouseEntryModal cases={cases} csrfToken={csrfToken} close={()=>setEntryOpen(false)} submit={submit}/>}
+    {editing&&<WarehouseEditModal item={editing} cases={cases} close={()=>setEditing(null)} submit={item=>{updateEntry(item);setEditing(null)}}/>}
+  </>;
 }
 function Summary({icon:Icon,label,value}){return <article><span><Icon/></span><div><small>{label}</small><b>{value}</b></div></article>}
 
@@ -1115,7 +1213,7 @@ function NewCaseModal({clientOptions=[],close,submit}){
 }
 
 function WarehouseEntryModal({cases,close,submit,csrfToken}){
-  const [form,setForm]=useState({expediente:cases[0]?.id||'',fechaRecepcion:localDateTimeValue(),zona:'A-01',mercancias:[{tipo:'CAJA',cantidad:'1',peso:'',seguimiento:''}]});
+  const [form,setForm]=useState({expediente:'',identificacion:'',fechaRecepcion:localDateTimeValue(),zona:'A-01',mercancias:[{tipo:'CAJA',cantidad:'1',peso:'',seguimiento:''}]});
   const [photos,setPhotos]=useState([]);
   const [documents,setDocuments]=useState([]);
   const [busy,setBusy]=useState(false);
@@ -1147,7 +1245,8 @@ function WarehouseEntryModal({cases,close,submit,csrfToken}){
     <section className="modal warehouse-entry-modal" role="dialog" aria-modal="true" aria-labelledby="warehouse-entry-title">
       <div className="modal-head"><div><span className="overline">Almacén</span><h2 id="warehouse-entry-title">Registrar mercancía</h2><p>Indica cantidad y peso de cada grupo recibido.</p></div><button className="icon-button" aria-label="Cerrar" disabled={busy} onClick={close}><X/></button></div>
       <form onSubmit={save}>
-        <label className="field wide"><span>Expediente</span><select name="expediente" value={form.expediente} onChange={update} required>{cases.map(item=><option value={item.id} key={item.id}>{caseLabel(item)}</option>)}</select></label>
+        <label className="field wide"><span>Expediente (opcional)</span><select name="expediente" value={form.expediente} onChange={update}><option value="">SIN EXPEDIENTE · VINCULAR DESPUÉS</option>{cases.map(item=><option value={item.id} key={item.id}>{caseLabel(item)}</option>)}</select></label>
+        {!form.expediente&&<label className="field wide"><span>Identificación provisional *</span><input name="identificacion" value={form.identificacion} onChange={update} placeholder="Remitente, tracking, proveedor o descripción" required/></label>}
         <label className="field"><span>Fecha y hora de llegada *</span><input name="fechaRecepcion" type="datetime-local" value={form.fechaRecepcion} onChange={update} required/></label>
         <label className="field"><span>Ubicación *</span><input name="zona" value={form.zona} onChange={update} placeholder="Ej. A-01" required/></label>
         <div className="cargo-lines wide">
@@ -1176,7 +1275,7 @@ function WarehouseEntryModal({cases,close,submit,csrfToken}){
 function WarehouseEditModal({item,cases,close,submit}){
   const [form,setForm]=useState({...item});const update=event=>setForm({...form,[event.target.name]:event.target.value});
   const save=event=>{event.preventDefault();const related=cases.find(entry=>entry.id===form.expediente);submit({...form,buque:related?.buque||form.buque,bultos:Number(form.bultos)||0,dias:Number(form.dias)||0})};
-  return <div className="modal-backdrop" onMouseDown={event=>{if(event.target===event.currentTarget)close()}}><section className="modal" role="dialog" aria-modal="true"><div className="modal-head"><div><span className="overline">{item.ref}</span><h2>Editar entrada de almacén</h2></div><button className="icon-button" onClick={close}><X/></button></div><form onSubmit={save}><label className="field wide"><span>Expediente</span><select name="expediente" value={form.expediente} onChange={update}>{cases.map(entry=><option key={entry.id} value={entry.id}>{entry.id} · {entry.buque}</option>)}</select></label><label className="field"><span>Ubicación</span><input name="zona" value={form.zona} onChange={update} required/></label><label className="field"><span>Fecha de entrada</span><input name="entrada" value={form.entrada} onChange={update} required/></label><label className="field"><span>Bultos</span><input name="bultos" type="number" min="0" value={form.bultos} onChange={update}/></label><label className="field"><span>Peso</span><input name="peso" value={form.peso} onChange={update}/></label><label className="field"><span>Días de storage</span><input name="dias" type="number" min="0" value={form.dias} onChange={update}/></label><label className="field"><span>Estado</span><select name="estado" value={form.estado} onChange={update}>{['En stock','Retenido','Preparado','Expedido'].map(value=><option key={value}>{value}</option>)}</select></label><div className="modal-actions wide"><button type="button" className="button tertiary" onClick={close}>Cancelar</button><button className="button primary"><Save/> Guardar entrada</button></div></form></section></div>;
+  return <div className="modal-backdrop" onMouseDown={event=>{if(event.target===event.currentTarget)close()}}><section className="modal" role="dialog" aria-modal="true"><div className="modal-head"><div><span className="overline">{item.ref}</span><h2>{item.expediente?'Editar entrada de almacén':'Vincular mercancía recibida'}</h2><p>{item.expediente?'Los cambios se reflejarán en el stock.':'Selecciona el expediente cuando sepas a qué buque pertenece.'}</p></div><button className="icon-button" onClick={close}><X/></button></div><form onSubmit={save}><label className="field wide"><span>Expediente</span><select name="expediente" value={form.expediente||''} onChange={update}><option value="">SIN EXPEDIENTE</option>{cases.map(entry=><option key={entry.id} value={entry.id}>{entry.id} · {entry.buque}</option>)}</select></label>{!form.expediente&&<label className="field wide"><span>Identificación provisional</span><input name="buque" value={form.buque||''} onChange={update} required/></label>}<label className="field"><span>Ubicación</span><input name="zona" value={form.zona} onChange={update} required/></label><label className="field"><span>Fecha de entrada</span><input name="entrada" value={form.entrada} onChange={update} required/></label><label className="field"><span>Bultos</span><input name="bultos" type="number" min="0" value={form.bultos} onChange={update}/></label><label className="field"><span>Peso</span><input name="peso" value={form.peso} onChange={update}/></label><label className="field"><span>Días de storage</span><input name="dias" type="number" min="0" value={form.dias} onChange={update}/></label><label className="field"><span>Estado</span><select name="estado" value={form.estado} onChange={update}>{['En stock','Retenido','Preparado','Expedido'].map(value=><option key={value}>{value}</option>)}</select></label><div className="modal-actions wide"><button type="button" className="button tertiary" onClick={close}>Cancelar</button><button className="button primary"><Save/> {form.expediente?'Guardar y vincular':'Guardar entrada'}</button></div></form></section></div>;
 }
 
 if('serviceWorker' in navigator)window.addEventListener('load',()=>navigator.serviceWorker.register('/sw.js').catch(()=>{}));
