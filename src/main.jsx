@@ -7,7 +7,7 @@ import {
   Circle, Camera, Box, Scale, Layers3, Navigation, UserRound, FileText, UploadCloud,
   Download, Filter, CircleDollarSign, ExternalLink, Mail, PencilLine, ClipboardCheck,
   BadgeEuro, Sparkles, ArrowLeft, Save, LogOut, ShieldCheck, LockKeyhole, UserPlus, Eye,
-  RefreshCw, Timer, Undo2
+  RefreshCw, Timer, Undo2, ScanLine
 } from 'lucide-react';
 import {
   expedientesIniciales, movimientosAlmacen, transportesIniciales, proveedoresIniciales, tramitesAduana, eventosCalendarioIniciales,
@@ -213,21 +213,131 @@ const imageFromFile=file=>new Promise((resolve,reject)=>{
   image.src=url;
 });
 
+const documentCorners=image=>{
+  const maximum=640;
+  const scale=Math.min(1,maximum/Math.max(image.naturalWidth,image.naturalHeight));
+  const width=Math.max(1,Math.round(image.naturalWidth*scale));
+  const height=Math.max(1,Math.round(image.naturalHeight*scale));
+  const canvas=document.createElement('canvas');
+  canvas.width=width;canvas.height=height;
+  const context=canvas.getContext('2d',{willReadFrequently:true});
+  context.drawImage(image,0,0,width,height);
+  const pixels=context.getImageData(0,0,width,height).data;
+  const histogram=new Uint32Array(256);
+  for(let index=0;index<pixels.length;index+=4){
+    const luminance=Math.round(pixels[index]*.299+pixels[index+1]*.587+pixels[index+2]*.114);
+    histogram[luminance]++;
+  }
+  const total=width*height;
+  let sum=0;
+  for(let value=0;value<256;value++)sum+=value*histogram[value];
+  let background=0,backgroundSum=0,best=-1,threshold=145;
+  for(let value=0;value<256;value++){
+    background+=histogram[value];
+    if(!background)continue;
+    const foreground=total-background;
+    if(!foreground)break;
+    backgroundSum+=value*histogram[value];
+    const meanBackground=backgroundSum/background;
+    const meanForeground=(sum-backgroundSum)/foreground;
+    const variance=background*foreground*(meanBackground-meanForeground)**2;
+    if(variance>best){best=variance;threshold=value}
+  }
+  threshold=Math.max(105,Math.min(205,threshold+8));
+  const mask=new Uint8Array(total);
+  for(let pixel=0;pixel<total;pixel++){
+    const offset=pixel*4;
+    const red=pixels[offset],green=pixels[offset+1],blue=pixels[offset+2];
+    const luminance=red*.299+green*.587+blue*.114;
+    const chroma=Math.max(red,green,blue)-Math.min(red,green,blue);
+    if(luminance>=threshold&&chroma<105)mask[pixel]=1;
+  }
+  const queue=new Int32Array(total);
+  let largest=null;
+  for(let start=0;start<total;start++){
+    if(!mask[start])continue;
+    let head=0,tail=0,count=0;
+    let tl={score:Infinity,x:0,y:0},tr={score:-Infinity,x:0,y:0},br={score:-Infinity,x:0,y:0},bl={score:Infinity,x:0,y:0};
+    queue[tail++]=start;mask[start]=0;
+    while(head<tail){
+      const current=queue[head++],x=current%width,y=Math.floor(current/width);count++;
+      const sumScore=x+y,difference=x-y;
+      if(sumScore<tl.score)tl={score:sumScore,x,y};
+      if(difference>tr.score)tr={score:difference,x,y};
+      if(sumScore>br.score)br={score:sumScore,x,y};
+      if(difference<bl.score)bl={score:difference,x,y};
+      if(x>0&&mask[current-1]){mask[current-1]=0;queue[tail++]=current-1}
+      if(x<width-1&&mask[current+1]){mask[current+1]=0;queue[tail++]=current+1}
+      if(y>0&&mask[current-width]){mask[current-width]=0;queue[tail++]=current-width}
+      if(y<height-1&&mask[current+width]){mask[current+width]=0;queue[tail++]=current+width}
+    }
+    if(!largest||count>largest.count)largest={count,corners:[tl,tr,br,bl]};
+  }
+  if(!largest||largest.count<total*.045)return null;
+  const sourceScale=1/scale;
+  const points=largest.corners.map(point=>({x:point.x*sourceScale,y:point.y*sourceScale}));
+  const center=points.reduce((result,point)=>({x:result.x+point.x/4,y:result.y+point.y/4}),{x:0,y:0});
+  return points.map(point=>({
+    x:Math.max(0,Math.min(image.naturalWidth-1,center.x+(point.x-center.x)*1.012)),
+    y:Math.max(0,Math.min(image.naturalHeight-1,center.y+(point.y-center.y)*1.012))
+  }));
+};
+
+const distance=(first,second)=>Math.hypot(second.x-first.x,second.y-first.y);
+
 async function scannedPodPdf(file,caseId){
   const source=await imageFromFile(file);
+  const detected=documentCorners(source);
+  const corners=detected||[
+    {x:source.naturalWidth*.035,y:source.naturalHeight*.035},
+    {x:source.naturalWidth*.965,y:source.naturalHeight*.035},
+    {x:source.naturalWidth*.965,y:source.naturalHeight*.965},
+    {x:source.naturalWidth*.035,y:source.naturalHeight*.965}
+  ];
+  const [topLeft,topRight,bottomRight,bottomLeft]=corners;
+  const rawWidth=Math.max(distance(topLeft,topRight),distance(bottomLeft,bottomRight));
+  const rawHeight=Math.max(distance(topLeft,bottomLeft),distance(topRight,bottomRight));
   const maximum=2200;
-  const scale=Math.min(1,maximum/Math.max(source.naturalWidth,source.naturalHeight));
-  const width=Math.max(1,Math.round(source.naturalWidth*scale));
-  const height=Math.max(1,Math.round(source.naturalHeight*scale));
+  const scale=Math.min(1,maximum/Math.max(rawWidth,rawHeight));
+  const width=Math.max(1,Math.round(rawWidth*scale));
+  const height=Math.max(1,Math.round(rawHeight*scale));
+  const samplingScale=Math.min(1,2800/Math.max(source.naturalWidth,source.naturalHeight));
+  const sourceCanvas=document.createElement('canvas');
+  sourceCanvas.width=Math.max(1,Math.round(source.naturalWidth*samplingScale));sourceCanvas.height=Math.max(1,Math.round(source.naturalHeight*samplingScale));
+  const sourceContext=sourceCanvas.getContext('2d',{willReadFrequently:true});
+  sourceContext.drawImage(source,0,0,sourceCanvas.width,sourceCanvas.height);
+  const sourcePixels=sourceContext.getImageData(0,0,sourceCanvas.width,sourceCanvas.height).data;
   const canvas=document.createElement('canvas');
-  canvas.width=width;
-  canvas.height=height;
+  canvas.width=width;canvas.height=height;
   const context=canvas.getContext('2d',{alpha:false});
-  context.fillStyle='#fff';
-  context.fillRect(0,0,width,height);
-  context.filter='grayscale(1) contrast(1.28) brightness(1.08)';
-  context.drawImage(source,0,0,width,height);
-  const jpeg=await new Promise((resolve,reject)=>canvas.toBlob(blob=>blob?resolve(blob):reject(new Error('No se pudo preparar el escaneo.')),'image/jpeg',.88));
+  const output=context.createImageData(width,height);
+  const [sampleTopLeft,sampleTopRight,sampleBottomRight,sampleBottomLeft]=corners.map(point=>({x:point.x*samplingScale,y:point.y*samplingScale}));
+  const dx1=sampleTopRight.x-sampleBottomRight.x,dx2=sampleBottomLeft.x-sampleBottomRight.x,dx3=sampleTopLeft.x-sampleTopRight.x+sampleBottomRight.x-sampleBottomLeft.x;
+  const dy1=sampleTopRight.y-sampleBottomRight.y,dy2=sampleBottomLeft.y-sampleBottomRight.y,dy3=sampleTopLeft.y-sampleTopRight.y+sampleBottomRight.y-sampleBottomLeft.y;
+  const denominator=dx1*dy2-dx2*dy1;
+  const projectiveG=Math.abs(denominator)<.0001?0:(dx3*dy2-dx2*dy3)/denominator;
+  const projectiveH=Math.abs(denominator)<.0001?0:(dx1*dy3-dx3*dy1)/denominator;
+  const a=sampleTopRight.x-sampleTopLeft.x+projectiveG*sampleTopRight.x;
+  const b=sampleBottomLeft.x-sampleTopLeft.x+projectiveH*sampleBottomLeft.x;
+  const c=sampleTopLeft.x;
+  const d=sampleTopRight.y-sampleTopLeft.y+projectiveG*sampleTopRight.y;
+  const e=sampleBottomLeft.y-sampleTopLeft.y+projectiveH*sampleBottomLeft.y;
+  const f=sampleTopLeft.y;
+  for(let y=0;y<height;y++){
+    const vertical=height===1?0:y/(height-1);
+    for(let x=0;x<width;x++){
+      const horizontal=width===1?0:x/(width-1);
+      const divisor=projectiveG*horizontal+projectiveH*vertical+1;
+      const sourceX=Math.max(0,Math.min(sourceCanvas.width-1,Math.round((a*horizontal+b*vertical+c)/divisor)));
+      const sourceY=Math.max(0,Math.min(sourceCanvas.height-1,Math.round((d*horizontal+e*vertical+f)/divisor)));
+      const sourceOffset=(sourceY*sourceCanvas.width+sourceX)*4;
+      const targetOffset=(y*width+x)*4;
+      const gray=Math.max(0,Math.min(255,(sourcePixels[sourceOffset]*.299+sourcePixels[sourceOffset+1]*.587+sourcePixels[sourceOffset+2]*.114-18)*1.32+18));
+      output.data[targetOffset]=gray;output.data[targetOffset+1]=gray;output.data[targetOffset+2]=gray;output.data[targetOffset+3]=255;
+    }
+  }
+  context.putImageData(output,0,0);
+  const jpeg=await new Promise((resolve,reject)=>canvas.toBlob(blob=>blob?resolve(blob):reject(new Error('No se pudo preparar el escaneo.')),'image/jpeg',.9));
   const jpegBytes=new Uint8Array(await jpeg.arrayBuffer());
   const encoder=new TextEncoder();
   const portrait=height>=width;
@@ -521,19 +631,24 @@ function App({auth,finance,onFinanceChange,onLogout}){
     const expected=nextOperationStep(target);
     if(!expected||expected.key!==stepKey){notify('Completa primero el paso anterior');return}
     const evidenceFiles=Array.isArray(evidence)?evidence.filter(Boolean):evidence?[evidence]:[];
-    if(['cargo','delivery'].includes(stepKey)&&!evidenceFiles.length){notify(stepKey==='cargo'?'Añade al menos una foto de la mercancía':'Escanea o adjunta el POD firmado');return}
+    const cargoEvidence=stepKey==='cargo'?evidenceFiles:[];
+    const deliveryPhotos=stepKey==='delivery'?evidenceFiles.filter(file=>file.evidenceType==='delivery-photo'):[];
+    const podFiles=stepKey==='delivery'?evidenceFiles.filter(file=>file.evidenceType==='pod'||(!file.evidenceType&&file)):[];
+    if(stepKey==='cargo'&&!cargoEvidence.length){notify('Añade al menos una foto de la mercancía');return}
+    if(stepKey==='delivery'&&!deliveryPhotos.length){notify('Añade al menos una foto de la mercancía entregada');return}
+    if(stepKey==='delivery'&&!podFiles.length){notify('Escanea o adjunta el POD firmado');return}
     const flow={...operationFlow(target),[stepKey]:true};
     const ready=stepKey==='delivery';
     if(ready)flow.billingReady=true;
     const nextStep=OPERATION_STEPS.find(step=>!flow[step.key]);
     const now=new Date();
-    const timelineEntry={id:`FLOW-${id}-${stepKey}-${Date.now()}`,fecha:now.toLocaleDateString('es-ES'),hora:now.toLocaleTimeString('es-ES',{hour:'2-digit',minute:'2-digit'}),titulo:expected.title,detalle:note||'Paso confirmado sin incidencias',actor:visibleUser.fullName,archivo:ready?evidenceFiles[0]||null:null,archivos:stepKey==='cargo'?evidenceFiles:[],estado:'done'};
+    const timelineEntry={id:`FLOW-${id}-${stepKey}-${Date.now()}`,fecha:now.toLocaleDateString('es-ES'),hora:now.toLocaleTimeString('es-ES',{hour:'2-digit',minute:'2-digit'}),titulo:expected.title,detalle:note||'Paso confirmado sin incidencias',actor:visibleUser.fullName,archivo:ready?podFiles[0]||null:null,archivos:stepKey==='cargo'?cargoEvidence:deliveryPhotos,estado:'done'};
     const linkedTransport=transports.find(item=>item.expediente===id);
     const cargoMerchandise=(target.mercancias||[]).length?target.mercancias:[{id:`${id}-AUTO-${Date.now()}`,tipo:'CAJA',cantidad:Math.max(1,Number(target.bultos)||1),seguimiento:'',peso:target.peso&&!/registrar|pendiente/i.test(target.peso)?target.peso:'PESO PENDIENTE',documentos:[]}];
-    const cargoPhotos=evidenceFiles.map((file,index)=>({...file,tipo:index===0?'VISTA GENERAL':'ESTADO DE EMBALAJE',mercancia:cargoMerchandise.map(line=>`${line.cantidad} ${line.tipo}${line.cantidad===1?'':'S'} · ${line.peso||'PESO PENDIENTE'}`).join(' · '),nota:`Registrado por ${visibleUser.fullName}`}));
+    const cargoPhotos=cargoEvidence.map((file,index)=>({...file,tipo:index===0?'VISTA GENERAL':'ESTADO DE EMBALAJE',mercancia:cargoMerchandise.map(line=>`${line.cantidad} ${line.tipo}${line.cantidad===1?'':'S'} · ${line.peso||'PESO PENDIENTE'}`).join(' · '),nota:`Registrado por ${visibleUser.fullName}`}));
     const cargoReference=`ALM-${Date.now()}`;
     const cargoReception=stepKey==='cargo'?{ref:cargoReference,source:'driver-flow',fecha:now.toISOString(),zona:linkedTransport?.origen||'PENDIENTE DE UBICAR',peso:merchandiseWeightLabel(cargoMerchandise),mercancias:cargoMerchandise,fotos:cargoPhotos,documentos:[]}:null;
-    const nextCases=cases.map(item=>item.id===id?normalizeMerchandise({...item,mercancias:stepKey==='cargo'?cargoMerchandise:item.mercancias,operationalFlow:flow,progreso:ready?100:OPERATION_STEPS.filter(step=>flow[step.key]).length*25,siguiente:ready?'Listo para facturar':nextStep?.next||'',estado:ready?'Completado':'En curso',recepciones:cargoReception?[cargoReception,...(item.recepciones||[])]:item.recepciones,documentacionMercancia:ready?{...item.documentacionMercancia,podDisponible:true,podArchivo:evidenceFiles[0]||item.documentacionMercancia?.podArchivo||null}:item.documentacionMercancia,timelineCustom:[timelineEntry,...(item.timelineCustom||[])]}):item);
+    const nextCases=cases.map(item=>item.id===id?normalizeMerchandise({...item,mercancias:stepKey==='cargo'?cargoMerchandise:item.mercancias,operationalFlow:flow,progreso:ready?100:OPERATION_STEPS.filter(step=>flow[step.key]).length*25,siguiente:ready?'Listo para facturar':nextStep?.next||'',estado:ready?'Completado':'En curso',recepciones:cargoReception?[cargoReception,...(item.recepciones||[])]:item.recepciones,documentacionMercancia:ready?{...item.documentacionMercancia,podDisponible:true,podArchivo:podFiles[0]||item.documentacionMercancia?.podArchivo||null,podArchivos:podFiles,fotosEntrega:deliveryPhotos}:item.documentacionMercancia,timelineCustom:[timelineEntry,...(item.timelineCustom||[])]}):item);
     const nextTransports=ready?transports.map(item=>item.expediente===id?{...item,estado:'Entregado'}:item):transports;
     const alreadyInWarehouse=warehouseEntries.some(item=>item.expediente===id&&!item.archivado&&item.estado!=='Expedido');
     const automaticWarehouseEntry=stepKey==='cargo'&&!alreadyInWarehouse?{ref:cargoReference,source:'driver-flow',expediente:id,buque:target.buque,zona:'PENDIENTE',entrada:formatReceptionDate(now.toISOString()),fechaRecepcion:now.toISOString(),bultos:merchandiseCount(cargoMerchandise),peso:merchandiseWeightLabel(cargoMerchandise),mercancias:cargoMerchandise,fotos:cargoPhotos,documentosRecepcion:[],dias:0,estado:'En stock',archivado:false}:null;
@@ -555,7 +670,7 @@ function App({auth,finance,onFinanceChange,onLogout}){
     const progress=OPERATION_STEPS.filter(step=>flow[step.key]).length*25;
     const now=new Date();
     const timelineEntry={id:`UNDO-${id}-${stepKey}-${Date.now()}`,fecha:now.toLocaleDateString('es-ES'),hora:now.toLocaleTimeString('es-ES',{hour:'2-digit',minute:'2-digit'}),titulo:`Paso reabierto: ${reopened.title}`,detalle:'El conductor deshizo la confirmación para corregir o repetir este paso',actor:visibleUser.fullName,estado:'done'};
-    const nextCases=cases.map(item=>item.id===id?normalizeMerchandise({...item,operationalFlow:flow,progreso:progress,siguiente:reopened.next,estado:'En curso',recepciones:stepKey==='cargo'?(item.recepciones||[]).filter(reception=>reception.source!=='driver-flow'):item.recepciones,documentacionMercancia:stepKey==='delivery'?{...item.documentacionMercancia,podDisponible:false,podArchivo:null}:item.documentacionMercancia,timelineCustom:[timelineEntry,...(item.timelineCustom||[])]}):item);
+    const nextCases=cases.map(item=>item.id===id?normalizeMerchandise({...item,operationalFlow:flow,progreso:progress,siguiente:reopened.next,estado:'En curso',recepciones:stepKey==='cargo'?(item.recepciones||[]).filter(reception=>reception.source!=='driver-flow'):item.recepciones,documentacionMercancia:stepKey==='delivery'?{...item.documentacionMercancia,podDisponible:false,podArchivo:null,podArchivos:[],fotosEntrega:[]}:item.documentacionMercancia,timelineCustom:[timelineEntry,...(item.timelineCustom||[])]}):item);
     const nextTransports=stepKey==='delivery'?transports.map(item=>item.expediente===id?{...item,estado:item.conductor&&item.conductor!=='Sin asignar'?'Asignado':'Sin asignar'}:item):transports;
     const nextWarehouse=stepKey==='delivery'?warehouseEntries.map(item=>item.expediente===id?{...item,estado:'En stock',archivado:false,salida:null}:item):stepKey==='cargo'?warehouseEntries.filter(item=>!(item.expediente===id&&item.source==='driver-flow')):warehouseEntries;
     setCases(nextCases);setTransports(nextTransports);setWarehouseEntries(nextWarehouse);
@@ -811,6 +926,75 @@ function DriverTaskModal({event,item,transport,warehouseEntries,currentUser,csrf
     review:'Lee el servicio completo y comprueba buque, fecha, puerto, ruta, mercancía y observaciones antes de empezar.',
     cargo:inWarehouse?'Comprueba cantidades, peso y estado de la mercancía antes de cargar.':'Recoge la mercancía en el lugar indicado y comprueba cantidades, peso y estado.',
     documents:'Comprueba que están listos los documentos necesarios antes de salir a entregar.',
+    delivery:'Fotografía la mercancía ya entregada y escanea el POD firmado. Ambas evidencias son obligatorias para cerrar el servicio.'
+  };
+  const uploadEvidence=async(files,evidenceType)=>{
+    const selected=[...files].filter(Boolean);
+    if(!selected.length)return;
+    setUploading(true);setError('');
+    try{
+      const uploaded=[];
+      for(const file of selected){
+        const prepared=evidenceType==='pod'&&file.type.startsWith('image/')?await scannedPodPdf(file,item.id):file;
+        const stored=await uploadAttachment(prepared,prepared.type==='application/pdf'?'document':'photo',csrfToken);
+        uploaded.push({...stored,evidenceType});
+      }
+      setEvidenceFiles(current=>[...current,...uploaded]);
+      if(evidenceType==='pod'&&selected.some(file=>file.type.startsWith('image/')))notify?.('Documento recortado, corregido y guardado como PDF');
+    }catch(reason){setError(reason.message)}finally{setUploading(false)}
+  };
+  const cargoPhotos=evidenceFiles.filter(file=>file.evidenceType==='cargo-photo');
+  const deliveryPhotos=evidenceFiles.filter(file=>file.evidenceType==='delivery-photo');
+  const podFiles=evidenceFiles.filter(file=>file.evidenceType==='pod');
+  const evidenceReady=step?.key==='cargo'?cargoPhotos.length>0:step?.key==='delivery'?deliveryPhotos.length>0&&podFiles.length>0:true;
+  const needsEvidence=['cargo','delivery'].includes(step?.key);
+  const evidenceLabel=file=>file.evidenceType==='pod'?'POD escaneado':file.evidenceType==='delivery-photo'?'Foto de entrega':'Foto de recepción';
+  return <div className="modal-backdrop driver-task-backdrop" onMouseDown={mouse=>{if(mouse.target===mouse.currentTarget)close()}}>
+    <section className="modal driver-task-modal">
+      <div className="modal-head"><div><span className="overline">{event.inicio}–{event.fin} · {event.tipoServicio}</span><h2>{item.buque}</h2><p>{caseLabel(item)}</p></div><button className="icon-button" onClick={close}><X/></button></div>
+      <div className="driver-task-body">
+        <div className="driver-route"><MapPin/><span><small>PUERTO / RUTA</small><b>{transport?.ruta||item.puerto}</b></span></div>
+        {!mine&&<div className="driver-owner-alert"><UserRound/><span><b>{event.asignado&&event.asignado!=='Sin asignar'?`Asignado a ${event.asignado}`:'Trabajo sin conductor'}</b><small>Asígnatelo antes de registrar avances.</small></span><button className="button secondary" onClick={claim}>Asignarme</button></div>}
+        <OperationChecklist item={item} csrfToken={csrfToken} reloadOperational={reloadOperational} notify={notify}/>
+        <CargoManifest item={item}/>
+        {step?<>
+          <div className="driver-next-action"><span>{OPERATION_STEPS.findIndex(entry=>entry.key===step.key)+1}</span><div><small>AHORA TOCA</small><b>{step.title}</b><p>{instructions[step.key]}</p></div></div>
+          {needsEvidence&&<div className="pod-scanner evidence-capture">
+            <div><Camera/><span><b>{step.key==='cargo'?'Fotos de la mercancía recibida':'Evidencias de la entrega'}</b><small>{step.key==='cargo'?'Se requiere al menos una foto; puedes añadir todas las necesarias.':'Se requiere foto de la entrega y POD firmado.'}</small></span></div>
+            <div className="pod-scanner-actions">
+              <label className="button primary"><Camera/> {uploading?'Procesando…':step.key==='cargo'?'Añadir fotos de recepción':'Añadir fotos de entrega'}<input type="file" accept="image/*" capture="environment" multiple disabled={uploading||!mine} onChange={change=>{uploadEvidence(change.target.files,step.key==='cargo'?'cargo-photo':'delivery-photo');change.target.value=''}}/></label>
+              {step.key==='delivery'&&<><label className="button secondary"><ScanLine/> Escanear POD<input type="file" accept="image/*" capture="environment" multiple disabled={uploading||!mine} onChange={change=>{uploadEvidence(change.target.files,'pod');change.target.value=''}}/></label><label className="button tertiary"><FileText/> Adjuntar PDF<input type="file" accept="application/pdf" multiple disabled={uploading||!mine} onChange={change=>{uploadEvidence(change.target.files,'pod');change.target.value=''}}/></label></>}
+            </div>
+            {step.key==='delivery'&&<div className="evidence-requirements"><span className={deliveryPhotos.length?'done':''}><CheckCircle2/> Foto de entrega {deliveryPhotos.length?`(${deliveryPhotos.length})`:'pendiente'}</span><span className={podFiles.length?'done':''}><CheckCircle2/> POD firmado {podFiles.length?`(${podFiles.length})`:'pendiente'}</span></div>}
+            {evidenceFiles.length>0&&<div className="evidence-file-list">{evidenceFiles.map((file,index)=><a className="pod-uploaded" href={file.url} target="_blank" rel="noreferrer" key={`${file.id}-${index}`}><CheckCircle2/><span><b>{evidenceLabel(file)} {file.evidenceType==='pod'?'':index+1}</b><small>{file.name}</small></span><ExternalLink/></a>)}</div>}
+            {error&&<p className="form-error"><CircleAlert/>{error}</p>}
+          </div>}
+          <label className="field"><span>Observación del trabajo (opcional)</span><input value={note} disabled={!mine} onChange={change=>setNote(change.target.value)} placeholder="Persona que recibe, incidencia, referencia…"/></label>
+          <button className="button primary full driver-confirm" disabled={!mine||uploading||!evidenceReady} onClick={()=>submit(step.key,note,evidenceFiles)}><CheckCircle2/> {!evidenceReady?(step.key==='cargo'?'Añade una foto para confirmar':'Completa foto de entrega y POD'):`Confirmar: ${step.title}`}</button>
+        </>:<div className="driver-finished"><CheckCircle2/><span><b>Trabajo terminado</b><small>POD recibido y expediente listo para facturación.</small></span></div>}
+        {mine&&lastCompleted&&<button className="button tertiary full driver-undo-step" onClick={()=>undo(lastCompleted.key)}><Undo2/> Deshacer: {lastCompleted.title}</button>}
+        <button className="button tertiary full" onClick={close}>{flow.billingReady?'Cerrar':'Volver al calendario'}</button>
+      </div>
+    </section>
+  </div>;
+}
+
+function DriverTaskModalLegacy({event,item,transport,warehouseEntries,currentUser,csrfToken,reloadOperational,notify,close,claim,submit,undo}){
+  const [note,setNote]=useState('');
+  const [evidenceFiles,setEvidenceFiles]=useState([]);
+  const [uploading,setUploading]=useState(false);
+  const [error,setError]=useState('');
+  const step=item?nextOperationStep(item):null;
+  useEffect(()=>{setNote('');setEvidenceFiles([]);setError('')},[step?.key]);
+  if(!item)return null;
+  const flow=operationFlow(item);
+  const lastCompleted=[...OPERATION_STEPS].reverse().find(entry=>flow[entry.key]);
+  const mine=event.asignado===currentUser.fullName;
+  const inWarehouse=warehouseEntries.some(entry=>entry.expediente===item.id&&!entry.archivado&&entry.estado!=='Expedido');
+  const instructions={
+    review:'Lee el servicio completo y comprueba buque, fecha, puerto, ruta, mercancía y observaciones antes de empezar.',
+    cargo:inWarehouse?'Comprueba cantidades, peso y estado de la mercancía antes de cargar.':'Recoge la mercancía en el lugar indicado y comprueba cantidades, peso y estado.',
+    documents:'Comprueba que están listos los documentos necesarios antes de salir a entregar.',
     delivery:'Entrega toda la mercancía, confirma quién la recibe y fotografía o escanea el POD firmado. Al confirmar quedará lista para facturar.'
   };
   const uploadEvidence=async file=>{if(!file)return;setUploading(true);setError('');try{const prepared=step.key==='delivery'&&file.type.startsWith('image/')?await scannedPodPdf(file,item.id):file;const uploaded=await uploadAttachment(prepared,prepared.type==='application/pdf'?'document':'photo',csrfToken);setEvidenceFiles(current=>step.key==='cargo'?[...current,uploaded]:[uploaded]);if(step.key==='delivery'&&file.type.startsWith('image/'))notify?.('POD escaneado y guardado como PDF')}catch(reason){setError(reason.message)}finally{setUploading(false)}};
@@ -898,6 +1082,63 @@ function OperationChecklist({item,csrfToken,reloadOperational,notify}){
 }
 
 function OperationStepModal({item,warehouseEntries,transports,csrfToken,close,submit}){
+  const step=nextOperationStep(item);
+  const [note,setNote]=useState('');
+  const [evidenceFiles,setEvidenceFiles]=useState([]);
+  const [uploading,setUploading]=useState(false);
+  const [error,setError]=useState('');
+  if(!step)return null;
+  const inWarehouse=warehouseEntries.some(entry=>entry.expediente===item.id&&!entry.archivado&&entry.estado!=='Expedido');
+  const transport=transports.find(entry=>entry.expediente===item.id);
+  const guidance={
+    review:'Comprueba buque, ETA, puerto, ruta, mercancía solicitada y observaciones del correo antes de iniciar el servicio.',
+    cargo:inWarehouse?'Confirma que la mercancía recibida coincide con fotos, cantidades y peso.':'Confirma la recogida en el punto indicado y comprueba cantidades y estado.',
+    documents:'Comprueba packing list, CMR, delivery note y documento aduanero cuando corresponda.',
+    delivery:'Adjunta fotografías de la mercancía entregada y el POD firmado. Ambas evidencias son obligatorias.'
+  };
+  const uploadEvidence=async(files,evidenceType)=>{
+    const selected=[...files].filter(Boolean);
+    if(!selected.length)return;
+    setUploading(true);setError('');
+    try{
+      const uploaded=[];
+      for(const file of selected){
+        const prepared=evidenceType==='pod'&&file.type.startsWith('image/')?await scannedPodPdf(file,item.id):file;
+        const stored=await uploadAttachment(prepared,prepared.type==='application/pdf'?'document':'photo',csrfToken);
+        uploaded.push({...stored,evidenceType});
+      }
+      setEvidenceFiles(current=>[...current,...uploaded]);
+    }catch(reason){setError(reason.message)}finally{setUploading(false)}
+  };
+  const cargoPhotos=evidenceFiles.filter(file=>file.evidenceType==='cargo-photo');
+  const deliveryPhotos=evidenceFiles.filter(file=>file.evidenceType==='delivery-photo');
+  const podFiles=evidenceFiles.filter(file=>file.evidenceType==='pod');
+  const needsEvidence=['cargo','delivery'].includes(step.key);
+  const evidenceReady=step.key==='cargo'?cargoPhotos.length>0:step.key==='delivery'?deliveryPhotos.length>0&&podFiles.length>0:true;
+  return <div className="modal-backdrop" onMouseDown={event=>{if(event.target===event.currentTarget)close()}}>
+    <section className="modal operation-modal">
+      <div className="modal-head"><div><span className="overline">Paso operativo</span><h2>{step.title}</h2><p>{item.id} · {item.buque}</p></div><button className="icon-button" onClick={close}><X/></button></div>
+      <div className="operation-modal-body">
+        <OperationChecklist item={item}/>
+        <div className="operation-guidance"><ClipboardCheck/><div><b>Qué debes comprobar</b><p>{guidance[step.key]}</p>{step.key==='delivery'&&transport&&<small>{transport.id} · {transport.ruta}</small>}</div></div>
+        {needsEvidence&&<div className="pod-scanner evidence-capture">
+          <div><Camera/><span><b>{step.key==='cargo'?'Fotos de la mercancía recibida':'Evidencias de la entrega'}</b><small>{step.key==='cargo'?'Puedes tomar varias fotografías.':'Se exige al menos una foto de entrega y un POD.'}</small></span></div>
+          <div className="pod-scanner-actions">
+            <label className="button primary"><Camera/> {uploading?'Procesando…':step.key==='cargo'?'Añadir fotos de recepción':'Añadir fotos de entrega'}<input type="file" accept="image/*" capture="environment" multiple disabled={uploading} onChange={event=>{uploadEvidence(event.target.files,step.key==='cargo'?'cargo-photo':'delivery-photo');event.target.value=''}}/></label>
+            {step.key==='delivery'&&<><label className="button secondary"><ScanLine/> Escanear POD<input type="file" accept="image/*" capture="environment" multiple disabled={uploading} onChange={event=>{uploadEvidence(event.target.files,'pod');event.target.value=''}}/></label><label className="button tertiary"><FileText/> Adjuntar PDF<input type="file" accept="application/pdf" multiple disabled={uploading} onChange={event=>{uploadEvidence(event.target.files,'pod');event.target.value=''}}/></label></>}
+          </div>
+          {step.key==='delivery'&&<div className="evidence-requirements"><span className={deliveryPhotos.length?'done':''}><CheckCircle2/> Foto de entrega {deliveryPhotos.length?`(${deliveryPhotos.length})`:'pendiente'}</span><span className={podFiles.length?'done':''}><CheckCircle2/> POD firmado {podFiles.length?`(${podFiles.length})`:'pendiente'}</span></div>}
+          {evidenceFiles.length>0&&<div className="evidence-file-list">{evidenceFiles.map((file,index)=><a className="pod-uploaded" href={file.url} target="_blank" rel="noreferrer" key={`${file.id}-${index}`}><CheckCircle2/><span><b>{file.evidenceType==='pod'?'POD escaneado':file.evidenceType==='delivery-photo'?'Foto de entrega':'Foto de recepción'}</b><small>{file.name}</small></span><ExternalLink/></a>)}</div>}
+          {error&&<p className="form-error"><CircleAlert/>{error}</p>}
+        </div>}
+        <label className="field"><span>Observación (opcional)</span><input value={note} onChange={event=>setNote(event.target.value)} placeholder="Incidencias, persona que recibe, referencia…"/></label>
+        <div className="modal-actions"><button className="button tertiary" onClick={close}>Cancelar</button><button className="button primary" disabled={uploading||!evidenceReady} onClick={()=>submit(step.key,note,evidenceFiles)}><CheckCircle2/> {!evidenceReady?(step.key==='cargo'?'Añade una foto':'Completa foto de entrega y POD'):'Confirmar paso'}</button></div>
+      </div>
+    </section>
+  </div>;
+}
+
+function OperationStepModalLegacy({item,warehouseEntries,transports,csrfToken,close,submit}){
   const step=nextOperationStep(item);
   const [note,setNote]=useState('');
   const [evidenceFiles,setEvidenceFiles]=useState([]);
