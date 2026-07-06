@@ -102,6 +102,7 @@ function ensure_schema(): void
             password_hash VARCHAR(255) NOT NULL,
             full_name VARCHAR(120) NOT NULL,
             role ENUM('driver','operations','finance','admin') NOT NULL DEFAULT 'operations',
+            roles JSON NULL,
             active TINYINT(1) NOT NULL DEFAULT 1,
             last_login_at DATETIME NULL,
             created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -165,6 +166,11 @@ function ensure_schema(): void
              MODIFY role ENUM('driver','operations','finance','admin') NOT NULL DEFAULT 'operations'"
         );
     }
+    $rolesColumn = $pdo->query("SHOW COLUMNS FROM app_users LIKE 'roles'")->fetch();
+    if (!$rolesColumn) {
+        $pdo->exec("ALTER TABLE app_users ADD roles JSON NULL AFTER role");
+    }
+    $pdo->exec("UPDATE app_users SET roles = JSON_ARRAY(role) WHERE roles IS NULL OR JSON_LENGTH(roles) = 0");
     $pdo->exec(
         "CREATE TABLE IF NOT EXISTS app_operational_state (
             id TINYINT UNSIGNED PRIMARY KEY,
@@ -300,11 +306,17 @@ function seed_demo_finance_data(PDO $pdo): void
 
 function public_user(array $row): array
 {
+    $roles = json_decode((string) ($row['roles'] ?? ''), true);
+    if (!is_array($roles) || $roles === []) {
+        $roles = [(string) $row['role']];
+    }
+    $roles = array_values(array_unique(array_filter($roles, static fn($role): bool => in_array($role, ['driver', 'operations', 'finance', 'admin'], true))));
     return [
         'id' => (int) $row['id'],
         'email' => $row['email'],
         'fullName' => $row['full_name'],
         'role' => $row['role'],
+        'roles' => $roles,
     ];
 }
 
@@ -315,7 +327,7 @@ function current_user(): ?array
         return null;
     }
     $statement = db()->prepare(
-        'SELECT id, email, full_name, role FROM app_users WHERE id = ? AND active = 1'
+        'SELECT id, email, full_name, role, roles FROM app_users WHERE id = ? AND active = 1'
     );
     $statement->execute([$id]);
     $user = $statement->fetch();
@@ -354,7 +366,7 @@ function require_auth(): array
 function require_roles(array $roles): array
 {
     $user = require_auth();
-    if (!in_array($user['role'], $roles, true)) {
+    if (array_intersect($user['roles'] ?? [$user['role']], $roles) === []) {
         respond(['error' => 'No tienes permiso para realizar esta acción.'], 403);
     }
     return $user;

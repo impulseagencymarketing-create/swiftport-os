@@ -38,12 +38,22 @@ const TITLES = {
   usuarios:['Usuarios y permisos','Control de acceso al equipo']
 };
 const ROLE_LABELS={driver:'Transportista',operations:'Operaciones',finance:'Finanzas',admin:'Administración'};
-const canAccess=(role,id)=>{
+const rolesOf=value=>{
+  if(Array.isArray(value))return [...new Set(value.filter(role=>ROLE_LABELS[role]))];
+  if(value&&Array.isArray(value.roles))return rolesOf(value.roles);
+  const role=typeof value==='string'?value:value?.role;
+  return ROLE_LABELS[role]?[role]:[];
+};
+const hasRole=(value,role)=>rolesOf(value).includes(role);
+const primaryRole=value=>['admin','finance','operations','driver'].find(role=>hasRole(value,role))||'operations';
+const roleLabel=value=>rolesOf(value).map(role=>ROLE_LABELS[role]).join(' + ');
+const isDriverOnly=value=>{const roles=rolesOf(value);return roles.length===1&&roles[0]==='driver'};
+const canAccess=(roles,id)=>{
   if(['transportes','aduanas'].includes(id))return false;
-  if(role==='driver')return ['calendario','almacen'].includes(id);
-  if (['clientes','facturacion'].includes(id)) return ['finance','admin'].includes(role);
-  if (id==='correos') return ['operations','admin'].includes(role);
-  if (id==='usuarios') return role==='admin';
+  if(isDriverOnly(roles))return ['calendario','almacen'].includes(id);
+  if (['clientes','facturacion'].includes(id)) return hasRole(roles,'finance')||hasRole(roles,'admin');
+  if (id==='correos') return hasRole(roles,'operations')||hasRole(roles,'admin');
+  if (id==='usuarios') return hasRole(roles,'admin');
   return true;
 };
 const statusTone = value => {
@@ -130,7 +140,7 @@ const OPERATION_STEPS=[
   {key:'assignment',title:'Conductor asignado',next:'Asignar el transporte a un conductor',responsibility:'OPERACIONES / CONDUCTOR',roles:['operations','driver']},
   {key:'delivery',title:'Entrega confirmada con POD',next:'Entregar la mercancía y registrar fotos y POD firmado',responsibility:'CONDUCTOR / OPERACIONES',roles:['driver','operations']}
 ];
-const canCompleteOperationStep=(role,key)=>Boolean(OPERATION_STEPS.find(step=>step.key===key)?.roles.includes(role));
+const canCompleteOperationStep=(roles,key)=>Boolean(OPERATION_STEPS.find(step=>step.key===key)?.roles.some(role=>hasRole(roles,role)));
 const operationFlow=item=>{
   if(item.operationalFlow){const stored=item.operationalFlow;const delivery=Boolean(stored.delivery||stored.pod);const assigned=Boolean(item.conductor&&item.conductor!=='Sin asignar');return {review:false,cargo:false,documents:false,assignment:false,delivery:false,billingReady:false,...stored,assignment:stored.assignment??Boolean(delivery||(stored.documents&&assigned)),delivery,billingReady:Boolean(stored.billingReady||delivery),review:stored.review??Boolean(stored.cargo||stored.documents||stored.delivered||stored.pod||stored.delivery)}};
   const progress=Number(item.progreso)||0;
@@ -408,9 +418,9 @@ function AuthRoot(){
   };
   useEffect(()=>{loadSession()},[]);
   useEffect(()=>{
-    if(!session||!['finance','admin'].includes(session.user.role)){setFinance({caseAmounts:{},warehouseStorageTotal:0,clients:[],invoices:[]});return}
+    if(!session||!(hasRole(session.user,'finance')||hasRole(session.user,'admin'))){setFinance({caseAmounts:{},warehouseStorageTotal:0,clients:[],invoices:[]});return}
     api('/api/finance.php').then(setFinance).catch(reason=>setError(reason.message));
-  },[session?.user?.id,session?.user?.role]);
+  },[session?.user?.id,JSON.stringify(session?.user?.roles||[])]);
   const authenticated=result=>{if(!result?.user) throw new Error('Respuesta de acceso inválida.');setSession(result);setSetupRequired(false);setError('')};
   const logout=async()=>{
     try{await api('/api/auth/logout.php',{method:'POST',headers:{'X-CSRF-Token':session.csrfToken}})}
@@ -442,11 +452,12 @@ function SetupForm({onSuccess,globalError}){
 function App({auth,finance,onFinanceChange,onLogout}){
   const user=auth.user;
   const [previewUser,setPreviewUser]=useState(null);
-  const effectiveRole=previewUser?.role||user.role;
   const visibleUser=previewUser||user;
-  const showFinance=['finance','admin'].includes(effectiveRole);
-  const availableNav=NAV.filter(([id])=>canAccess(effectiveRole,id));
-  const [tab,setTab]=useState(user.role==='driver'?'calendario':'dashboard');
+  const effectiveRoles=rolesOf(visibleUser);
+  const driverOnly=isDriverOnly(effectiveRoles);
+  const showFinance=hasRole(effectiveRoles,'finance')||hasRole(effectiveRoles,'admin');
+  const availableNav=NAV.filter(([id])=>canAccess(effectiveRoles,id));
+  const [tab,setTab]=useState(isDriverOnly(user)?'calendario':'dashboard');
   const [menuOpen,setMenuOpen]=useState(false);
   const [newOpen,setNewOpen]=useState(false);
   const [search,setSearch]=useState('');
@@ -462,17 +473,17 @@ function App({auth,finance,onFinanceChange,onLogout}){
   const [operationalLoaded,setOperationalLoaded]=useState(false);
   const [toast,setToast]=useState('');
   const scheduleAlertsKey=`swiftport-driver-alerts-${user.id}`;
-  const [scheduleAlerts,setScheduleAlerts]=useState(()=>{if(user.role!=='driver')return[];try{const stored=JSON.parse(localStorage.getItem(scheduleAlertsKey)||'[]');return Array.isArray(stored)?stored:[]}catch{return[]}});
+  const [scheduleAlerts,setScheduleAlerts]=useState(()=>{if(!hasRole(user,'driver'))return[];try{const stored=JSON.parse(localStorage.getItem(scheduleAlertsKey)||'[]');return Array.isArray(stored)?stored:[]}catch{return[]}});
   const scheduleSnapshotRef=useRef(null);
   const aisAlertSnapshotRef=useRef(null);
   const casesWithFinance=useMemo(()=>cases.map(item=>({...item,importe:finance.caseAmounts[item.id]||0})),[cases,finance.caseAmounts]);
   const selected=casesWithFinance.find(item=>item.id===selectedId)||casesWithFinance[0];
   const notify=message=>{setToast(message);window.clearTimeout(window.__swiftportToast);window.__swiftportToast=window.setTimeout(()=>setToast(''),2600)};
-  const navigate=id=>{setTab(canAccess(effectiveRole,id)?id:(availableNav[0]?.[0]||'dashboard'));setMenuOpen(false);setSearch('')};
+  const navigate=id=>{setTab(canAccess(effectiveRoles,id)?id:(availableNav[0]?.[0]||'dashboard'));setMenuOpen(false);setSearch('')};
   const loadTeam=()=>api('/api/users/directory.php').then(result=>setTeam(result.users)).catch(reason=>notify(reason.message));
   const loadOperational=()=>api('/api/operational.php').then(result=>{
     if(result.data){
-      if(user.role==='driver'){
+      if(hasRole(user,'driver')){
         const storageKey=`swiftport-driver-schedule-${user.id}`;
         let stored=scheduleSnapshotRef.current;
         if(!stored){try{stored=JSON.parse(localStorage.getItem(storageKey)||'null')}catch{stored=null}}
@@ -499,7 +510,7 @@ function App({auth,finance,onFinanceChange,onLogout}){
       const tracking=item.aisTracking||{};
       if(!tracking.alertKey)return;
       current[item.id]=tracking.alertKey;
-      const visibleToDriver=user.role!=='driver'||calendarEvents.some(event=>event.expediente===item.id&&(!event.asignado||event.asignado==='Sin asignar'||event.asignado===user.fullName));
+      const visibleToDriver=!hasRole(user,'driver')||calendarEvents.some(event=>event.expediente===item.id&&(!event.asignado||event.asignado==='Sin asignar'||event.asignado===user.fullName));
       if(hadSnapshot&&visibleToDriver&&previous[item.id]!==tracking.alertKey)alerts.push({item,tracking});
     });
     aisAlertSnapshotRef.current=current;
@@ -511,8 +522,8 @@ function App({auth,finance,onFinanceChange,onLogout}){
     if(localStorage.getItem('swiftport-device-alerts')==='1')showDeviceNotification(`Swiftport · ${item.buque}`,message,tracking.alertKey).catch(()=>{});
   },[cases,calendarEvents,operationalLoaded]);
   const saveOperational=(nextCases=cases,nextTransports=transports,nextWarehouse=warehouseEntries,nextCustoms=customs,nextCalendar=calendarEvents,nextProviders=providers)=>api('/api/operational.php',{method:'PUT',headers:{'X-CSRF-Token':auth.csrfToken},body:JSON.stringify({data:{cases:nextCases,transports:nextTransports,warehouseEntries:nextWarehouse,customs:nextCustoms,calendarEvents:nextCalendar,providers:nextProviders}})}).catch(reason=>notify(reason.message));
-  const operationalTeam=useMemo(()=>team.filter(member=>['operations','driver'].includes(member.role)),[team]);
-  useEffect(()=>{if(effectiveRole==='driver'&&!['calendario','almacen'].includes(tab))setTab('calendario')},[effectiveRole,tab]);
+  const operationalTeam=useMemo(()=>team.filter(member=>hasRole(member,'operations')||hasRole(member,'driver')),[team]);
+  useEffect(()=>{if(driverOnly&&!['calendario','almacen'].includes(tab))setTab('calendario')},[driverOnly,tab]);
   useEffect(()=>{
     if(!operationalLoaded)return;
     const missing=cases.flatMap((item,index)=>{
@@ -632,7 +643,7 @@ function App({auth,finance,onFinanceChange,onLogout}){
     if(!target)return;
     const expected=nextOperationStep(target);
     if(!expected||expected.key!==stepKey){notify('Completa primero el paso anterior');return}
-    if(!canCompleteOperationStep(effectiveRole,stepKey)){notify(`Este paso corresponde a ${expected.responsibility}`);return}
+    if(!canCompleteOperationStep(effectiveRoles,stepKey)){notify(`Este paso corresponde a ${expected.responsibility}`);return}
     if(stepKey==='assignment'){notify('Asigna el conductor desde el transporte o desde el calendario');return}
     const evidenceFiles=Array.isArray(evidence)?evidence.filter(Boolean):evidence?[evidence]:[];
     const cargoEvidence=stepKey==='cargo'?evidenceFiles:[];
@@ -740,10 +751,10 @@ function App({auth,finance,onFinanceChange,onLogout}){
   };
   const [title,subtitle]=TITLES[tab];
   const startPreview=member=>{setPreviewUser(member);setTab('dashboard');notify('Vista previa activada')};
-  const assignedAlerts=['operations','driver'].includes(effectiveRole)
+  const assignedAlerts=(hasRole(effectiveRoles,'operations')||hasRole(effectiveRoles,'driver'))
     ? calendarEvents.filter(event=>event.asignado===visibleUser.fullName&&cases.find(item=>item.id===event.expediente)?.estado!=='Completado')
     : calendarEvents.filter(event=>!event.asignado||event.asignado==='Sin asignar');
-  const notificationCount=assignedAlerts.length+(effectiveRole==='driver'?scheduleAlerts.length:0);
+  const notificationCount=assignedAlerts.length+(hasRole(effectiveRoles,'driver')?scheduleAlerts.length:0);
   const scheduleAlert=scheduleAlerts[0];
   return <div className="shell">
     <Sidebar tab={tab} open={menuOpen} navigate={navigate} close={()=>setMenuOpen(false)} nav={availableNav} user={visibleUser} onLogout={onLogout}/>
@@ -756,23 +767,23 @@ function App({auth,finance,onFinanceChange,onLogout}){
         </div>
         <div className="topbar-actions">
           <button className="icon-button notification" aria-label="Notificaciones" onClick={()=>{navigate('calendario');notify(scheduleAlerts.length?`Tienes ${scheduleAlerts.length} cambios de horario sin leer`:assignedAlerts.length?`Tienes ${assignedAlerts.length} servicios que requieren atención`:'No tienes avisos operativos')}}><Bell/>{notificationCount>0&&<i>{notificationCount}</i>}</button>
-          {effectiveRole!=='driver'&&<button className="button primary" aria-label="Nuevo expediente" onClick={()=>setNewOpen(true)}><Plus/> <span>Nuevo expediente</span></button>}
-          <div className="avatar" title={visibleUser.fullName+' · '+ROLE_LABELS[effectiveRole]}>{initials(visibleUser.fullName)}</div>
+          {!driverOnly&&<button className="button primary" aria-label="Nuevo expediente" onClick={()=>setNewOpen(true)}><Plus/> <span>Nuevo expediente</span></button>}
+          <div className="avatar" title={visibleUser.fullName+' · '+roleLabel(visibleUser)}>{initials(visibleUser.fullName)}</div>
         </div>
       </header>
       <div className="content">
-        {previewUser&&<div className="preview-banner"><Eye/><span>Estás viendo la aplicación como <b>{previewUser.fullName}</b> ({ROLE_LABELS[previewUser.role]}). Tu cuenta sigue siendo administrador.</span><button onClick={()=>setPreviewUser(null)}>Salir de la vista previa</button></div>}
-        {effectiveRole==='driver'&&scheduleAlert&&<section className="schedule-change-alert" role="alert"><Clock3/><div><small>HORARIO ACTUALIZADO · {scheduleAlert.service}</small><b>{scheduleAlert.title}</b>{scheduleAlert.oldEta!==scheduleAlert.newEta&&<p>ETA: <s>{scheduleAlert.oldEta}</s> → <strong>{scheduleAlert.newEta}</strong></p>}{scheduleAlert.oldTask!==scheduleAlert.newTask&&<p>Servicio: <s>{scheduleAlert.oldTask}</s> → <strong>{scheduleAlert.newTask}</strong></p>}</div><button className="button secondary" onClick={()=>setScheduleAlerts(alerts=>{const next=alerts.slice(1);try{localStorage.setItem(scheduleAlertsKey,JSON.stringify(next))}catch{}return next})}>Entendido</button></section>}
+        {previewUser&&<div className="preview-banner"><Eye/><span>Estás viendo la aplicación como <b>{previewUser.fullName}</b> ({roleLabel(previewUser)}). Tu cuenta sigue siendo administrador.</span><button onClick={()=>setPreviewUser(null)}>Salir de la vista previa</button></div>}
+        {hasRole(effectiveRoles,'driver')&&scheduleAlert&&<section className="schedule-change-alert" role="alert"><Clock3/><div><small>HORARIO ACTUALIZADO · {scheduleAlert.service}</small><b>{scheduleAlert.title}</b>{scheduleAlert.oldEta!==scheduleAlert.newEta&&<p>ETA: <s>{scheduleAlert.oldEta}</s> → <strong>{scheduleAlert.newEta}</strong></p>}{scheduleAlert.oldTask!==scheduleAlert.newTask&&<p>Servicio: <s>{scheduleAlert.oldTask}</s> → <strong>{scheduleAlert.newTask}</strong></p>}</div><button className="button secondary" onClick={()=>setScheduleAlerts(alerts=>{const next=alerts.slice(1);try{localStorage.setItem(scheduleAlertsKey,JSON.stringify(next))}catch{}return next})}>Entendido</button></section>}
         {tab==='dashboard'&&<Dashboard cases={casesWithFinance} warehouseEntries={warehouseEntries} calendarEvents={calendarEvents} openCase={openCase} navigate={navigate} showFinance={showFinance} user={visibleUser}/>}
-        {tab==='calendario'&&<>{effectiveRole!=='driver'&&<DriverLegend team={operationalTeam}/>}<Calendario events={calendarEvents} team={operationalTeam} cases={cases} transports={transports} providers={providers} warehouseEntries={warehouseEntries} saveEvent={saveCalendarEvent} completeCaseStep={completeCaseStep} undoCaseStep={undoCaseStep} openCase={openCase} currentUser={visibleUser} csrfToken={auth.csrfToken} reloadOperational={loadOperational} notify={notify}/></>}
+        {tab==='calendario'&&<>{!driverOnly&&<DriverLegend team={operationalTeam}/>}<Calendario events={calendarEvents} team={operationalTeam} cases={cases} transports={transports} providers={providers} warehouseEntries={warehouseEntries} saveEvent={saveCalendarEvent} completeCaseStep={completeCaseStep} undoCaseStep={undoCaseStep} openCase={openCase} currentUser={visibleUser} csrfToken={auth.csrfToken} reloadOperational={loadOperational} notify={notify}/></>}
         {tab==='expedientes'&&<Expedientes cases={casesWithFinance} selected={selected} select={setSelectedId} search={search} setSearch={setSearch} completeCaseStep={completeCaseStep} notify={notify} showFinance={showFinance} updateCase={updateCase} clientOptions={clientOptions} warehouseEntries={warehouseEntries} transports={transports} calendarEvents={calendarEvents} team={operationalTeam} providers={providers} saveEvent={saveCalendarEvent} csrfToken={auth.csrfToken} reloadOperational={loadOperational} currentUser={visibleUser}/>}
         {tab==='almacen'&&<Almacen items={warehouseEntries} cases={casesWithFinance} openCase={openCase} registerEntry={registerWarehouseEntry} updateEntry={updateWarehouseEntry} showFinance={showFinance} storageTotal={finance.warehouseStorageTotal} csrfToken={auth.csrfToken}/>}
         {tab==='transportes'&&<Transportes items={transports} update={updateTransport} openCase={openCase} team={operationalTeam} providers={providers} saveProvider={saveProvider}/>}
         {tab==='aduanas'&&<Aduanas items={customs} update={updateCustom} openCase={openCase} notify={notify}/>}
-        {tab==='correos'&&<Correos csrfToken={auth.csrfToken} notify={notify} openCase={openCase} reloadOperational={loadOperational} canRebuild={effectiveRole==='admin'}/>}
+        {tab==='correos'&&<Correos csrfToken={auth.csrfToken} notify={notify} openCase={openCase} reloadOperational={loadOperational} canRebuild={hasRole(effectiveRoles,'admin')}/>}
         {tab==='clientes'&&showFinance&&<Clientes notify={notify} clients={finance.clients} updateClient={updateClient}/>}
         {tab==='facturacion'&&showFinance&&<Facturacion openCase={openCase} notify={notify} invoices={finance.invoices} cases={casesWithFinance} updateInvoice={updateInvoice}/>}
-        {tab==='usuarios'&&user.role==='admin'&&!previewUser&&<Usuarios csrfToken={auth.csrfToken} notify={notify} onPreview={startPreview} onUsersChanged={loadTeam}/>}
+        {tab==='usuarios'&&hasRole(user,'admin')&&!previewUser&&<Usuarios csrfToken={auth.csrfToken} notify={notify} onPreview={startPreview} onUsersChanged={loadTeam}/>}
       </div>
     </main>
     <MobileNav tab={tab} navigate={navigate} more={()=>setMenuOpen(true)} nav={availableNav}/>
@@ -787,7 +798,7 @@ function Sidebar({tab,open,navigate,close,nav,user,onLogout}){
     <div className="brand"><span className="brand-mark"><Anchor/></span><div><b>SWIFTPORT</b><small>OPERATING SYSTEM</small></div><button className="icon-button sidebar-close" aria-label="Cerrar menú" onClick={close}><X/></button></div>
     <nav aria-label="Navegación principal">{nav.map(([id,label,Icon])=><button key={id} className={tab===id?'active':''} onClick={()=>navigate(id)}><Icon/><span>{label}</span>{tab===id&&<ChevronRight className="nav-arrow"/>}</button>)}</nav>
     <div className="sidebar-card"><div className="live-dot"/> <div><b>Operativa conectada</b><small>Datos de demostración</small></div></div>
-    <div className="profile"><div className="avatar light">{initials(user.fullName)}</div><div><b>{user.fullName}</b><small>{ROLE_LABELS[user.role]}</small></div><button className="profile-logout" aria-label="Cerrar sesión" title="Cerrar sesión" onClick={onLogout}><LogOut/></button></div>
+    <div className="profile"><div className="avatar light">{initials(user.fullName)}</div><div><b>{user.fullName}</b><small>{roleLabel(user)}</small></div><button className="profile-logout" aria-label="Cerrar sesión" title="Cerrar sesión" onClick={onLogout}><LogOut/></button></div>
   </aside>;
 }
 function MobileNav({tab,navigate,more,nav}){
@@ -854,13 +865,13 @@ function Calendario({events,team,cases,transports,providers,warehouseEntries,sav
   const [weekStart,setWeekStart]=useState(startOfWeek(new Date()));
   const [editing,setEditing]=useState(null);
   const [mineOnly,setMineOnly]=useState(false);
-  if(currentUser.role==='driver')return <DriverCalendarV2 events={events} cases={cases} transports={transports} warehouseEntries={warehouseEntries} currentUser={currentUser} saveEvent={saveEvent} completeCaseStep={completeCaseStep} undoCaseStep={undoCaseStep} csrfToken={csrfToken} reloadOperational={reloadOperational} notify={notify}/>;
+  if(isDriverOnly(currentUser))return <DriverCalendarV2 events={events} cases={cases} transports={transports} warehouseEntries={warehouseEntries} currentUser={currentUser} saveEvent={saveEvent} completeCaseStep={completeCaseStep} undoCaseStep={undoCaseStep} csrfToken={csrfToken} reloadOperational={reloadOperational} notify={notify}/>;
   const days=Array.from({length:7},(_,index)=>addDays(weekStart,index));
   const hours=Array.from({length:16},(_,index)=>index+6);
   const dayLabel=new Intl.DateTimeFormat('es-ES',{weekday:'short',day:'numeric',month:'short'});
   const newEvent=()=>setEditing({id:'EV-'+Date.now(),titulo:'',tipoServicio:'Recepción',fecha:isoDate(days[0]),inicio:'09:00',fin:'10:00',asignado:'Sin asignar',expediente:'',transporte:'',color:'gray'});
   const visibleEvents=(mineOnly?events.filter(event=>event.asignado===currentUser.fullName):events).filter(event=>event.inicio);
-  return <><section className="calendar-toolbar"><div className="calendar-nav"><button className="button tertiary" onClick={()=>setWeekStart(addDays(weekStart,-7))}>‹</button><button className="button tertiary" onClick={()=>setWeekStart(startOfWeek(new Date()))}>Hoy</button><button className="button tertiary" onClick={()=>setWeekStart(addDays(weekStart,7))}>›</button><h2>{days[0].toLocaleDateString('es-ES',{day:'numeric',month:'long'})} – {days[6].toLocaleDateString('es-ES',{day:'numeric',month:'long',year:'numeric'})}</h2></div><div className="calendar-actions">{currentUser.role==='operations'&&<button className={'button '+(mineOnly?'secondary':'tertiary')} onClick={()=>setMineOnly(!mineOnly)}><UserRound/> Mis servicios</button>}<button className="button primary" onClick={newEvent}><Plus/> Nueva tarea</button></div></section><section className="calendar-shell panel"><div className="calendar-scroll"><div className="calendar-head"><span className="calendar-zone">GMT+2</span>{days.map(day=><div key={isoDate(day)} className={isoDate(day)===isoDate(new Date())?'today':''}><b>{dayLabel.format(day).replace('.','')}</b></div>)}</div><div className="calendar-body"><div className="calendar-hours">{hours.map(hour=><span key={hour}>{String(hour).padStart(2,'0')}:00</span>)}</div>{days.map(day=><div className="calendar-day" key={isoDate(day)}>{hours.map(hour=><i className="calendar-line" key={hour}/>)}
+  return <><section className="calendar-toolbar"><div className="calendar-nav"><button className="button tertiary" onClick={()=>setWeekStart(addDays(weekStart,-7))}>‹</button><button className="button tertiary" onClick={()=>setWeekStart(startOfWeek(new Date()))}>Hoy</button><button className="button tertiary" onClick={()=>setWeekStart(addDays(weekStart,7))}>›</button><h2>{days[0].toLocaleDateString('es-ES',{day:'numeric',month:'long'})} – {days[6].toLocaleDateString('es-ES',{day:'numeric',month:'long',year:'numeric'})}</h2></div><div className="calendar-actions">{hasRole(currentUser,'operations')&&<button className={'button '+(mineOnly?'secondary':'tertiary')} onClick={()=>setMineOnly(!mineOnly)}><UserRound/> Mis servicios</button>}<button className="button primary" onClick={newEvent}><Plus/> Nueva tarea</button></div></section><section className="calendar-shell panel"><div className="calendar-scroll"><div className="calendar-head"><span className="calendar-zone">GMT+2</span>{days.map(day=><div key={isoDate(day)} className={isoDate(day)===isoDate(new Date())?'today':''}><b>{dayLabel.format(day).replace('.','')}</b></div>)}</div><div className="calendar-body"><div className="calendar-hours">{hours.map(hour=><span key={hour}>{String(hour).padStart(2,'0')}:00</span>)}</div>{days.map(day=><div className="calendar-day" key={isoDate(day)}>{hours.map(hour=><i className="calendar-line" key={hour}/>)}
     {visibleEvents.filter(event=>event.fecha===isoDate(day)).map(event=>{const [startHour,startMinute]=event.inicio.split(':').map(Number);const [endHour,endMinute]=event.fin.split(':').map(Number);const top=((startHour*60+startMinute)-360)/60*64;const height=Math.max(108,((endHour*60+endMinute)-(startHour*60+startMinute))/60*64);return <article key={event.id} className={'calendar-event '+event.color} style={{top,height}}><button className="calendar-event-open" onClick={()=>setEditing(event)}><CalendarEventContent event={event} cases={cases}/></button><select aria-label={'Asignar conductor a '+(event.titulo||event.id)} value={event.asignado||'Sin asignar'} onChange={change=>saveEvent({...event,asignado:change.target.value})}><option>Sin asignar</option>{team.map(member=><option key={member.id} value={member.fullName}>{member.fullName}</option>)}</select></article>})}</div>)}</div></div></section>{editing&&<CalendarEventModal item={editing} team={team} cases={cases} transports={transports} providers={providers} close={()=>setEditing(null)} submit={item=>{saveEvent(item);setEditing(null)}} openCase={openCase}/>}</>;
 }
 
@@ -975,7 +986,7 @@ function DriverTaskModal({event,item,transport,warehouseEntries,currentUser,csrf
       <div className="driver-task-body">
         <div className="driver-route"><MapPin/><span><small>PUERTO / RUTA</small><b>{transport?.ruta||item.puerto}</b></span></div>
         {!mine&&<div className="driver-owner-alert"><UserRound/><span><b>{event.asignado&&event.asignado!=='Sin asignar'?`Asignado a ${event.asignado}`:'Trabajo sin conductor'}</b><small>Asígnatelo antes de registrar avances.</small></span><button className="button secondary" onClick={claim}>Asignarme</button></div>}
-        <OperationChecklist item={item} csrfToken={csrfToken} reloadOperational={reloadOperational} notify={notify} currentRole={currentUser.role}/>
+        <OperationChecklist item={item} csrfToken={csrfToken} reloadOperational={reloadOperational} notify={notify} currentRoles={currentUser}/>
         <CargoManifest item={item}/>
         {flow.cargo&&<ShipmentDocuments item={item}/>}
         {step?<>
@@ -991,7 +1002,7 @@ function DriverTaskModal({event,item,transport,warehouseEntries,currentUser,csrf
             {error&&<p className="form-error"><CircleAlert/>{error}</p>}
           </div>}
           <label className="field"><span>Observación del trabajo (opcional)</span><input value={note} disabled={!mine} onChange={change=>setNote(change.target.value)} placeholder="Persona que recibe, incidencia, referencia…"/></label>
-          {canCompleteOperationStep(currentUser.role,step.key)&&step.key!=='assignment'?<button className="button primary full driver-confirm" disabled={!mine||uploading||!evidenceReady} onClick={()=>submit(step.key,note,evidenceFiles)}><CheckCircle2/> {!evidenceReady?(step.key==='cargo'?'Añade una foto para confirmar':'Completa foto de entrega y POD'):`Confirmar: ${step.title}`}</button>:<div className="step-owner-wait"><LockKeyhole/><span><b>{step.key==='assignment'?'Asigna o asígnate el transporte':'Esperando al equipo responsable'}</b><small>{step.responsibility}</small></span></div>}
+          {canCompleteOperationStep(currentUser,step.key)&&step.key!=='assignment'?<button className="button primary full driver-confirm" disabled={!mine||uploading||!evidenceReady} onClick={()=>submit(step.key,note,evidenceFiles)}><CheckCircle2/> {!evidenceReady?(step.key==='cargo'?'Añade una foto para confirmar':'Completa foto de entrega y POD'):`Confirmar: ${step.title}`}</button>:<div className="step-owner-wait"><LockKeyhole/><span><b>{step.key==='assignment'?'Asigna o asígnate el transporte':'Esperando al equipo responsable'}</b><small>{step.responsibility}</small></span></div>}
         </>:<div className="driver-finished"><CheckCircle2/><span><b>Trabajo terminado</b><small>POD recibido y expediente listo para facturación.</small></span></div>}
         {mine&&lastCompleted&&<button className="button tertiary full driver-undo-step" onClick={()=>undo(lastCompleted.key)}><Undo2/> Deshacer: {lastCompleted.title}</button>}
         <button className="button tertiary full" onClick={close}>{flow.billingReady?'Cerrar':'Volver al calendario'}</button>
@@ -1028,7 +1039,7 @@ function Dashboard({cases,warehouseEntries,calendarEvents,openCase,navigate,show
   const active=cases.filter(item=>item.estado!=='Completado').length;
   const billing=cases.filter(item=>item.estado==='Completado').reduce((sum,item)=>sum+item.importe,0);
   const stock=warehouseEntries.filter(item=>!item.archivado&&item.estado!=='Expedido').reduce((sum,item)=>sum+Number(item.bultos||0),0);
-  const alerts=user.role==='operations'
+  const alerts=hasRole(user,'operations')
     ? calendarEvents.filter(event=>event.asignado===user.fullName&&cases.find(item=>item.id===event.expediente)?.estado!=='Completado').length
     : cases.filter(item=>item.estado!=='Completado'&&(item.prioridad==='Urgente'||item.conductor==='Sin asignar')).length;
   return <>
@@ -1067,7 +1078,7 @@ function Expedientes({cases,selected,select,search,setSearch,completeCaseStep,no
   const filtered=cases.filter(item=>(filter==='Todos'||item.estado===filter)&&[item.buque,item.id,item.cliente,item.puerto].join(' ').toLowerCase().includes(search.toLowerCase()));
   return <div className={'case-layout '+(mobileDetail?'mobile-detail-open':'')}>
     <section className={'panel case-list '+(selected?'has-selection':'')}><div className="list-toolbar"><label className="search-box"><Search/><input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Buscar número, buque, ETA o puerto…"/></label><div className="filter-chips">{['Todos','En curso','Bloqueado','Planificado'].map(value=><button key={value} className={filter===value?'active':''} onClick={()=>setFilter(value)}>{value}</button>)}</div></div><div className="case-count">{filtered.length} expedientes</div>{filtered.length?filtered.map(item=><button key={item.id} className={'case-card '+(selected.id===item.id?'selected':'')} onClick={()=>{select(item.id);setMobileDetail(true)}}><div className="case-card-top"><span className="ship-icon"><Ship/></span><span><b>{caseLabel(item)}</b><small>{item.cliente}</small></span><Badge>{item.estado}</Badge></div><div className="case-card-meta"><span><MapPin/>{item.puerto}</span><span><CalendarDays/>{item.eta}</span></div><div className="case-progress"><span><i style={{width:item.progreso+'%'}}/></span><small>{item.progreso}%</small></div><p><b>Siguiente:</b> {item.siguiente}</p></button>):<Empty text="Prueba con otro término o estado."/>}</section>
-    <section className="panel case-detail"><button className="mobile-detail-back" onClick={()=>setMobileDetail(false)}><ArrowLeft/> Expedientes</button><div className="detail-hero"><div><div className="detail-id">{selected.id} <Badge>{selected.estado}</Badge></div><h2>{selected.buque}</h2><p>{selected.cliente} · {selected.puerto}</p></div><button className="icon-button" aria-label="Editar expediente" onClick={()=>setEditOpen(true)}><PencilLine/></button></div><div className={'detail-stats '+(!showFinance?'detail-stats-three':'')}><Stat label="ETA" value={selected.eta} icon={Clock3}/><Stat label="Mercancía" value={selected.bultos+' bultos · '+selected.peso} icon={Box}/><Stat label="Conductor" value={selected.conductor} icon={UserRound}/>{showFinance&&<Stat label="Importe previsto" value={money(selected.importe)} icon={BadgeEuro}/>}</div><PortCallPanel item={selected}/><OperationChecklist item={selected} csrfToken={csrfToken} reloadOperational={reloadOperational} notify={notify} currentRole={currentUser?.role}/><ShipmentDocuments item={selected}/><div className="detail-columns"><div><h3>Línea temporal real</h3><ActualTimeline item={selected}/></div><aside className="detail-side"><div className={'next-action '+(operationFlow(selected).billingReady?'complete':'')}><span>{operationFlow(selected).billingReady?'Operativa completada':'Próxima acción'}</span><b>{selected.siguiente}</b><p>{operationFlow(selected).billingReady?'El POD está registrado y el expediente ha pasado a facturación.':'Sigue el paso indicado para que todo el equipo trabaje igual.'}</p><button className="button primary full" disabled={operationFlow(selected).billingReady} onClick={()=>setFlowOpen(true)}><ClipboardCheck/> {operationFlow(selected).billingReady?'Listo para facturar':'Registrar siguiente paso'}</button></div><div className="document-box"><h3>POD de entrega</h3>{selected.documentacionMercancia?.podArchivo?<a className="document-link" href={selected.documentacionMercancia.podArchivo.url} target="_blank" rel="noreferrer"><Camera/><span><b>POD firmado</b><small>{selected.documentacionMercancia.podArchivo.name}</small></span><ExternalLink/></a>:<button onClick={()=>notify('POD todavía pendiente')}><Camera/><span><b>POD / fotografías</b><small>Pendiente de entrega</small></span><ChevronRight/></button>}</div></aside></div></section>
+    <section className="panel case-detail"><button className="mobile-detail-back" onClick={()=>setMobileDetail(false)}><ArrowLeft/> Expedientes</button><div className="detail-hero"><div><div className="detail-id">{selected.id} <Badge>{selected.estado}</Badge></div><h2>{selected.buque}</h2><p>{selected.cliente} · {selected.puerto}</p></div><button className="icon-button" aria-label="Editar expediente" onClick={()=>setEditOpen(true)}><PencilLine/></button></div><div className={'detail-stats '+(!showFinance?'detail-stats-three':'')}><Stat label="ETA" value={selected.eta} icon={Clock3}/><Stat label="Mercancía" value={selected.bultos+' bultos · '+selected.peso} icon={Box}/><Stat label="Conductor" value={selected.conductor} icon={UserRound}/>{showFinance&&<Stat label="Importe previsto" value={money(selected.importe)} icon={BadgeEuro}/>}</div><PortCallPanel item={selected}/><OperationChecklist item={selected} csrfToken={csrfToken} reloadOperational={reloadOperational} notify={notify} currentRoles={currentUser}/><ShipmentDocuments item={selected}/><div className="detail-columns"><div><h3>Línea temporal real</h3><ActualTimeline item={selected}/></div><aside className="detail-side"><div className={'next-action '+(operationFlow(selected).billingReady?'complete':'')}><span>{operationFlow(selected).billingReady?'Operativa completada':'Próxima acción'}</span><b>{selected.siguiente}</b><p>{operationFlow(selected).billingReady?'El POD está registrado y el expediente ha pasado a facturación.':'Sigue el paso indicado para que todo el equipo trabaje igual.'}</p><button className="button primary full" disabled={operationFlow(selected).billingReady} onClick={()=>setFlowOpen(true)}><ClipboardCheck/> {operationFlow(selected).billingReady?'Listo para facturar':'Registrar siguiente paso'}</button></div><div className="document-box"><h3>POD de entrega</h3>{selected.documentacionMercancia?.podArchivo?<a className="document-link" href={selected.documentacionMercancia.podArchivo.url} target="_blank" rel="noreferrer"><Camera/><span><b>POD firmado</b><small>{selected.documentacionMercancia.podArchivo.name}</small></span><ExternalLink/></a>:<button onClick={()=>notify('POD todavía pendiente')}><Camera/><span><b>POD / fotografías</b><small>Pendiente de entrega</small></span><ChevronRight/></button>}</div></aside></div></section>
     <section className="panel case-services-panel"><CaseServicesPanel item={selected} events={calendarEvents} cases={cases} transports={transports} team={team} providers={providers} saveEvent={saveEvent}/></section>
     <section className="panel merchandise-case-panel"><MerchandisePanel item={selected} updateCase={updateCase}/></section>
     {editOpen&&<CaseEditModal item={selected} clientOptions={clientOptions} close={()=>setEditOpen(false)} submit={item=>{updateCase(item);setEditOpen(false)}}/>}
@@ -1096,10 +1107,10 @@ function ActualTimeline({item}){
   if(!events.length)return <div className="timeline-empty"><Clock3/><b>Sin actividad registrada</b><small>La cronología aparecerá cuando el equipo confirme el primer paso.</small></div>;
   return <div className="timeline actual-timeline">{events.map((event,index)=><div className="timeline-event done" key={event.id||event.titulo+index}><span className="timeline-marker"><CheckCircle2/></span><time>{event.hora||'—'}<small>{event.fecha||''}</small></time><span><b>{event.titulo}</b><small>{event.detalle}</small>{event.actor&&<em>Registrado por {event.actor}</em>}{event.archivo&&<a href={event.archivo.url} target="_blank" rel="noreferrer"><FileText/> Ver {event.archivo.name}</a>}{(event.archivos||[]).map((file,fileIndex)=><a href={file.url} target="_blank" rel="noreferrer" key={file.id||fileIndex}><Camera/> Foto {fileIndex+1}: {file.name}</a>)}</span></div>)}</div>;
 }
-function OperationChecklist({item,csrfToken,reloadOperational,notify,currentRole}){
+function OperationChecklist({item,csrfToken,reloadOperational,notify,currentRoles}){
   const flow=operationFlow(item);
   const current=nextOperationStep(item);
-  return <><AisTrackingPanel item={item} csrfToken={csrfToken} reloadOperational={reloadOperational} notify={notify}/><section className="operation-checklist"><div><b>FLUJO OPERATIVO</b><small>Orden y responsable de cada paso</small></div><ol>{OPERATION_STEPS.map((step,index)=><li key={step.key} className={`${flow[step.key]?'done':current?.key===step.key?'current':''} ${currentRole&&!step.roles.includes(currentRole)?'other-role':''}`}><span>{flow[step.key]?<CheckCircle2/>:index+1}</span><span><b>{step.title}</b><small>{step.responsibility}</small></span></li>)}<li className={flow.billingReady?'done':''}><span>{flow.billingReady?<CheckCircle2/>:OPERATION_STEPS.length+1}</span><span><b>Listo para facturar</b><small>ADMINISTRACIÓN</small></span></li></ol></section></>;
+  return <><AisTrackingPanel item={item} csrfToken={csrfToken} reloadOperational={reloadOperational} notify={notify}/><section className="operation-checklist"><div><b>FLUJO OPERATIVO</b><small>Orden y responsable de cada paso</small></div><ol>{OPERATION_STEPS.map((step,index)=><li key={step.key} className={`${flow[step.key]?'done':current?.key===step.key?'current':''} ${currentRoles&&!canCompleteOperationStep(currentRoles,step.key)?'other-role':''}`}><span>{flow[step.key]?<CheckCircle2/>:index+1}</span><span><b>{step.title}</b><small>{step.responsibility}</small></span></li>)}<li className={flow.billingReady?'done':''}><span>{flow.billingReady?<CheckCircle2/>:OPERATION_STEPS.length+1}</span><span><b>Listo para facturar</b><small>ADMINISTRACIÓN</small></span></li></ol></section></>;
 }
 
 function OperationStepModal({item,warehouseEntries,transports,csrfToken,currentUser,close,submit}){
@@ -1142,10 +1153,10 @@ function OperationStepModal({item,warehouseEntries,transports,csrfToken,currentU
     <section className="modal operation-modal">
       <div className="modal-head"><div><span className="overline">Paso operativo</span><h2>{step.title}</h2><p>{item.id} · {item.buque}</p></div><button className="icon-button" onClick={close}><X/></button></div>
       <div className="operation-modal-body">
-        <OperationChecklist item={item} currentRole={currentUser?.role}/>
+        <OperationChecklist item={item} currentRoles={currentUser}/>
         <div className="operation-guidance"><ClipboardCheck/><div><b>Qué debes comprobar</b><p>{guidance[step.key]}</p>{step.key==='delivery'&&transport&&<small>{transport.id} · {transport.ruta}</small>}</div></div>
         {['documents','assignment','delivery'].includes(step.key)&&<ShipmentDocuments item={item}/>}
-        {step.key==='documents'&&canCompleteOperationStep(currentUser?.role,step.key)&&<div className="pod-scanner shipment-document-upload">
+        {step.key==='documents'&&canCompleteOperationStep(currentUser,step.key)&&<div className="pod-scanner shipment-document-upload">
           <div><FileCheck2/><span><b>Adjuntar documentación del envío</b><small>Packing list, delivery note, CMR, T1, levante u otros documentos.</small></span></div>
           <div className="pod-scanner-actions"><label className="button primary"><UploadCloud/> {uploading?'Subiendo…':'Añadir documentos'}<input type="file" accept="application/pdf,image/*" multiple disabled={uploading} onChange={event=>{uploadEvidence(event.target.files,'shipment-document');event.target.value=''}}/></label></div>
           {shipmentFiles.length>0&&<div className="evidence-file-list">{shipmentFiles.map((file,index)=><a className="pod-uploaded" href={file.url} target="_blank" rel="noreferrer" key={`${file.id}-${index}`}><CheckCircle2/><span><b>{documentLabel(file.name)}</b><small>{file.name}</small></span><ExternalLink/></a>)}</div>}
@@ -1161,7 +1172,7 @@ function OperationStepModal({item,warehouseEntries,transports,csrfToken,currentU
           {error&&<p className="form-error"><CircleAlert/>{error}</p>}
         </div>}
         <label className="field"><span>Observación (opcional)</span><input value={note} onChange={event=>setNote(event.target.value)} placeholder="Incidencias, persona que recibe, referencia…"/></label>
-        <div className="modal-actions"><button className="button tertiary" onClick={close}>Cancelar</button>{canCompleteOperationStep(currentUser?.role,step.key)&&step.key!=='assignment'?<button className="button primary" disabled={uploading||!evidenceReady} onClick={()=>submit(step.key,note,evidenceFiles)}><CheckCircle2/> {!evidenceReady?(step.key==='cargo'?'Añade una foto':'Completa foto de entrega y POD'):'Confirmar paso'}</button>:<div className="step-owner-wait"><LockKeyhole/><span><b>{step.key==='assignment'?'Asigna el conductor en el calendario':'Paso reservado a otro equipo'}</b><small>{step.responsibility}</small></span></div>}</div>
+        <div className="modal-actions"><button className="button tertiary" onClick={close}>Cancelar</button>{canCompleteOperationStep(currentUser,step.key)&&step.key!=='assignment'?<button className="button primary" disabled={uploading||!evidenceReady} onClick={()=>submit(step.key,note,evidenceFiles)}><CheckCircle2/> {!evidenceReady?(step.key==='cargo'?'Añade una foto':'Completa foto de entrega y POD'):'Confirmar paso'}</button>:<div className="step-owner-wait"><LockKeyhole/><span><b>{step.key==='assignment'?'Asigna el conductor en el calendario':'Paso reservado a otro equipo'}</b><small>{step.responsibility}</small></span></div>}</div>
       </div>
     </section>
   </div>;
@@ -1378,13 +1389,29 @@ function MailReviewModal({item,close,submit}){
 
 function Usuarios({csrfToken,notify,onPreview,onUsersChanged}){
   const [users,setUsers]=useState([]);const [loading,setLoading]=useState(true);const [error,setError]=useState('');
-  const [form,setForm]=useState({fullName:'',email:'',password:'',role:'operations'});const [busy,setBusy]=useState(false);
+  const [form,setForm]=useState({fullName:'',email:'',password:'',roles:['operations']});const [busy,setBusy]=useState(false);
   const load=()=>{setLoading(true);api('/api/admin/users.php').then(result=>setUsers(result.users)).catch(reason=>setError(reason.message)).finally(()=>setLoading(false))};
   useEffect(load,[]);
   const update=event=>setForm({...form,[event.target.name]:event.target.value});
-  const updateRole=async(item,role)=>{setError('');try{await api('/api/admin/users.php',{method:'PUT',headers:{'X-CSRF-Token':csrfToken},body:JSON.stringify({id:item.id,role})});setUsers(users.map(user=>user.id===item.id?{...user,role}:user));notify(`${item.fullName} ahora es ${ROLE_LABELS[role]}`);onUsersChanged()}catch(reason){setError(reason.message)}};
-  const submit=async event=>{event.preventDefault();setBusy(true);setError('');try{await api('/api/admin/users.php',{method:'POST',headers:{'X-CSRF-Token':csrfToken},body:JSON.stringify(form)});setForm({fullName:'',email:'',password:'',role:'operations'});notify('Usuario creado correctamente');load();onUsersChanged()}catch(reason){setError(reason.message)}finally{setBusy(false)}};
-  return <div className="users-layout"><section className="panel"><SectionHeader title="Equipo con acceso" subtitle="Cambia a Moisés a Transportista para activar su vista simplificada"/>{error&&<div className="form-error users-error"><CircleAlert/>{error}</div>}{loading?<div className="users-loading">Cargando usuarios…</div>:<div className="user-list">{users.map(item=><article key={item.id}><div className="avatar">{initials(item.fullName)}</div><div><b>{item.fullName}</b><small>{item.email}</small></div><label className="user-role-select"><span>Nivel</span><select value={item.role} onChange={event=>updateRole(item,event.target.value)}>{Object.entries(ROLE_LABELS).map(([value,label])=><option key={value} value={value}>{label}</option>)}</select></label><button className="button tertiary preview-user" onClick={()=>onPreview(item)}><Eye/> Ver como</button></article>)}</div>}</section><section className="panel create-user"><SectionHeader title="Añadir usuario" subtitle="La contraseña debe tener al menos 4 caracteres"/><form onSubmit={submit}><label className="field"><span>Nombre completo</span><input name="fullName" value={form.fullName} onChange={update} required/></label><label className="field"><span>Email</span><input name="email" type="email" value={form.email} onChange={update} required/></label><label className="field"><span>Contraseña temporal</span><input name="password" type="password" minLength="4" value={form.password} onChange={update} required/></label><label className="field"><span>Nivel de acceso</span><select name="role" value={form.role} onChange={update}><option value="driver">Transportista · solo sus trabajos</option><option value="operations">Operaciones · sin importes</option><option value="finance">Finanzas · importes y tarifas</option><option value="admin">Administración · acceso total</option></select></label><button className="button primary full" disabled={busy}><UserPlus/>{busy?'Creando…':'Crear usuario'}</button></form></section></div>;
+  const toggleUserRole=async(item,role)=>{
+    const current=rolesOf(item);
+    const roles=current.includes(role)?current.filter(value=>value!==role):[...current,role];
+    if(!roles.length){setError('Cada usuario debe conservar al menos un rol.');return}
+    setError('');
+    try{
+      await api('/api/admin/users.php',{method:'PUT',headers:{'X-CSRF-Token':csrfToken},body:JSON.stringify({id:item.id,roles})});
+      setUsers(users.map(user=>user.id===item.id?{...user,roles,role:primaryRole(roles)}:user));
+      notify(`Permisos de ${item.fullName} actualizados`);
+      onUsersChanged();
+    }catch(reason){setError(reason.message)}
+  };
+  const toggleFormRole=role=>setForm(current=>{const roles=current.roles.includes(role)?current.roles.filter(value=>value!==role):[...current.roles,role];return {...current,roles:roles.length?roles:current.roles}});
+  const submit=async event=>{event.preventDefault();setBusy(true);setError('');try{await api('/api/admin/users.php',{method:'POST',headers:{'X-CSRF-Token':csrfToken},body:JSON.stringify(form)});setForm({fullName:'',email:'',password:'',roles:['operations']});notify('Usuario creado correctamente');load();onUsersChanged()}catch(reason){setError(reason.message)}finally{setBusy(false)}};
+  const RoleChecks=({roles,toggle})=><div className="multi-role-selector">{Object.entries(ROLE_LABELS).map(([value,label])=><label className={roles.includes(value)?'checked':''} key={value}><input type="checkbox" checked={roles.includes(value)} onChange={()=>toggle(value)}/><CheckCircle2/><span><b>{label}</b><small>{value==='driver'?'Calendario, almacén y entregas':value==='operations'?'Expedientes, correos y planificación':value==='finance'?'Importes, tarifas y facturación':'Control total y usuarios'}</small></span></label>)}</div>;
+  return <div className="users-layout">
+    <section className="panel"><SectionHeader title="Equipo con acceso" subtitle="Una persona puede combinar varios roles y permisos"/>{error&&<div className="form-error users-error"><CircleAlert/>{error}</div>}{loading?<div className="users-loading">Cargando usuarios…</div>:<div className="user-list">{users.map(item=><article key={item.id}><div className="avatar">{initials(item.fullName)}</div><div className="user-identity"><b>{item.fullName}</b><small>{item.email}</small><em>{roleLabel(item)}</em></div><RoleChecks roles={rolesOf(item)} toggle={role=>toggleUserRole(item,role)}/><button className="button tertiary preview-user" onClick={()=>onPreview(item)}><Eye/> Ver como</button></article>)}</div>}</section>
+    <section className="panel create-user"><SectionHeader title="Añadir usuario" subtitle="Selecciona uno o varios roles"/><form onSubmit={submit}><label className="field"><span>Nombre completo</span><input name="fullName" value={form.fullName} onChange={update} required/></label><label className="field"><span>Email</span><input name="email" type="email" value={form.email} onChange={update} required/></label><label className="field"><span>Contraseña temporal</span><input name="password" type="password" minLength="4" value={form.password} onChange={update} required/></label><div className="field"><span>Roles y permisos</span><RoleChecks roles={form.roles} toggle={toggleFormRole}/></div><button className="button primary full" disabled={busy}><UserPlus/>{busy?'Creando…':'Crear usuario'}</button></form></section>
+  </div>;
 }
 
 function CaseEditModal({item,close,submit}){
@@ -1414,7 +1441,7 @@ function TransportEditModal({item,team,providers,close,submit}){
   const initialRoute=routeParts(item);
   const [form,setForm]=useState({...item,...initialRoute,fecha:item.fecha||new Date().toISOString().slice(0,10),inicio:item.inicio||'09:00',fin:item.fin||'10:00'});const update=event=>setForm({...form,[event.target.name]:event.target.value});
   const save=event=>{event.preventDefault();const estado=form.conductor==='Sin asignar'?'Sin asignar':form.estado==='Sin asignar'?'Asignado':form.estado;submit({...form,ruta:`${form.origen.trim()} → ${form.destino.trim()}`,estado})};
-  return <div className="modal-backdrop" onMouseDown={event=>{if(event.target===event.currentTarget)close()}}><section className="modal transport-edit-modal" role="dialog" aria-modal="true"><div className="modal-head"><div><span className="overline">{item.id}</span><h2>Editar recorrido</h2><p>Indica libremente dónde se recoge y dónde se entrega.</p></div><button className="icon-button" onClick={close}><X/></button></div><form onSubmit={save}><label className="field wide"><span>Lugar de recogida</span><input name="origen" value={form.origen} onChange={update} placeholder="Ej. ALMACÉN SWIFTPORT, TECHNYMON, AEROPUERTO…" required/></label><label className="field wide"><span>Lugar de entrega</span><input name="destino" value={form.destino} onChange={update} placeholder="Ej. BUQUE, ALMACÉN, EMPRESA X (BILBAO)…" required/></label><div className="route-preview wide"><MapPin/><span><small>RECORRIDO</small><b>{form.origen||'ORIGEN'} → {form.destino||'DESTINO'}</b></span></div><label className="field"><span>Fecha</span><input name="fecha" type="date" value={form.fecha} onChange={update} required/></label><label className="field"><span>Hora inicio</span><input name="inicio" type="time" value={form.inicio} onChange={update} required/></label><label className="field"><span>Hora fin</span><input name="fin" type="time" value={form.fin} onChange={update} required/></label><label className="field"><span>Estado</span><select name="estado" value={form.estado} onChange={update}>{['Sin asignar','Asignado','En ruta','Entregado'].map(value=><option key={value}>{value}</option>)}</select></label><label className="field"><span>Conductor</span><select name="conductor" value={form.conductor} onChange={update}><option>Sin asignar</option>{team.filter(member=>['operations','driver'].includes(member.role)).map(member=><option key={member.id} value={member.fullName}>{member.fullName}</option>)}</select></label><label className="field"><span>Proveedor</span><select name="proveedorId" value={form.proveedorId||''} onChange={update}><option value="">Sin proveedor</option>{providers.filter(provider=>provider.activo!==false).map(provider=><option key={provider.id} value={provider.id}>{provider.nombre}</option>)}</select></label><label className="field"><span>Vehículo / matrícula</span><input name="vehiculo" value={form.vehiculo} onChange={update}/></label><div className="modal-actions wide"><button type="button" className="button tertiary" onClick={close}>Cancelar</button><button className="button primary"><Save/> Guardar recorrido</button></div></form></section></div>;
+  return <div className="modal-backdrop" onMouseDown={event=>{if(event.target===event.currentTarget)close()}}><section className="modal transport-edit-modal" role="dialog" aria-modal="true"><div className="modal-head"><div><span className="overline">{item.id}</span><h2>Editar recorrido</h2><p>Indica libremente dónde se recoge y dónde se entrega.</p></div><button className="icon-button" onClick={close}><X/></button></div><form onSubmit={save}><label className="field wide"><span>Lugar de recogida</span><input name="origen" value={form.origen} onChange={update} placeholder="Ej. ALMACÉN SWIFTPORT, TECHNYMON, AEROPUERTO…" required/></label><label className="field wide"><span>Lugar de entrega</span><input name="destino" value={form.destino} onChange={update} placeholder="Ej. BUQUE, ALMACÉN, EMPRESA X (BILBAO)…" required/></label><div className="route-preview wide"><MapPin/><span><small>RECORRIDO</small><b>{form.origen||'ORIGEN'} → {form.destino||'DESTINO'}</b></span></div><label className="field"><span>Fecha</span><input name="fecha" type="date" value={form.fecha} onChange={update} required/></label><label className="field"><span>Hora inicio</span><input name="inicio" type="time" value={form.inicio} onChange={update} required/></label><label className="field"><span>Hora fin</span><input name="fin" type="time" value={form.fin} onChange={update} required/></label><label className="field"><span>Estado</span><select name="estado" value={form.estado} onChange={update}>{['Sin asignar','Asignado','En ruta','Entregado'].map(value=><option key={value}>{value}</option>)}</select></label><label className="field"><span>Conductor</span><select name="conductor" value={form.conductor} onChange={update}><option>Sin asignar</option>{team.filter(member=>hasRole(member,'operations')||hasRole(member,'driver')).map(member=><option key={member.id} value={member.fullName}>{member.fullName}</option>)}</select></label><label className="field"><span>Proveedor</span><select name="proveedorId" value={form.proveedorId||''} onChange={update}><option value="">Sin proveedor</option>{providers.filter(provider=>provider.activo!==false).map(provider=><option key={provider.id} value={provider.id}>{provider.nombre}</option>)}</select></label><label className="field"><span>Vehículo / matrícula</span><input name="vehiculo" value={form.vehiculo} onChange={update}/></label><div className="modal-actions wide"><button type="button" className="button tertiary" onClick={close}>Cancelar</button><button className="button primary"><Save/> Guardar recorrido</button></div></form></section></div>;
 }
 
 function ProviderModal({close,submit}){
@@ -1458,7 +1485,7 @@ function CalendarEventModal({item,team,cases,transports,providers,close,submit,o
     if(event.target.name==='transporte'){const linked=transports.find(entry=>entry.id===event.target.value);const route=routeParts(linked);setForm({...form,...route,tipoServicio:event.target.value?'Transporte':form.tipoServicio,transporte:event.target.value,expediente:linked?.expediente||form.expediente,titulo:linked?transportRoute(linked):form.titulo,asignado:linked?.conductor||form.asignado,proveedorId:linked?.proveedorId||form.proveedorId||'',fecha:linked?.fecha||form.fecha,inicio:linked?.inicio||form.inicio,fin:linked?.fin||form.fin});return}
     setForm({...form,[event.target.name]:event.target.value});
   };
-  const validTeam=team.filter(member=>['operations','driver'].includes(member.role));
+  const validTeam=team.filter(member=>hasRole(member,'operations')||hasRole(member,'driver'));
   const relatedCase=cases.find(entry=>entry.id===form.expediente);
   const save=event=>{event.preventDefault();const route=form.tipoServicio==='Transporte'?`${form.origen.trim()} → ${form.destino.trim()}`:form.titulo;submit({...form,titulo:route})};
   return <div className="modal-backdrop" onMouseDown={event=>{if(event.target===event.currentTarget)close()}}><section className="modal calendar-event-modal" role="dialog" aria-modal="true"><div className="modal-head"><div><span className="overline">Planificación</span><h2>{item.titulo?'Editar tarea':'Nueva tarea'}</h2><p>Fecha, horas, recorrido y conductor quedarán sincronizados.</p></div><button className="icon-button" onClick={close}><X/></button></div><form onSubmit={save}><label className="field"><span>Tipo de servicio</span><select name="tipoServicio" value={form.tipoServicio} onChange={update} autoFocus><option>Recepción</option><option>Transporte</option></select></label><label className="field"><span>Expediente / buque</span><select name="expediente" value={form.expediente} onChange={update} required><option value="">Seleccionar expediente</option>{cases.map(entry=><option key={entry.id} value={entry.id}>{caseLabel(entry)}</option>)}</select></label><label className="field"><span>Fecha</span><input name="fecha" type="date" value={form.fecha} onChange={update} required/></label><label className="field"><span>Conductor</span><select name="asignado" value={form.asignado} onChange={update}><option>Sin asignar</option>{validTeam.map(member=><option key={member.id} value={member.fullName}>{member.fullName}</option>)}</select></label><label className="field"><span>Hora de inicio</span><input name="inicio" type="time" value={form.inicio} onChange={update} required/></label><label className="field"><span>Hora de fin</span><input name="fin" type="time" value={form.fin} onChange={update} required/></label>{form.tipoServicio==='Transporte'?<><label className="field wide"><span>Lugar de recogida</span><input name="origen" value={form.origen} onChange={update} placeholder="ALMACÉN SWIFTPORT" required/></label><label className="field wide"><span>Lugar de entrega</span><input name="destino" value={form.destino} onChange={update} placeholder="BUQUE / EMPRESA / ALMACÉN…" required/></label><div className="route-preview wide"><MapPin/><span><small>RECORRIDO DEL CONDUCTOR</small><b>{form.origen||'ORIGEN'} → {form.destino||'DESTINO'}</b></span></div><label className="field"><span>Empresa de transporte</span><select name="proveedorId" value={form.proveedorId||''} onChange={update}><option value="">Sin proveedor</option>{providers.filter(provider=>provider.activo!==false).map(provider=><option key={provider.id} value={provider.id}>{provider.nombre}</option>)}</select></label><label className="field"><span>Transporte relacionado</span><select name="transporte" value={form.transporte} onChange={update}><option value="">Crear transporte nuevo</option>{transports.map(entry=><option key={entry.id} value={entry.id}>{entry.id} · {transportRoute(entry)}</option>)}</select></label></>:<label className="field wide"><span>Lugar / notas de recepción</span><input name="titulo" value={form.titulo} onChange={update} placeholder="Almacén, terminal, proveedor…"/></label>}<CargoManifest item={relatedCase}/>{form.expediente&&<button type="button" className="button tertiary wide calendar-case-link" onClick={()=>{close();openCase(form.expediente)}}>Abrir expediente relacionado <ExternalLink/></button>}<div className="modal-actions wide"><button type="button" className="button tertiary" onClick={close}>Cancelar</button><button className="button primary"><Save/> Guardar tarea</button></div></form></section></div>;

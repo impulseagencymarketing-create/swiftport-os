@@ -25,7 +25,7 @@ if ((int) $attempts->fetchColumn() >= 5) {
 }
 
 $statement = db()->prepare(
-    'SELECT id, email, password_hash, full_name, role FROM app_users WHERE email = ? AND active = 1'
+    'SELECT id, email, password_hash, full_name, role, roles FROM app_users WHERE email = ? AND active = 1'
 );
 $statement->execute([$email]);
 $row = $statement->fetch();

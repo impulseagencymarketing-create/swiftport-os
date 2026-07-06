@@ -30,8 +30,8 @@ if (strlen($password) < 4) {
 }
 
 $statement = db()->prepare(
-    "INSERT INTO app_users (email, password_hash, full_name, role)
-     VALUES (?, ?, ?, 'admin')"
+    "INSERT INTO app_users (email, password_hash, full_name, role, roles)
+     VALUES (?, ?, ?, 'admin', JSON_ARRAY('admin'))"
 );
 $statement->execute([$email, password_hash($password, PASSWORD_DEFAULT), $fullName]);
 $id = (int) db()->lastInsertId();
@@ -42,6 +42,6 @@ $_SESSION['csrf'] = bin2hex(random_bytes(32));
 audit($id, 'auth.initial_admin_created');
 
 respond([
-    'user' => ['id' => $id, 'email' => $email, 'fullName' => $fullName, 'role' => 'admin'],
+    'user' => ['id' => $id, 'email' => $email, 'fullName' => $fullName, 'role' => 'admin', 'roles' => ['admin']],
     'csrfToken' => csrf_token(),
 ], 201);
