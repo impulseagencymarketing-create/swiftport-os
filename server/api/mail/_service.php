@@ -2,6 +2,8 @@
 declare(strict_types=1);
 require_once __DIR__ . '/_correlation.php';
 
+const SWIFTPORT_WAREHOUSE_ADDRESS = 'Bluespace, Carrer del Roure, 2, 08820 El Prat de Llobregat, Barcelona';
+
 function mail_decode_header_value(string $value): string
 {
     if (!function_exists('imap_mime_header_decode')) {
@@ -266,6 +268,165 @@ function normalize_operational_date(string $value, string $receivedAt): string
         }
     }
     return '';
+}
+
+function relative_service_date(string $text, string $receivedAt): string
+{
+    $base = strtotime($receivedAt) ?: time();
+    $normalized = mb_strtolower($text);
+    if (preg_match('/\bpasado\s+mañana\b/u', $normalized)) {
+        return date('Y-m-d', strtotime('+2 days', $base));
+    }
+    if (preg_match('/\bmañana\b/u', $normalized)) {
+        return date('Y-m-d', strtotime('+1 day', $base));
+    }
+    if (preg_match('/\bhoy\b/u', $normalized)) {
+        return date('Y-m-d', $base);
+    }
+    return '';
+}
+
+function subject_delivery_request(string $subject): array
+{
+    $normalized = normalized_mail_subject($subject);
+    if (!preg_match('/^ENTREGA\s+(.+?)\s*@\s*([^\/]+?)(?:\s*\/\/\s*([A-Z0-9._-]+))?$/u', $normalized, $match)) {
+        return [];
+    }
+    return [
+        'vessel' => port_call_vessel_name((string) $match[1]),
+        'port' => clean_extracted_value((string) $match[2]),
+        'reference' => mb_strtoupper(clean_extracted_value((string) ($match[3] ?? ''))),
+    ];
+}
+
+function cargo_summary_from_text(string $text): string
+{
+    $numbers = ['un' => 1, 'una' => 1, 'dos' => 2, 'tres' => 3, 'cuatro' => 4, 'cinco' => 5];
+    if (preg_match('/\b(\d+|un|una|dos|tres|cuatro|cinco)\s+(pallets?|palets?|cajas?|bultos?|sobres?|paquetes?)\b/iu', $text, $match)) {
+        $amountRaw = mb_strtolower((string) $match[1]);
+        $amount = ctype_digit($amountRaw) ? (int) $amountRaw : ($numbers[$amountRaw] ?? 1);
+        $unit = mb_strtoupper((string) $match[2]);
+        $unit = preg_replace('/^PALETS?$/u', 'PALLET', $unit) ?? $unit;
+        return trim($amount . ' ' . $unit);
+    }
+    return '';
+}
+
+function pickup_hint_from_text(string $text): string
+{
+    if (preg_match('/\b(?:en|desde)\s+([A-Z0-9][A-Z0-9 ._-]{2,40})\s+para\s+entregar\b/iu', $text, $match)) {
+        return clean_extracted_value((string) $match[1]);
+    }
+    return '';
+}
+
+function local_clear_service_fallback(array $email, string $text): array
+{
+    $subjectInfo = subject_delivery_request((string) ($email['subject'] ?? ''));
+    $body = (string) ($email['body'] ?? '');
+    $fullText = trim((string) ($email['subject'] ?? '') . "\n" . $body . "\n" . $text);
+    $hasDeliverySignal = preg_match('/\b(?:entregar|entrega|delivery)\b/iu', $fullText)
+        && preg_match('/\b(?:a\s+bordo|on\s+board|buque|vessel)\b/iu', $fullText);
+    if ($subjectInfo === [] && !$hasDeliverySignal) {
+        return [];
+    }
+    $vessel = (string) ($subjectInfo['vessel'] ?? '');
+    if ($vessel === '' && preg_match('/\ba\s+bordo\s+del?\s+([A-Z0-9][A-Z0-9 ._-]{2,60})\b/iu', $fullText, $match)) {
+        $vessel = port_call_vessel_name((string) $match[1]);
+    }
+    $port = (string) ($subjectInfo['port'] ?? '');
+    if ($port === '' && preg_match('/\bpuerto\s+de\s+([A-ZÀ-ÿ][A-ZÀ-ÿ ._-]{2,50})\b/iu', $fullText, $match)) {
+        $port = clean_extracted_value((string) $match[1]);
+    }
+    if ($vessel === '') {
+        return [];
+    }
+    $receivedAt = (string) ($email['received_at'] ?? date('Y-m-d H:i:s'));
+    $receptionDate = relative_service_date($fullText, $receivedAt);
+    $cargo = cargo_summary_from_text($fullText);
+    $pickupHint = pickup_hint_from_text($fullText);
+    $reference = (string) ($subjectInfo['reference'] ?? '');
+    if ($reference === '' && preg_match('/\b(POA\d{4,})\b/iu', $fullText, $match)) {
+        $reference = mb_strtoupper((string) $match[1]);
+    }
+    $notes = 'Servicio claro detectado sin depender de IA: recepción de mercancía y entrega a bordo. ETB pendiente de confirmación.';
+    if (preg_match('/\b(?:ETB|previsiones?|ETA)\b[^.]{0,120}(?:confirmar|pendiente|ASAP|cuando\s+respondan)/iu', $fullText)) {
+        $notes .= ' El correo indica que las previsiones/ETB están por confirmar.';
+    }
+    if (preg_match('/\bdocumentos?\b[^.]{0,80}\bASAP\b/iu', $fullText)) {
+        $notes .= ' Documentos pendientes ASAP.';
+    }
+    $client = clean_extracted_value((string) ($email['sender_name'] ?? ''));
+    $senderIdentity = mb_strtolower($client . ' ' . (string) ($email['sender_email'] ?? ''));
+    if (str_contains($senderIdentity, 'limani')) {
+        $client = 'LIMANI';
+    }
+    return normalize_extracted_payload([
+        'is_service' => true,
+        'confidence' => 0.94,
+        'request_action' => 'new',
+        'service_kind' => 'reception_and_delivery',
+        'existing_reference' => $reference,
+        'client' => $client !== '' ? $client : 'Por identificar',
+        'vessel' => $vessel,
+        'eta' => '',
+        'eta_time' => '',
+        'etb' => '',
+        'etb_time' => '',
+        'etd' => '',
+        'etd_time' => '',
+        'delivery_mode' => 'vessel',
+        'operation_location' => $port !== '' ? 'BUQUE ' . $vessel . ' · ' . $port : 'BUQUE ' . $vessel,
+        'port' => $port,
+        'priority' => 'Media',
+        'cargo_summary' => $cargo !== '' ? $cargo : 'Mercancía pendiente de detalle',
+        'operational_notes' => $notes,
+        'reception' => [
+            'required' => true,
+            'date' => $receptionDate,
+            'time' => '',
+            'location' => $pickupHint !== '' ? $pickupHint . ' → ' . SWIFTPORT_WAREHOUSE_ADDRESS : SWIFTPORT_WAREHOUSE_ADDRESS,
+        ],
+        'transport' => [
+            'required' => true,
+            'date' => '',
+            'time' => '',
+            'pickup' => SWIFTPORT_WAREHOUSE_ADDRESS,
+            'delivery' => $port !== '' ? 'BUQUE ' . $vessel . ' · ' . $port : 'BUQUE ' . $vessel,
+        ],
+        'tasks' => [],
+    ]);
+}
+
+function merge_clear_service_fallback(array $data, array $fallback): array
+{
+    if ($fallback === []) return $data;
+    if (!empty($fallback['is_service'])) {
+        $data['is_service'] = true;
+        $data['confidence'] = max((float) ($data['confidence'] ?? 0), (float) ($fallback['confidence'] ?? 0));
+        if (in_array((string) ($data['request_action'] ?? ''), ['', 'not_service', 'information'], true)) {
+            $data['request_action'] = 'new';
+        }
+    }
+    foreach (['service_kind', 'existing_reference', 'client', 'vessel', 'delivery_mode', 'operation_location', 'port', 'cargo_summary', 'operational_notes'] as $field) {
+        if (trim((string) ($data[$field] ?? '')) === '' && trim((string) ($fallback[$field] ?? '')) !== '') {
+            $data[$field] = $fallback[$field];
+        }
+    }
+    if (str_contains(mb_strtolower((string) ($fallback['client'] ?? '')), 'limani')) {
+        $data['client'] = 'LIMANI';
+    }
+    foreach (['reception', 'transport'] as $section) {
+        $data[$section] = is_array($data[$section] ?? null) ? $data[$section] : [];
+        $fallbackSection = is_array($fallback[$section] ?? null) ? $fallback[$section] : [];
+        if (!empty($fallbackSection['required'])) $data[$section]['required'] = true;
+        foreach (['date', 'time', 'location', 'pickup', 'delivery'] as $field) {
+            if (trim((string) ($data[$section][$field] ?? '')) === '' && trim((string) ($fallbackSection[$field] ?? '')) !== '') {
+                $data[$section][$field] = $fallbackSection[$field];
+            }
+        }
+    }
+    return normalize_extracted_payload($data);
 }
 
 function extract_port_call_fallbacks(string $text, string $receivedAt): array
@@ -822,8 +983,10 @@ function extract_local_service(array $email): array
         ];
     }
 
+    $clearFallback = local_clear_service_fallback($email, $text);
     try {
         $data = call_openai_extraction($text, $email);
+        $data = merge_clear_service_fallback($data, $clearFallback);
         $fallbacks = extract_port_call_fallbacks(
             $text,
             (string) ($email['received_at'] ?? date('Y-m-d H:i:s'))
@@ -868,6 +1031,9 @@ function extract_local_service(array $email): array
         }
         return $data;
     } catch (Throwable $error) {
+        if ($clearFallback !== []) {
+            return $clearFallback;
+        }
         $aiErrorCode = openai_error_code_from_exception($error);
         return [
             'is_service' => false,
@@ -1964,7 +2130,7 @@ function reconcile_existing_mail_threads(PDO $pdo): array
 
 function automatic_mail_publish_enabled(PDO $pdo): bool
 {
-    return false;
+    return true;
 }
 
 function process_mailboxes(string $triggerType): array
@@ -2090,13 +2256,32 @@ function process_mailboxes(string $triggerType): array
             imap_close($imap);
         }
         $pendingUpdates = $autoPublish ? $pdo->query(
-            "SELECT id, subject, extracted FROM app_mail_items
+            "SELECT id, subject, sender_name, sender_email, body, received_at, extracted
+             FROM app_mail_items
              WHERE status = 'review' AND extracted IS NOT NULL
              ORDER BY received_at ASC, id ASC LIMIT 100"
         )->fetchAll() : [];
         foreach ($pendingUpdates as $pending) {
             $data = json_decode((string) ($pending['extracted'] ?? ''), true);
-            if (!is_array($data) || (float) ($data['confidence'] ?? 0) < 0.82) continue;
+            if (!is_array($data)) continue;
+            $localFallback = local_clear_service_fallback([
+                'subject' => (string) ($pending['subject'] ?? ''),
+                'body' => (string) ($pending['body'] ?? ''),
+                'sender_name' => (string) ($pending['sender_name'] ?? ''),
+                'sender_email' => (string) ($pending['sender_email'] ?? ''),
+                'received_at' => (string) ($pending['received_at'] ?? date('Y-m-d H:i:s')),
+            ], sanitize_email_text((string) ($pending['subject'] ?? ''), (string) ($pending['body'] ?? '')));
+            if ($localFallback !== []) {
+                $data = merge_clear_service_fallback($data, $localFallback);
+                $refresh = $pdo->prepare('UPDATE app_mail_items SET extracted = ?, confidence = ?, review_reason = ? WHERE id = ?');
+                $refresh->execute([
+                    json_encode($data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+                    (float) ($data['confidence'] ?? 0),
+                    service_review_reasons($data) ? implode('. ', service_review_reasons($data)) : 'Servicio claro detectado automáticamente',
+                    (int) $pending['id'],
+                ]);
+            }
+            if ((float) ($data['confidence'] ?? 0) < 0.82) continue;
             if (!in_array((string) ($data['request_action'] ?? ''), ['new', 'update', 'information'], true)) continue;
             if (empty($data['is_service']) && !port_call_data_has_schedule($data)) continue;
             $mailId = (int) $pending['id'];
@@ -2104,7 +2289,7 @@ function process_mailboxes(string $triggerType): array
             if ($related === '') {
                 $related = find_correlated_case_ref($pdo, $data, (string) $pending['subject']);
             }
-            if ($related === '') continue;
+            if ($related === '' && !service_required_data_complete($data)) continue;
             try {
                 apply_service_email($mailId, $data);
                 $summary['processed']++;
