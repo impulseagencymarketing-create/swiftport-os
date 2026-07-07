@@ -984,6 +984,9 @@ function extract_local_service(array $email): array
     }
 
     $clearFallback = local_clear_service_fallback($email, $text);
+    if ($clearFallback !== []) {
+        return $clearFallback;
+    }
     try {
         $data = call_openai_extraction($text, $email);
         $data = merge_clear_service_fallback($data, $clearFallback);
@@ -2319,14 +2322,13 @@ function process_mailboxes(string $triggerType): array
             imap_close($imap);
         }
         $pendingUpdates = $autoPublish ? $pdo->query(
-            "SELECT id, subject, sender_name, sender_email, body, received_at, extracted
+             "SELECT id, status, subject, sender_name, sender_email, body, received_at, extracted
              FROM app_mail_items
-             WHERE status = 'review' AND extracted IS NOT NULL
+             WHERE status IN ('review', 'ignored', 'error')
              ORDER BY received_at ASC, id ASC LIMIT 100"
         )->fetchAll() : [];
         foreach ($pendingUpdates as $pending) {
             $data = json_decode((string) ($pending['extracted'] ?? ''), true);
-            if (!is_array($data)) continue;
             $localFallback = local_clear_service_fallback([
                 'subject' => (string) ($pending['subject'] ?? ''),
                 'body' => (string) ($pending['body'] ?? ''),
@@ -2334,6 +2336,9 @@ function process_mailboxes(string $triggerType): array
                 'sender_email' => (string) ($pending['sender_email'] ?? ''),
                 'received_at' => (string) ($pending['received_at'] ?? date('Y-m-d H:i:s')),
             ], sanitize_email_text((string) ($pending['subject'] ?? ''), (string) ($pending['body'] ?? '')));
+            if (!is_array($data)) {
+                $data = $localFallback !== [] ? $localFallback : [];
+            }
             if ($localFallback !== []) {
                 $data = merge_clear_service_fallback($data, $localFallback);
                 $refresh = $pdo->prepare('UPDATE app_mail_items SET extracted = ?, confidence = ?, review_reason = ? WHERE id = ?');
@@ -2344,6 +2349,7 @@ function process_mailboxes(string $triggerType): array
                     (int) $pending['id'],
                 ]);
             }
+            if ($localFallback === [] && (string) ($pending['status'] ?? '') !== 'review') continue;
             if ((float) ($data['confidence'] ?? 0) < 0.82) continue;
             if (!in_array((string) ($data['request_action'] ?? ''), ['new', 'update', 'information'], true)) continue;
             if (empty($data['is_service']) && !port_call_data_has_schedule($data)) continue;
