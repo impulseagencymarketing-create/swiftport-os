@@ -1,0 +1,15 @@
+.detail-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.icon-button.danger {
+  color: #c0263f;
+  background: #fff1f2;
+  border-color: #fecdd3;
+}
+
+.icon-button.danger:hover {
+  background: #ffe4e6;
+}

@@ -142,7 +142,7 @@ function subject_target_vessel(string $subject): string
 {
     $normalized = normalized_mail_subject($subject);
     if (preg_match('/^(.{2,70}?)\s+-\s+(?:GABARRA|BARGE)\b/u', $normalized, $match)) {
-        $candidate = port_call_vessel_name($match[1]);
+        $candidate = safe_vessel_name($match[1]);
         return in_array($candidate, ['SERVICE', 'SERVICIO', 'REQUEST', 'SOLICITUD'], true) ? '' : $candidate;
     }
     return '';
@@ -293,7 +293,7 @@ function subject_delivery_request(string $subject): array
         return [];
     }
     return [
-        'vessel' => port_call_vessel_name((string) $match[1]),
+        'vessel' => safe_vessel_name((string) $match[1]),
         'port' => clean_extracted_value((string) $match[2]),
         'reference' => mb_strtoupper(clean_extracted_value((string) ($match[3] ?? ''))),
     ];
@@ -320,6 +320,26 @@ function pickup_hint_from_text(string $text): string
     return '';
 }
 
+function invalid_vessel_name(string $value): bool
+{
+    $token = port_call_token(port_call_vessel_name($value));
+    if ($token === '' || mb_strlen($token) < 3) return true;
+    $invalid = [
+        'A', 'AL', 'DE', 'DEL', 'EL', 'EN', 'LA', 'LAS', 'LOS', 'UN', 'UNA', 'THE',
+        'BUQUE', 'VESSEL', 'BARCO', 'GABARRA', 'INFORMACION', 'INFORMATION',
+        'SIGUIENTE', 'SIGUIENTE INFORMACION', 'PODRIAN REMITIR LA SIGUIENTE INFORMACION',
+        'MERCANCIA', 'DOCUMENTOS', 'PREVISIONES', 'CONFIRMAR',
+    ];
+    if (in_array($token, $invalid, true)) return true;
+    return preg_match('/\b(?:PODRIAN|PODRÍAN|REMITIR|SIGUIENTE|INFORMACION|INFORMACIÓN)\b/u', $token) === 1;
+}
+
+function safe_vessel_name(string $value): string
+{
+    $vessel = port_call_vessel_name($value);
+    return invalid_vessel_name($vessel) ? '' : $vessel;
+}
+
 function local_clear_service_fallback(array $email, string $text): array
 {
     $subjectInfo = subject_delivery_request((string) ($email['subject'] ?? ''));
@@ -330,9 +350,9 @@ function local_clear_service_fallback(array $email, string $text): array
     if ($subjectInfo === [] && !$hasDeliverySignal) {
         return [];
     }
-    $vessel = (string) ($subjectInfo['vessel'] ?? '');
-    if ($vessel === '' && preg_match('/\ba\s+bordo\s+del?\s+([A-Z0-9][A-Z0-9 ._-]{2,60})\b/iu', $fullText, $match)) {
-        $vessel = port_call_vessel_name((string) $match[1]);
+    $vessel = safe_vessel_name((string) ($subjectInfo['vessel'] ?? ''));
+    if ($vessel === '' && preg_match('/\ba\s+bordo\s+(?:del|de\s+la|de\s+los|de\s+las|de)\s+([A-Z0-9][A-Z0-9 ._-]{2,60})\b/iu', $fullText, $match)) {
+        $vessel = safe_vessel_name((string) $match[1]);
     }
     $port = (string) ($subjectInfo['port'] ?? '');
     if ($port === '' && preg_match('/\bpuerto\s+de\s+([A-ZÀ-ÿ][A-ZÀ-ÿ ._-]{2,50})\b/iu', $fullText, $match)) {
@@ -860,7 +880,7 @@ function normalize_extracted_payload(array $payload): array
             ? (string) $payload['service_kind'] : 'none',
         'existing_reference' => mb_strtoupper(clean_extracted_value((string) ($payload['existing_reference'] ?? ''))),
         'client' => clean_extracted_value((string) ($payload['client'] ?? '')),
-        'vessel' => port_call_vessel_name(clean_extracted_value((string) ($payload['vessel'] ?? ''))),
+        'vessel' => safe_vessel_name(clean_extracted_value((string) ($payload['vessel'] ?? ''))),
         'imo' => preg_replace('/\D/', '', (string) ($payload['imo'] ?? '')),
         'mmsi' => preg_replace('/\D/', '', (string) ($payload['mmsi'] ?? '')),
         'eta' => trim((string) ($payload['eta'] ?? '')),
@@ -1925,7 +1945,7 @@ function reconcile_existing_mail_threads(PDO $pdo): array
                     $summary['correctedCases']++;
                 }
                 if (trim((string) ($data['vessel'] ?? '')) !== '') {
-                    $canonical['buque'] = port_call_vessel_name((string) $data['vessel']);
+                    $canonical['buque'] = safe_vessel_name((string) $data['vessel']);
                 }
                 $canonical['servicios'] = is_array($canonical['servicios'] ?? null) ? $canonical['servicios'] : [];
                 if (!empty($data['reception']['required'])) $canonical['servicios'][] = 'Recepción';
@@ -2151,6 +2171,61 @@ function case_operational_year(array $case): int
     return 0;
 }
 
+function case_has_real_activity(array $case): bool
+{
+    return (int) ($case['progreso'] ?? 0) > 10
+        || !empty($case['mercancias'])
+        || !empty($case['recepciones'])
+        || port_call_token((string) ($case['estado'] ?? '')) === 'COMPLETADO';
+}
+
+function remove_invalid_auto_cases(PDO $pdo): int
+{
+    $row = $pdo->query('SELECT data FROM app_operational_state WHERE id = 1 FOR UPDATE')->fetch();
+    if (!$row) return 0;
+    $state = json_decode((string) $row['data'], true);
+    if (!is_array($state)) return 0;
+    foreach (['cases', 'transports', 'warehouseEntries', 'customs', 'calendarEvents'] as $key) {
+        $state[$key] = is_array($state[$key] ?? null) ? $state[$key] : [];
+    }
+    $removeRefs = [];
+    foreach ($state['cases'] as $case) {
+        if (!is_array($case)) continue;
+        $ref = (string) ($case['id'] ?? '');
+        if ($ref === '' || empty($case['sourceEmailId']) || case_has_real_activity($case)) continue;
+        $hasWarehouse = array_filter(
+            $state['warehouseEntries'],
+            static fn(array $entry): bool => (string) ($entry['expediente'] ?? '') === $ref
+        );
+        if ($hasWarehouse) continue;
+        if (invalid_vessel_name((string) ($case['buque'] ?? ''))) {
+            $removeRefs[$ref] = true;
+        }
+    }
+    if ($removeRefs === []) return 0;
+    $state['cases'] = array_values(array_filter(
+        $state['cases'],
+        static fn(array $case): bool => !isset($removeRefs[(string) ($case['id'] ?? '')])
+    ));
+    foreach (['transports', 'customs', 'calendarEvents'] as $collection) {
+        $state[$collection] = array_values(array_filter(
+            $state[$collection],
+            static fn(array $record): bool => !isset($removeRefs[(string) ($record['expediente'] ?? '')])
+        ));
+    }
+    $encoded = json_encode($state, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
+    $save = $pdo->prepare('UPDATE app_operational_state SET data = ?, updated_by = NULL WHERE id = 1');
+    $save->execute([$encoded]);
+    $refs = array_keys($removeRefs);
+    $placeholders = implode(',', array_fill(0, count($refs), '?'));
+    $resetMail = $pdo->prepare(
+        "UPDATE app_mail_items SET status = 'review', review_reason = 'Buque inválido detectado automáticamente', case_ref = NULL
+         WHERE case_ref IN ($placeholders)"
+    );
+    $resetMail->execute($refs);
+    return count($refs);
+}
+
 function remove_outdated_auto_cases(PDO $pdo): int
 {
     $row = $pdo->query('SELECT data FROM app_operational_state WHERE id = 1 FOR UPDATE')->fetch();
@@ -2165,10 +2240,7 @@ function remove_outdated_auto_cases(PDO $pdo): int
     foreach ($state['cases'] as $case) {
         if (!is_array($case)) continue;
         $year = case_operational_year($case);
-        $hasActivity = (int) ($case['progreso'] ?? 0) > 10
-            || !empty($case['mercancias'])
-            || !empty($case['recepciones'])
-            || port_call_token((string) ($case['estado'] ?? '')) === 'COMPLETADO';
+        $hasActivity = case_has_real_activity($case);
         if ($year > 0 && $year < $currentYear && !empty($case['sourceEmailId']) && !$hasActivity) {
             $ref = (string) ($case['id'] ?? '');
             if ($ref !== '') $removeRefs[$ref] = true;
@@ -2212,7 +2284,8 @@ function process_mailboxes(string $triggerType): array
         $run = $pdo->prepare("INSERT INTO app_mail_runs (trigger_type, status) VALUES (?, 'running')");
         $run->execute([$triggerType]);
         $runId = (int) $pdo->lastInsertId();
-        $summary = ['scanned' => 0, 'processed' => 0, 'review' => 0, 'ignored' => 0, 'errors' => 0, 'removedOldCases' => 0];
+        $summary = ['scanned' => 0, 'processed' => 0, 'review' => 0, 'ignored' => 0, 'errors' => 0, 'removedOldCases' => 0, 'removedInvalidCases' => 0];
+        $summary['removedInvalidCases'] = remove_invalid_auto_cases($pdo);
         $summary['removedOldCases'] = remove_outdated_auto_cases($pdo);
         $summary['reconciliation'] = reconcile_existing_mail_threads($pdo);
         $accounts = [
