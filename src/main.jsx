@@ -50,6 +50,10 @@ const roleLabel=value=>rolesOf(value).map(role=>ROLE_LABELS[role]).join(' + ');
 const isDriverOnly=value=>{const roles=rolesOf(value);return roles.length===1&&roles[0]==='driver'};
 const personKey=value=>String(value||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').trim().replace(/\s+/g,' ').toLowerCase();
 const samePerson=(first,second)=>Boolean(personKey(first)&&personKey(first)===personKey(second));
+const vesselKey=value=>personKey(value).replace(/\b(mv|m\/v|m\.v\.|mt|m\/t|m\.t\.)\b/g,'').replace(/[^a-z0-9]+/g,' ').trim();
+const sameVessel=(first,second)=>Boolean(vesselKey(first)&&vesselKey(first)===vesselKey(second));
+const activeWarehouseEntry=entry=>!entry?.archivado&&entry?.estado!=='Expedido';
+const warehouseEntriesForVessel=(entries,item)=>entries.filter(entry=>activeWarehouseEntry(entry)&&(entry.expediente===item.id||sameVessel(entry.buque,item.buque)));
 const canAccess=(roles,id)=>{
   if(['transportes','aduanas'].includes(id))return false;
   if(isDriverOnly(roles))return ['calendario','almacen'].includes(id);
@@ -660,7 +664,9 @@ function App({auth,finance,onFinanceChange,onLogout}){
     if(ready)flow.billingReady=true;
     const nextStep=OPERATION_STEPS.find(step=>!flow[step.key]);
     const now=new Date();
-    const timelineEntry={id:`FLOW-${id}-${stepKey}-${Date.now()}`,fecha:now.toLocaleDateString('es-ES'),hora:now.toLocaleTimeString('es-ES',{hour:'2-digit',minute:'2-digit'}),titulo:expected.title,detalle:note||'Paso confirmado sin incidencias',actor:visibleUser.fullName,archivo:ready?podFiles[0]||null:null,archivos:stepKey==='cargo'?cargoEvidence:stepKey==='documents'?documentEvidence:[...deliveryPhotos,...podFiles.slice(1)],estado:'done'};
+    const deliveryWarehouseScope=ready?warehouseEntriesForVessel(warehouseEntries,target):[];
+    const warehouseReviewNote=ready?` Almacén revisado: ${deliveryWarehouseScope.length} partida(s) activa(s) para ${target.buque}.`:'';
+    const timelineEntry={id:`FLOW-${id}-${stepKey}-${Date.now()}`,fecha:now.toLocaleDateString('es-ES'),hora:now.toLocaleTimeString('es-ES',{hour:'2-digit',minute:'2-digit'}),titulo:expected.title,detalle:`${note||'Paso confirmado sin incidencias'}${warehouseReviewNote}`,actor:visibleUser.fullName,archivo:ready?podFiles[0]||null:null,archivos:stepKey==='cargo'?cargoEvidence:stepKey==='documents'?documentEvidence:[...deliveryPhotos,...podFiles.slice(1)],estado:'done'};
     const linkedTransport=transports.find(item=>item.expediente===id);
     const cargoMerchandise=(target.mercancias||[]).length?target.mercancias:[{id:`${id}-AUTO-${Date.now()}`,tipo:'CAJA',cantidad:Math.max(1,Number(target.bultos)||1),seguimiento:'',peso:target.peso&&!/registrar|pendiente/i.test(target.peso)?target.peso:'PESO PENDIENTE',documentos:[]}];
     const cargoPhotos=cargoEvidence.map((file,index)=>({...file,tipo:index===0?'VISTA GENERAL':'ESTADO DE EMBALAJE',mercancia:cargoMerchandise.map(line=>`${line.cantidad} ${line.tipo}${line.cantidad===1?'':'S'} · ${line.peso||'PESO PENDIENTE'}`).join(' · '),nota:`Registrado por ${visibleUser.fullName}`}));
@@ -670,7 +676,7 @@ function App({auth,finance,onFinanceChange,onLogout}){
     const nextTransports=ready?transports.map(item=>item.expediente===id?{...item,estado:'Entregado'}:item):transports;
     const alreadyInWarehouse=warehouseEntries.some(item=>item.expediente===id&&!item.archivado&&item.estado!=='Expedido');
     const automaticWarehouseEntry=stepKey==='cargo'&&!alreadyInWarehouse?{ref:cargoReference,source:'driver-flow',expediente:id,buque:target.buque,zona:'PENDIENTE',entrada:formatReceptionDate(now.toISOString()),fechaRecepcion:now.toISOString(),bultos:merchandiseCount(cargoMerchandise),peso:merchandiseWeightLabel(cargoMerchandise),mercancias:cargoMerchandise,fotos:cargoPhotos,documentosRecepcion:[],dias:0,estado:'En stock',archivado:false}:null;
-    const nextWarehouse=ready?warehouseEntries.map(item=>item.expediente===id?{...item,estado:'Expedido',archivado:true,salida:new Date().toISOString()}:item):automaticWarehouseEntry?[automaticWarehouseEntry,...warehouseEntries]:warehouseEntries;
+    const nextWarehouse=ready?warehouseEntries.map(item=>deliveryWarehouseScope.includes(item)?{...item,expediente:item.expediente||id,estado:'Expedido',archivado:true,salida:new Date().toISOString()}:item):automaticWarehouseEntry?[automaticWarehouseEntry,...warehouseEntries]:warehouseEntries;
     setCases(nextCases);setTransports(nextTransports);setWarehouseEntries(nextWarehouse);
     saveOperational(nextCases,nextTransports,nextWarehouse);
     notify(ready?'POD registrado: expediente listo para facturar':expected.title+' registrado');
@@ -971,6 +977,22 @@ function ShipmentDocuments({item}){
   </section>;
 }
 
+function WarehouseTransportReview({entries,item,checked,setChecked}){
+  const totalUnits=entries.reduce((sum,entry)=>{
+    const explicit=Number(entry.bultos);
+    return sum+(Number.isFinite(explicit)?explicit:merchandiseCount(entry.mercancias));
+  },0);
+  return <section className="warehouse-transport-review">
+    <div className="warehouse-review-head"><Box/><span><b>Revisión obligatoria de almacén</b><small>{entries.length?`Hay ${entries.length} partida(s) activas para ${item.buque}. Revisa también mercancía antigua o sin expediente.`:`No aparece stock activo para ${item.buque}, pero debes confirmarlo antes de cerrar.`}</small></span><strong>{totalUnits} bultos</strong></div>
+    {entries.length?<div className="warehouse-review-list">{entries.map((entry,index)=>{
+      const pieces=(entry.mercancias||[]).length?(entry.mercancias||[]).map(line=>`${line.cantidad} ${line.tipo}${line.cantidad===1?'':'S'}${line.peso?` · ${line.peso}`:''}`).join(' · '):`${entry.bultos||0} bultos${entry.peso?` · ${entry.peso}`:''}`;
+      const linked=entry.expediente===item.id?'Este expediente':entry.expediente?`Otro expediente: ${entry.expediente}`:'Sin expediente vinculado';
+      return <article key={entry.ref||index}><span><b>{entry.ref||`Entrada ${index+1}`}</b><small>{linked} · {entry.entrada||formatReceptionDate(entry.fechaRecepcion||entry.fecha)||'Fecha pendiente'}</small></span><em>{pieces}</em><small>{entry.zona||'Ubicación pendiente'}</small></article>;
+    })}</div>:<p><CircleAlert/> Si sabes que hay una caja antigua para este buque, regístrala en almacén antes de cerrar la entrega.</p>}
+    <label className="warehouse-review-check"><input type="checkbox" checked={checked} onChange={event=>setChecked(event.target.checked)}/><span>He revisado todo lo que hay en almacén para este buque y se entregará todo lo pendiente.</span></label>
+  </section>;
+}
+
 function PodDocuments({item,notify}){
   const documentation=item?.documentacionMercancia||{};
   const pods=(documentation.podArchivos||[]).length?documentation.podArchivos:(documentation.podArchivo?[documentation.podArchivo]:[]);
@@ -982,8 +1004,9 @@ function DriverTaskModal({event,item,transport,warehouseEntries,currentUser,csrf
   const [evidenceFiles,setEvidenceFiles]=useState([]);
   const [uploading,setUploading]=useState(false);
   const [error,setError]=useState('');
+  const [warehouseReviewed,setWarehouseReviewed]=useState(false);
   const step=item?nextOperationStep(item):null;
-  useEffect(()=>{setNote('');setEvidenceFiles([]);setError('')},[step?.key]);
+  useEffect(()=>{setNote('');setEvidenceFiles([]);setError('');setWarehouseReviewed(false)},[step?.key,item?.id]);
   if(!item)return null;
   const flow=operationFlow(item);
   const lastCompleted=[...OPERATION_STEPS].reverse().find(entry=>flow[entry.key]);
@@ -994,7 +1017,7 @@ function DriverTaskModal({event,item,transport,warehouseEntries,currentUser,csrf
     cargo:inWarehouse?'Comprueba cantidades, peso y estado de la mercancía antes de cargar.':'Recoge la mercancía en el lugar indicado y comprueba cantidades, peso y estado.',
     documents:'Comprueba que están listos los documentos necesarios antes de salir a entregar.',
     assignment:'El transporte debe quedar asignado. Puedes asignártelo desde esta misma pantalla si está libre.',
-    delivery:'Fotografía la mercancía ya entregada y escanea el POD firmado. Ambas evidencias son obligatorias para cerrar el servicio.'
+    delivery:'Antes de entregar, revisa todo lo que hay en almacén para este buque. Luego fotografía la entrega y escanea el POD firmado.'
   };
   const uploadEvidence=async(files,evidenceType)=>{
     const selected=[...files].filter(Boolean);
@@ -1014,7 +1037,8 @@ function DriverTaskModal({event,item,transport,warehouseEntries,currentUser,csrf
   const cargoPhotos=evidenceFiles.filter(file=>file.evidenceType==='cargo-photo');
   const deliveryPhotos=evidenceFiles.filter(file=>file.evidenceType==='delivery-photo');
   const podFiles=evidenceFiles.filter(file=>file.evidenceType==='pod');
-  const evidenceReady=step?.key==='cargo'?cargoPhotos.length>0:step?.key==='delivery'?deliveryPhotos.length>0&&podFiles.length>0:true;
+  const vesselWarehouseEntries=warehouseEntriesForVessel(warehouseEntries,item);
+  const evidenceReady=step?.key==='cargo'?cargoPhotos.length>0:step?.key==='delivery'?warehouseReviewed&&deliveryPhotos.length>0&&podFiles.length>0:true;
   const needsEvidence=['cargo','delivery'].includes(step?.key);
   const evidenceLabel=file=>file.evidenceType==='pod'?'POD escaneado':file.evidenceType==='delivery-photo'?'Foto de entrega':'Foto de recepción';
   return <div className="modal-backdrop driver-task-backdrop" onMouseDown={mouse=>{if(mouse.target===mouse.currentTarget)close()}}>
@@ -1028,6 +1052,7 @@ function DriverTaskModal({event,item,transport,warehouseEntries,currentUser,csrf
         {flow.cargo&&<ShipmentDocuments item={item}/>}
         {step?<>
           <div className="driver-next-action"><span>{OPERATION_STEPS.findIndex(entry=>entry.key===step.key)+1}</span><div><small>AHORA TOCA</small><b>{step.title}</b><p>{instructions[step.key]}</p></div></div>
+          {step.key==='delivery'&&<WarehouseTransportReview entries={vesselWarehouseEntries} item={item} checked={warehouseReviewed} setChecked={setWarehouseReviewed}/>}
           {needsEvidence&&<div className="pod-scanner evidence-capture">
             <div><Camera/><span><b>{step.key==='cargo'?'Fotos de la mercancía recibida':'Evidencias de la entrega'}</b><small>{step.key==='cargo'?'Se requiere al menos una foto; puedes añadir todas las necesarias.':'Se requiere foto de la entrega y POD firmado.'}</small></span></div>
             {!mine&&<div className="evidence-assignment-lock"><LockKeyhole/><span><b>Activa el registro de este trabajo</b><small>{event.asignado&&event.asignado!=='Sin asignar'?`Ahora figura asignado a ${event.asignado}. Asígnatelo para activar la cámara y el POD.`:'El servicio todavía no tiene conductor. Asígnatelo para activar la cámara y el POD.'}</small></span><button className="button secondary" onClick={claim}>Asignarme y activar</button></div>}
@@ -1040,7 +1065,7 @@ function DriverTaskModal({event,item,transport,warehouseEntries,currentUser,csrf
             {error&&<p className="form-error"><CircleAlert/>{error}</p>}
           </div>}
           <label className="field"><span>Observación del trabajo (opcional)</span><input value={note} disabled={!mine} onChange={change=>setNote(change.target.value)} placeholder="Persona que recibe, incidencia, referencia…"/></label>
-          {canCompleteOperationStep(currentUser,step.key)&&step.key!=='assignment'?<button className="button primary full driver-confirm" disabled={!mine||uploading||!evidenceReady} onClick={()=>submit(step.key,note,evidenceFiles)}><CheckCircle2/> {!evidenceReady?(step.key==='cargo'?'Añade una foto para confirmar':'Completa foto de entrega y POD'):`Confirmar: ${step.title}`}</button>:<div className="step-owner-wait"><LockKeyhole/><span><b>{step.key==='assignment'?'Asigna o asígnate el transporte':'Esperando al equipo responsable'}</b><small>{step.responsibility}</small></span></div>}
+          {canCompleteOperationStep(currentUser,step.key)&&step.key!=='assignment'?<button className="button primary full driver-confirm" disabled={!mine||uploading||!evidenceReady} onClick={()=>submit(step.key,note,evidenceFiles)}><CheckCircle2/> {!evidenceReady?(step.key==='cargo'?'Añade una foto para confirmar':'Revisa almacén, foto de entrega y POD'):`Confirmar: ${step.title}`}</button>:<div className="step-owner-wait"><LockKeyhole/><span><b>{step.key==='assignment'?'Asigna o asígnate el transporte':'Esperando al equipo responsable'}</b><small>{step.responsibility}</small></span></div>}
         </>:<div className="driver-finished"><CheckCircle2/><span><b>Trabajo terminado</b><small>POD recibido y expediente listo para facturación.</small></span></div>}
         {mine&&lastCompleted&&<button className="button tertiary full driver-undo-step" onClick={()=>undo(lastCompleted.key)}><Undo2/> Deshacer: {lastCompleted.title}</button>}
         <button className="button tertiary full" onClick={close}>{flow.billingReady?'Cerrar':'Volver al calendario'}</button>
@@ -1157,6 +1182,7 @@ function OperationStepModal({item,warehouseEntries,transports,csrfToken,currentU
   const [evidenceFiles,setEvidenceFiles]=useState([]);
   const [uploading,setUploading]=useState(false);
   const [error,setError]=useState('');
+  const [warehouseReviewed,setWarehouseReviewed]=useState(false);
   if(!step)return null;
   const inWarehouse=warehouseEntries.some(entry=>entry.expediente===item.id&&!entry.archivado&&entry.estado!=='Expedido');
   const transport=transports.find(entry=>entry.expediente===item.id);
@@ -1165,7 +1191,7 @@ function OperationStepModal({item,warehouseEntries,transports,csrfToken,currentU
     cargo:inWarehouse?'Confirma que la mercancía recibida coincide con fotos, cantidades y peso.':'Confirma la recogida en el punto indicado y comprueba cantidades y estado.',
     documents:'Comprueba packing list, CMR, delivery note y documento aduanero. Puedes adjuntar aquí los archivos recibidos por correo.',
     assignment:'Selecciona el conductor en el transporte o calendario. Este paso se completará automáticamente.',
-    delivery:'Adjunta fotografías de la mercancía entregada y el POD firmado. Ambas evidencias son obligatorias.'
+    delivery:'Revisa todo el almacén de este buque, adjunta fotografías de la mercancía entregada y el POD firmado.'
   };
   const uploadEvidence=async(files,evidenceType)=>{
     const selected=[...files].filter(Boolean);
@@ -1185,8 +1211,9 @@ function OperationStepModal({item,warehouseEntries,transports,csrfToken,currentU
   const shipmentFiles=evidenceFiles.filter(file=>file.evidenceType==='shipment-document');
   const deliveryPhotos=evidenceFiles.filter(file=>file.evidenceType==='delivery-photo');
   const podFiles=evidenceFiles.filter(file=>file.evidenceType==='pod');
+  const vesselWarehouseEntries=warehouseEntriesForVessel(warehouseEntries,item);
   const needsEvidence=['cargo','delivery'].includes(step.key);
-  const evidenceReady=step.key==='cargo'?cargoPhotos.length>0:step.key==='delivery'?deliveryPhotos.length>0&&podFiles.length>0:true;
+  const evidenceReady=step.key==='cargo'?cargoPhotos.length>0:step.key==='delivery'?warehouseReviewed&&deliveryPhotos.length>0&&podFiles.length>0:true;
   return <div className="modal-backdrop" onMouseDown={event=>{if(event.target===event.currentTarget)close()}}>
     <section className="modal operation-modal">
       <div className="modal-head"><div><span className="overline">Paso operativo</span><h2>{step.title}</h2><p>{item.id} · {item.buque}</p></div><button className="icon-button" onClick={close}><X/></button></div>
@@ -1194,6 +1221,7 @@ function OperationStepModal({item,warehouseEntries,transports,csrfToken,currentU
         <OperationChecklist item={item} currentRoles={currentUser}/>
         <div className="operation-guidance"><ClipboardCheck/><div><b>Qué debes comprobar</b><p>{guidance[step.key]}</p>{step.key==='delivery'&&transport&&<small>{transport.id} · {transport.ruta}</small>}</div></div>
         {['documents','assignment','delivery'].includes(step.key)&&<ShipmentDocuments item={item}/>}
+        {step.key==='delivery'&&<WarehouseTransportReview entries={vesselWarehouseEntries} item={item} checked={warehouseReviewed} setChecked={setWarehouseReviewed}/>}
         {step.key==='documents'&&canCompleteOperationStep(currentUser,step.key)&&<div className="pod-scanner shipment-document-upload">
           <div><FileCheck2/><span><b>Adjuntar documentación del envío</b><small>Packing list, delivery note, CMR, T1, levante u otros documentos.</small></span></div>
           <div className="pod-scanner-actions"><label className="button primary"><UploadCloud/> {uploading?'Subiendo…':'Añadir varios PDFs'}<input type="file" accept="application/pdf,image/*" multiple disabled={uploading} onChange={event=>{uploadEvidence(event.target.files,'shipment-document');event.target.value=''}}/></label></div>
@@ -1210,7 +1238,7 @@ function OperationStepModal({item,warehouseEntries,transports,csrfToken,currentU
           {error&&<p className="form-error"><CircleAlert/>{error}</p>}
         </div>}
         <label className="field"><span>Observación (opcional)</span><input value={note} onChange={event=>setNote(event.target.value)} placeholder="Incidencias, persona que recibe, referencia…"/></label>
-        <div className="modal-actions"><button className="button tertiary" onClick={close}>Cancelar</button>{canCompleteOperationStep(currentUser,step.key)&&step.key!=='assignment'?<button className="button primary" disabled={uploading||!evidenceReady} onClick={()=>submit(step.key,note,evidenceFiles)}><CheckCircle2/> {!evidenceReady?(step.key==='cargo'?'Añade una foto':'Completa foto de entrega y POD'):'Confirmar paso'}</button>:<div className="step-owner-wait"><LockKeyhole/><span><b>{step.key==='assignment'?'Asigna el conductor en el calendario':'Paso reservado a otro equipo'}</b><small>{step.responsibility}</small></span></div>}</div>
+        <div className="modal-actions"><button className="button tertiary" onClick={close}>Cancelar</button>{canCompleteOperationStep(currentUser,step.key)&&step.key!=='assignment'?<button className="button primary" disabled={uploading||!evidenceReady} onClick={()=>submit(step.key,note,evidenceFiles)}><CheckCircle2/> {!evidenceReady?(step.key==='cargo'?'Añade una foto':'Revisa almacén, foto de entrega y POD'):'Confirmar paso'}</button>:<div className="step-owner-wait"><LockKeyhole/><span><b>{step.key==='assignment'?'Asigna el conductor en el calendario':'Paso reservado a otro equipo'}</b><small>{step.responsibility}</small></span></div>}</div>
       </div>
     </section>
   </div>;
