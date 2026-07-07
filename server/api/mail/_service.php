@@ -27,9 +27,18 @@ function mail_decode_body(string $body, int $encoding): string
     return $encoding === 4 ? quoted_printable_decode($body) : $body;
 }
 
+function mail_as_list(mixed $value): array
+{
+    if ($value === null) return [];
+    if (is_array($value)) return $value;
+    if ($value instanceof Traversable) return iterator_to_array($value);
+    if (is_object($value)) return [$value];
+    return [];
+}
+
 function mail_part_charset(object $part): string
 {
-    foreach (array_merge($part->parameters ?? [], $part->dparameters ?? []) as $parameter) {
+    foreach (array_merge(mail_as_list($part->parameters ?? null), mail_as_list($part->dparameters ?? null)) as $parameter) {
         if (strtolower((string) ($parameter->attribute ?? '')) === 'charset') {
             return (string) ($parameter->value ?? 'UTF-8');
         }
@@ -39,7 +48,7 @@ function mail_part_charset(object $part): string
 
 function mail_part_filename(object $part): string
 {
-    foreach (array_merge($part->dparameters ?? [], $part->parameters ?? []) as $parameter) {
+    foreach (array_merge(mail_as_list($part->dparameters ?? null), mail_as_list($part->parameters ?? null)) as $parameter) {
         $attribute = strtolower((string) ($parameter->attribute ?? ''));
         if (in_array($attribute, ['filename', 'name'], true)) {
             return mail_decode_header_value((string) ($parameter->value ?? ''));
@@ -55,7 +64,8 @@ function mail_extract_attachment_names(object $part): array
     if ($filename !== '') {
         $names[] = $filename;
     }
-    foreach ($part->parts ?? [] as $child) {
+    foreach (mail_as_list($part->parts ?? null) as $child) {
+        if (!is_object($child)) continue;
         $names = array_merge($names, mail_extract_attachment_names($child));
     }
     return array_values(array_unique(array_filter($names)));
@@ -68,7 +78,8 @@ function mail_extract_text($imap, int $uid, object $part, string $partNumber = '
     }
     if (!empty($part->parts)) {
         $pieces = [];
-        foreach ($part->parts as $index => $child) {
+        foreach (mail_as_list($part->parts ?? null) as $index => $child) {
+            if (!is_object($child)) continue;
             $number = $partNumber === '' ? (string) ($index + 1) : $partNumber . '.' . ($index + 1);
             $pieces[] = mail_extract_text($imap, $uid, $child, $number);
         }
