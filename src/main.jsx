@@ -69,6 +69,9 @@ const statusTone = value => {
   return 'warning';
 };
 const money = value => new Intl.NumberFormat('es-ES',{style:'currency',currency:'EUR',maximumFractionDigits:0}).format(value);
+const numericRef=value=>Number(String(value||'').match(/(\d+)(?!.*\d)/)?.[1]||0);
+const newestFirst=(left,right)=>numericRef(right.id||right.ref)-numericRef(left.id||left.ref);
+const newestMailFirst=(left,right)=>(Date.parse(right.received_at||right.created_at||'')||0)-(Date.parse(left.received_at||left.created_at||'')||0)||Number(right.id||0)-Number(left.id||0);
 const formatEtaDate=value=>{
   if(!value||/confirmar/i.test(value))return 'ETA POR CONFIRMAR';
   const iso=String(value).match(/^(\d{4})-(\d{2})-(\d{2})/);
@@ -1138,7 +1141,7 @@ function Expedientes({cases,selected,select,search,setSearch,completeCaseStep,no
   const [mobileDetail,setMobileDetail]=useState(false);
   const [editOpen,setEditOpen]=useState(false);
   const [flowOpen,setFlowOpen]=useState(false);
-  const filtered=cases.filter(item=>(filter==='Todos'||item.estado===filter)&&[item.buque,item.id,item.cliente,item.puerto].join(' ').toLowerCase().includes(search.toLowerCase()));
+  const filtered=cases.filter(item=>(filter==='Todos'||item.estado===filter)&&[item.buque,item.id,item.cliente,item.puerto].join(' ').toLowerCase().includes(search.toLowerCase())).sort(newestFirst);
   return <div className={'case-layout '+(mobileDetail?'mobile-detail-open':'')}>
     <section className={'panel case-list '+(selected?'has-selection':'')}><div className="list-toolbar"><label className="search-box"><Search/><input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Buscar número, buque, ETA o puerto…"/></label><div className="filter-chips">{['Todos','En curso','Bloqueado','Planificado'].map(value=><button key={value} className={filter===value?'active':''} onClick={()=>setFilter(value)}>{value}</button>)}</div></div><div className="case-count">{filtered.length} expedientes</div>{filtered.length?filtered.map(item=><button key={item.id} className={'case-card '+(selected.id===item.id?'selected':'')} onClick={()=>{select(item.id);setMobileDetail(true)}}><div className="case-card-top"><span className="ship-icon"><Ship/></span><span><b>{caseLabel(item)}</b><small>{item.cliente}</small></span><Badge>{item.estado}</Badge></div><div className="case-card-meta"><span><MapPin/>{item.puerto}</span><span><CalendarDays/>{item.eta}</span></div><div className="case-progress"><span><i style={{width:item.progreso+'%'}}/></span><small>{item.progreso}%</small></div><p><b>Siguiente:</b> {item.siguiente}</p></button>):<Empty text="Prueba con otro término o estado."/>}</section>
     <section className="panel case-detail"><button className="mobile-detail-back" onClick={()=>setMobileDetail(false)}><ArrowLeft/> Expedientes</button><div className="detail-hero"><div><div className="detail-id">{selected.id} <Badge>{selected.estado}</Badge></div><h2>{selected.buque}</h2><p>{selected.cliente} · {selected.puerto}</p></div><button className="icon-button" aria-label="Editar expediente" onClick={()=>setEditOpen(true)}><PencilLine/></button></div><div className={'detail-stats '+(!showFinance?'detail-stats-three':'')}><Stat label="ETA" value={selected.eta} icon={Clock3}/><Stat label="Mercancía" value={selected.bultos+' bultos · '+selected.peso} icon={Box}/><Stat label="Conductor" value={selected.conductor} icon={UserRound}/>{showFinance&&<Stat label="Importe previsto" value={money(selected.importe)} icon={BadgeEuro}/>}</div><PortCallPanel item={selected}/><OperationChecklist item={selected} csrfToken={csrfToken} reloadOperational={reloadOperational} notify={notify} currentRoles={currentUser}/><ShipmentDocuments item={selected}/><div className="detail-columns"><div><h3>Línea temporal real</h3><ActualTimeline item={selected}/></div><aside className="detail-side"><div className={'next-action '+(operationFlow(selected).billingReady?'complete':'')}><span>{operationFlow(selected).billingReady?'Operativa completada':'Próxima acción'}</span><b>{selected.siguiente}</b><p>{operationFlow(selected).billingReady?'El POD está registrado y el expediente ha pasado a facturación.':'Sigue el paso indicado para que todo el equipo trabaje igual.'}</p><button className="button primary full" disabled={operationFlow(selected).billingReady} onClick={()=>setFlowOpen(true)}><ClipboardCheck/> {operationFlow(selected).billingReady?'Listo para facturar':'Registrar siguiente paso'}</button></div><PodDocuments item={selected} notify={notify}/></aside></div></section>
@@ -1353,7 +1356,7 @@ function Correos({csrfToken,notify,openCase,reloadOperational,canRebuild}){
   const [error,setError]=useState('');
   const load=async(nextFilter=filter)=>{
     setLoading(true);setError('');
-    try{const result=await api('/api/mail/inbox.php?status='+nextFilter);setItems(result.items);setCounts(result.counts);setLastRun(result.lastRun);const repaired=Number(result.reconciliation?.mergedCases||0)+Number(result.reconciliation?.correctedCases||0)+Number(result.reconciliation?.removedEmptyCases||0);if(repaired){await reloadOperational();notify(`${repaired} expedientes portuarios corregidos`)}}
+    try{const result=await api('/api/mail/inbox.php?status='+nextFilter);setItems([...(result.items||[])].sort(newestMailFirst));setCounts(result.counts);setLastRun(result.lastRun);const repaired=Number(result.reconciliation?.mergedCases||0)+Number(result.reconciliation?.correctedCases||0)+Number(result.reconciliation?.removedEmptyCases||0);if(repaired){await reloadOperational();notify(`${repaired} expedientes portuarios corregidos`)}}
     catch(reason){setError(reason.message)}
     finally{setLoading(false)}
   };
@@ -1364,7 +1367,8 @@ function Correos({csrfToken,notify,openCase,reloadOperational,canRebuild}){
       const result=await api('/api/mail/process.php',{method:'POST',headers:{'X-CSRF-Token':csrfToken},body:'{}'});
       const summary=result.summary;
       const repaired=Number(summary.reconciliation?.mergedCases||0)+Number(summary.reconciliation?.correctedCases||0)+Number(summary.reconciliation?.removedEmptyCases||0);
-      notify(`${summary.scanned} correos nuevos · ${summary.processed} trabajos creados · ${summary.review} para revisar${repaired?` · ${repaired} duplicados corregidos`:''}`);
+      const removedOld=Number(summary.removedOldCases||0);
+      notify(`${summary.scanned} correos nuevos · ${summary.processed} trabajos creados · ${summary.review} para revisar${removedOld?` · ${removedOld} antiguos retirados`:''}${repaired?` · ${repaired} duplicados corregidos`:''}`);
       await Promise.all([load(filter),reloadOperational()]);
     }catch(reason){setError(reason.message)}
     finally{setProcessing(false)}

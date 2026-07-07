@@ -2133,6 +2133,68 @@ function automatic_mail_publish_enabled(PDO $pdo): bool
     return true;
 }
 
+function case_operational_year(array $case): int
+{
+    $schedule = is_array($case['portCall'] ?? null) ? $case['portCall'] : [];
+    foreach ([
+        $schedule['etbDate'] ?? '',
+        $schedule['etaDate'] ?? '',
+        $case['eta'] ?? '',
+    ] as $value) {
+        if (preg_match('/^(20\d{2})-\d{2}-\d{2}/', (string) $value, $match)) {
+            return (int) $match[1];
+        }
+    }
+    return 0;
+}
+
+function remove_outdated_auto_cases(PDO $pdo): int
+{
+    $row = $pdo->query('SELECT data FROM app_operational_state WHERE id = 1 FOR UPDATE')->fetch();
+    if (!$row) return 0;
+    $state = json_decode((string) $row['data'], true);
+    if (!is_array($state)) return 0;
+    foreach (['cases', 'transports', 'warehouseEntries', 'customs', 'calendarEvents'] as $key) {
+        $state[$key] = is_array($state[$key] ?? null) ? $state[$key] : [];
+    }
+    $currentYear = (int) date('Y');
+    $removeRefs = [];
+    foreach ($state['cases'] as $case) {
+        if (!is_array($case)) continue;
+        $year = case_operational_year($case);
+        $hasActivity = (int) ($case['progreso'] ?? 0) > 10
+            || !empty($case['mercancias'])
+            || !empty($case['recepciones'])
+            || port_call_token((string) ($case['estado'] ?? '')) === 'COMPLETADO';
+        if ($year > 0 && $year < $currentYear && !empty($case['sourceEmailId']) && !$hasActivity) {
+            $ref = (string) ($case['id'] ?? '');
+            if ($ref !== '') $removeRefs[$ref] = true;
+        }
+    }
+    if ($removeRefs === []) return 0;
+    $state['cases'] = array_values(array_filter(
+        $state['cases'],
+        static fn(array $case): bool => !isset($removeRefs[(string) ($case['id'] ?? '')])
+    ));
+    foreach (['transports', 'warehouseEntries', 'customs', 'calendarEvents'] as $collection) {
+        $state[$collection] = array_values(array_filter(
+            $state[$collection],
+            static fn(array $record): bool => !isset($removeRefs[(string) ($record['expediente'] ?? '')])
+        ));
+    }
+    $encoded = json_encode($state, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
+    $save = $pdo->prepare('UPDATE app_operational_state SET data = ?, updated_by = NULL WHERE id = 1');
+    $save->execute([$encoded]);
+    $refs = array_keys($removeRefs);
+    $placeholders = implode(',', array_fill(0, count($refs), '?'));
+    $resetMail = $pdo->prepare(
+        "UPDATE app_mail_items SET status = 'ignored', review_reason = 'Correo anterior al año operativo actual', case_ref = NULL
+         WHERE case_ref IN ($placeholders)"
+    );
+    $resetMail->execute($refs);
+    return count($refs);
+}
+
 function process_mailboxes(string $triggerType): array
 {
     if (!function_exists('imap_open')) {
@@ -2147,7 +2209,8 @@ function process_mailboxes(string $triggerType): array
         $run = $pdo->prepare("INSERT INTO app_mail_runs (trigger_type, status) VALUES (?, 'running')");
         $run->execute([$triggerType]);
         $runId = (int) $pdo->lastInsertId();
-        $summary = ['scanned' => 0, 'processed' => 0, 'review' => 0, 'ignored' => 0, 'errors' => 0];
+        $summary = ['scanned' => 0, 'processed' => 0, 'review' => 0, 'ignored' => 0, 'errors' => 0, 'removedOldCases' => 0];
+        $summary['removedOldCases'] = remove_outdated_auto_cases($pdo);
         $summary['reconciliation'] = reconcile_existing_mail_threads($pdo);
         $accounts = [
             [config('info_email_user'), config('info_email_password')],
@@ -2164,7 +2227,7 @@ function process_mailboxes(string $triggerType): array
                 imap_errors();
                 continue;
             }
-            $uids = imap_search($imap, 'SINCE "' . date('d-M-Y', strtotime('-365 days')) . '"', SE_UID) ?: [];
+            $uids = imap_search($imap, 'SINCE "01-Jan-' . date('Y') . '"', SE_UID) ?: [];
             $knownStatement = $pdo->prepare('SELECT imap_uid FROM app_mail_items WHERE mailbox = ?');
             $knownStatement->execute([$username]);
             $knownUids = array_fill_keys(array_map('intval', $knownStatement->fetchAll(PDO::FETCH_COLUMN)), true);
@@ -2172,7 +2235,7 @@ function process_mailboxes(string $triggerType): array
                 array_map('intval', $uids),
                 static fn(int $uid): bool => !isset($knownUids[$uid])
             ));
-            sort($unseenUids, SORT_NUMERIC);
+            rsort($unseenUids, SORT_NUMERIC);
             $recentUids = array_slice($unseenUids, 0, 10);
             foreach ($recentUids as $uid) {
                 $overview = imap_fetch_overview($imap, (string) $uid, FT_UID)[0] ?? null;
