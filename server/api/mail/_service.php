@@ -2474,7 +2474,13 @@ function schedule_time_minus(string $time, int $hours): string
 
 function ensure_operational_schedule_coherence(PDO $pdo): array
 {
-    $summary = ['createdReceptionEvents' => 0, 'createdTransportEvents' => 0, 'createdTransports' => 0];
+    $summary = [
+        'removedNonTransportEvents' => 0,
+        'createdTransportEvents' => 0,
+        'createdTransports' => 0,
+        'updatedTransportEvents' => 0,
+        'updatedTransports' => 0,
+    ];
     $pdo->beginTransaction();
     try {
         $row = $pdo->query('SELECT data FROM app_operational_state WHERE id = 1 FOR UPDATE')->fetch();
@@ -2486,30 +2492,15 @@ function ensure_operational_schedule_coherence(PDO $pdo): array
         foreach (['cases', 'transports', 'calendarEvents'] as $collection) {
             $state[$collection] = is_array($state[$collection] ?? null) ? $state[$collection] : [];
         }
-        $needsRepair = false;
-        foreach ($state['cases'] as $case) {
-            $caseRef = (string) ($case['id'] ?? '');
-            if ($caseRef === '') continue;
-            $hasReception = false;
-            $hasTransportEvent = false;
-            foreach ($state['calendarEvents'] as $event) {
-                if (($event['expediente'] ?? '') !== $caseRef) continue;
-                if (($event['tipoServicio'] ?? '') === 'Recepción') $hasReception = true;
-                if (str_starts_with((string) ($event['tipoServicio'] ?? ''), 'Transporte')) $hasTransportEvent = true;
+        $beforeEvents = count($state['calendarEvents']);
+        $state['calendarEvents'] = array_values(array_filter(
+            $state['calendarEvents'],
+            static function (array $event): bool {
+                $type = (string) ($event['tipoServicio'] ?? '');
+                return str_starts_with($type, 'Transporte') || trim((string) ($event['transporte'] ?? '')) !== '';
             }
-            $hasTransportRecord = count(array_filter(
-                $state['transports'],
-                static fn(array $transport): bool => ($transport['expediente'] ?? '') === $caseRef
-            )) > 0;
-            if (!$hasReception || !$hasTransportEvent || !$hasTransportRecord) {
-                $needsRepair = true;
-                break;
-            }
-        }
-        if (!$needsRepair) {
-            $pdo->commit();
-            return $summary;
-        }
+        ));
+        $summary['removedNonTransportEvents'] = $beforeEvents - count($state['calendarEvents']);
         $mailRows = $pdo->query(
             "SELECT case_ref, received_at, extracted FROM app_mail_items
              WHERE status = 'processed' AND case_ref IS NOT NULL AND extracted IS NOT NULL
@@ -2524,7 +2515,7 @@ function ensure_operational_schedule_coherence(PDO $pdo): array
                 'receivedAt' => (string) ($mailRow['received_at'] ?? ''),
             ];
         }
-        $changed = false;
+        $changed = $summary['removedNonTransportEvents'] > 0;
         foreach ($state['cases'] as $caseIndex => $case) {
             $caseRef = (string) ($case['id'] ?? '');
             if ($caseRef === '') continue;
@@ -2544,17 +2535,20 @@ function ensure_operational_schedule_coherence(PDO $pdo): array
                 'transport'
             );
             $portCall = is_array($case['portCall'] ?? null) ? $case['portCall'] : [];
-            $arrivalDate = trim((string) ($portCall['etaDate'] ?? ''));
-            if (!is_valid_service_date($arrivalDate)) $arrivalDate = trim((string) ($portCall['etbDate'] ?? ''));
-            if (!is_valid_service_date($arrivalDate)) $arrivalDate = trim((string) ($case['eta'] ?? ''));
-            if (!is_valid_service_date($arrivalDate)) $arrivalDate = is_valid_service_date($explicitTransportDate) ? $explicitTransportDate : '';
-            if (!is_valid_service_date($arrivalDate)) $arrivalDate = is_valid_service_date($explicitReceptionDate) ? $explicitReceptionDate : '';
+            $etbDate = trim((string) ($portCall['etbDate'] ?? ''));
+            $etaDate = trim((string) ($portCall['etaDate'] ?? ''));
+            $caseEta = trim((string) ($case['eta'] ?? ''));
+            $arrivalDate = is_valid_service_date($etbDate) ? $etbDate : '';
+            if ($arrivalDate === '' && is_valid_service_date($etaDate)) $arrivalDate = $etaDate;
+            if ($arrivalDate === '' && is_valid_service_date($caseEta)) $arrivalDate = $caseEta;
+            if ($arrivalDate === '' && is_valid_service_date($explicitTransportDate)) $arrivalDate = $explicitTransportDate;
             if ($arrivalDate === '') continue;
-            $arrivalTime = trim((string) ($portCall['etaTime'] ?? ''));
-            if (!is_valid_service_time($arrivalTime)) $arrivalTime = trim((string) ($portCall['etbTime'] ?? ''));
-            if (!is_valid_service_time($arrivalTime)) $arrivalTime = is_valid_service_time($explicitTransportTime) ? $explicitTransportTime : '';
-            $arrivalTimeConfirmed = is_valid_service_time($arrivalTime);
-            if (!$arrivalTimeConfirmed) $arrivalTime = '09:00';
+            $etbTime = trim((string) ($portCall['etbTime'] ?? ''));
+            $arrivalTimeConfirmed = is_valid_service_time($etbTime);
+            $arrivalTime = $arrivalTimeConfirmed ? $etbTime : '';
+            $arrivalEnd = $arrivalTimeConfirmed ? plus_one_hour($arrivalTime) : '';
+            $scheduleStatus = $arrivalTimeConfirmed ? 'confirmed' : 'missing_time';
+            $scheduleNote = $arrivalTimeConfirmed ? '' : 'Falta hora ETB; pendiente de confirmar horario del buque';
 
             $receptionDate = $explicitReceptionDate;
             $receptionTime = $explicitReceptionTime;
@@ -2563,7 +2557,7 @@ function ensure_operational_schedule_coherence(PDO $pdo): array
             if ($receptionTime === '') $receptionTime = schedule_time_minus($arrivalTime, 2);
 
             $services = is_array($case['servicios'] ?? null) ? $case['servicios'] : [];
-            $requiredServices = array_values(array_unique(array_merge($services, ['Recepción', 'Transporte'])));
+            $requiredServices = array_values(array_unique(array_merge($services, ['Transporte'])));
             if ($requiredServices !== $services) {
                 $state['cases'][$caseIndex]['servicios'] = $requiredServices;
                 $changed = true;
@@ -2579,7 +2573,7 @@ function ensure_operational_schedule_coherence(PDO $pdo): array
             $transportType = ($case['deliveryMode'] ?? '') === 'barge'
                 ? 'Transporte a gabarra'
                 : 'Transporte a buque';
-            $pickup = trim((string) ($latestData['transport']['pickup'] ?? '')) ?: 'Origen por confirmar';
+            $pickup = trim((string) ($latestData['transport']['pickup'] ?? '')) ?: SWIFTPORT_WAREHOUSE_ADDRESS;
             $delivery = trim((string) ($latestData['transport']['delivery'] ?? ''))
                 ?: trim((string) ($case['operationLocation'] ?? ''))
                 ?: trim((string) ($case['puerto'] ?? 'Destino por confirmar'));
@@ -2590,64 +2584,74 @@ function ensure_operational_schedule_coherence(PDO $pdo): array
                     'id' => $transportRef,
                     'expediente' => $caseRef,
                     'ruta' => $route,
-                    'hora' => $arrivalDate . ' · ' . $arrivalTime . '–' . plus_one_hour($arrivalTime),
+                    'hora' => $arrivalTimeConfirmed ? $arrivalDate . ' · ' . $arrivalTime . '–' . $arrivalEnd : $arrivalDate . ' · FALTA HORARIO',
                     'fecha' => $arrivalDate,
                     'inicio' => $arrivalTime,
-                    'fin' => plus_one_hour($arrivalTime),
+                    'fin' => $arrivalEnd,
                     'tipoServicio' => $transportType,
                     'conductor' => (string) ($case['conductor'] ?? 'Sin asignar'),
                     'vehiculo' => 'Por asignar',
                     'estado' => 'Sin asignar',
-                    'scheduleStatus' => $arrivalTimeConfirmed ? 'confirmed' : 'provisional',
+                    'scheduleStatus' => $scheduleStatus,
+                    'scheduleNote' => $scheduleNote,
                 ];
                 $summary['createdTransports']++;
                 $changed = true;
             } else {
                 $transportRef = (string) $state['transports'][$transportIndex]['id'];
-            }
-
-            $hasReception = false;
-            $hasTransport = false;
-            foreach ($state['calendarEvents'] as $event) {
-                if (($event['expediente'] ?? '') !== $caseRef) continue;
-                if (($event['tipoServicio'] ?? '') === 'Recepción') $hasReception = true;
-                if (str_starts_with((string) ($event['tipoServicio'] ?? ''), 'Transporte')) $hasTransport = true;
-            }
-            if (!$hasReception) {
-                $state['calendarEvents'][] = [
-                    'id' => 'EV-SYNC-' . $caseRef . '-R',
-                    'titulo' => trim((string) ($case['resumenMercancia'] ?? '')) ?: 'Recepción de mercancía',
-                    'tipoServicio' => 'Recepción',
-                    'fecha' => $receptionDate,
-                    'inicio' => $receptionTime,
-                    'fin' => plus_one_hour($receptionTime),
-                    'asignado' => (string) ($case['conductor'] ?? 'Sin asignar'),
-                    'expediente' => $caseRef,
-                    'transporte' => '',
-                    'color' => 'gray',
-                    'scheduleStatus' => $receptionConfirmed ? 'confirmed' : 'provisional',
-                    'scheduleNote' => $receptionConfirmed ? '' : 'Fecha u hora inferida; confirmar con operaciones',
-                ];
-                $summary['createdReceptionEvents']++;
-                $changed = true;
-            }
-            if (!$hasTransport) {
-                $state['calendarEvents'][] = [
-                    'id' => 'EV-SYNC-' . $caseRef . '-T',
-                    'titulo' => $route,
-                    'tipoServicio' => $transportType,
+                $existingTransport = $state['transports'][$transportIndex];
+                $updatedTransport = array_merge($existingTransport, [
+                    'ruta' => $route,
                     'fecha' => $arrivalDate,
                     'inicio' => $arrivalTime,
-                    'fin' => plus_one_hour($arrivalTime),
-                    'asignado' => (string) ($case['conductor'] ?? 'Sin asignar'),
-                    'expediente' => $caseRef,
-                    'transporte' => $transportRef,
-                    'color' => 'gray',
-                    'scheduleStatus' => $arrivalTimeConfirmed ? 'confirmed' : 'provisional',
-                    'scheduleNote' => $arrivalTimeConfirmed ? '' : 'Entrega colocada a la llegada del buque; confirmar hora',
-                ];
+                    'fin' => $arrivalEnd,
+                    'hora' => $arrivalTimeConfirmed ? $arrivalDate . ' · ' . $arrivalTime . '–' . $arrivalEnd : $arrivalDate . ' · FALTA HORARIO',
+                    'tipoServicio' => $transportType,
+                    'scheduleStatus' => $scheduleStatus,
+                    'scheduleNote' => $scheduleNote,
+                ]);
+                if ($updatedTransport !== $existingTransport) {
+                    $state['transports'][$transportIndex] = $updatedTransport;
+                    $summary['updatedTransports']++;
+                    $changed = true;
+                }
+            }
+
+            $transportEventIndex = null;
+            foreach ($state['calendarEvents'] as $index => $event) {
+                if (($event['expediente'] ?? '') !== $caseRef) continue;
+                if (str_starts_with((string) ($event['tipoServicio'] ?? ''), 'Transporte') || ($event['transporte'] ?? '') === $transportRef) {
+                    $transportEventIndex = $index;
+                    break;
+                }
+            }
+            $eventPayload = [
+                'titulo' => $route,
+                'tipoServicio' => $transportType,
+                'fecha' => $arrivalDate,
+                'inicio' => $arrivalTime,
+                'fin' => $arrivalEnd,
+                'asignado' => (string) ($case['conductor'] ?? 'Sin asignar'),
+                'expediente' => $caseRef,
+                'transporte' => $transportRef,
+                'color' => 'gray',
+                'scheduleStatus' => $scheduleStatus,
+                'scheduleNote' => $scheduleNote,
+            ];
+            if ($transportEventIndex === null) {
+                $state['calendarEvents'][] = [
+                    'id' => 'EV-SYNC-' . $caseRef . '-T',
+                ] + $eventPayload;
                 $summary['createdTransportEvents']++;
                 $changed = true;
+            } else {
+                $existingEvent = $state['calendarEvents'][$transportEventIndex];
+                $updatedEvent = array_merge($existingEvent, $eventPayload);
+                if ($updatedEvent !== $existingEvent) {
+                    $state['calendarEvents'][$transportEventIndex] = $updatedEvent;
+                    $summary['updatedTransportEvents']++;
+                    $changed = true;
+                }
             }
         }
         if ($changed) {
