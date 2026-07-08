@@ -138,12 +138,34 @@ function normalized_mail_subject(string $subject): string
     return mb_strtoupper(trim(preg_replace('/\s+/', ' ', $value) ?? $value));
 }
 
+function canonical_vessel_display_name(string $value): string
+{
+    $value = mb_strtoupper(clean_extracted_value($value));
+    $value = preg_replace('/^[#:\-\s]*(?:ENTREGA|DELIVERY|SERVICIO|SERVICE|RECOGIDA|PICK\s*UP|COLLECT(?:ION)?|SOLICITUD|REQUEST)\s+/u', '', $value) ?? $value;
+    $value = preg_replace('/^(?:MV|M\/V|MT|M\/T|MY|M\/Y|MS|M\/S|SS|VSL|VESSEL|SHIP|BUQUE|BARCO)\s+/u', '', $value) ?? $value;
+    $parts = preg_split('/\s*(?:\/\/|\||;)\s*/u', $value);
+    if (is_array($parts) && isset($parts[0])) $value = $parts[0];
+    $value = preg_replace('/\s+\b(?:EN|AT|IN)\s+(?:EL\s+)?(?:PUERTO(?:\s+DE)?|PORT(?:\s+OF)?|ALGECIRAS|SAGUNTO|TARRAGONA|BARCELONA|VINAR[OÓ]S|VINAROS|MAR[IÍ]N|A\s+CORU[ÑN]A|VALENCIA|CASTELL[OÓ]N|MARSEILLE|BILBAO|ALICANTE|M[ÁA]LAGA|ALMER[ÍI]A|HUELVA|C[ÁA]DIZ)\b.*$/u', '', $value) ?? $value;
+    $value = preg_replace('/\s+\b(?:A\s+LA\s+MAYOR\s+BREVEDAD|ASAP|URGENTE|URGENT|PROSPECTS?\s+UPDATE|UPDATE|ACTUALIZACI[ÓO]N|PREVISI[ÓO]N|PREVISIONES|ETA|ETB|ETD)\b.*$/u', '', $value) ?? $value;
+    return trim(preg_replace('/\s+/', ' ', $value) ?? $value, " .,-_");
+}
+
 function subject_target_vessel(string $subject): string
 {
     $normalized = normalized_mail_subject($subject);
+    $delivery = subject_delivery_request($normalized);
+    if (!empty($delivery['vessel'])) {
+        return (string) $delivery['vessel'];
+    }
     if (preg_match('/^(.{2,70}?)\s+-\s+(?:GABARRA|BARGE)\b/u', $normalized, $match)) {
         $candidate = safe_vessel_name($match[1]);
         return in_array($candidate, ['SERVICE', 'SERVICIO', 'REQUEST', 'SOLICITUD'], true) ? '' : $candidate;
+    }
+    if (preg_match('/^(.{2,90}?)\s+(?:EN|AT|IN)\s+(?:EL\s+)?(?:PUERTO(?:\s+DE)?|PORT(?:\s+OF)?|ALGECIRAS|SAGUNTO|TARRAGONA|BARCELONA|VINAR[OÓ]S|VINAROS|MAR[IÍ]N|A\s+CORU[ÑN]A|VALENCIA|CASTELL[OÓ]N|MARSEILLE|BILBAO|ALICANTE|M[ÁA]LAGA|ALMER[ÍI]A|HUELVA|C[ÁA]DIZ)\b/u', $normalized, $match)) {
+        return safe_vessel_name($match[1]);
+    }
+    if (preg_match('/^(?:ENTREGA|DELIVERY|SERVICIO|SERVICE)\s+(.{2,80}?)(?:\s+-\s+|\s+\/\/\s+|$)/u', $normalized, $match)) {
+        return safe_vessel_name($match[1]);
     }
     return '';
 }
@@ -151,8 +173,18 @@ function subject_target_vessel(string $subject): string
 function subject_target_port(string $subject): string
 {
     $normalized = normalized_mail_subject($subject);
+    $delivery = subject_delivery_request($normalized);
+    if (!empty($delivery['port'])) {
+        return mb_strtoupper((string) $delivery['port']);
+    }
     if (preg_match('/^.{2,70}?\s+-\s+(?:GABARRA|BARGE)\s+-\s+(.{2,60})$/u', $normalized, $match)) {
         return trim($match[1]);
+    }
+    if (preg_match('/\s@\s*([^\/]+?)(?:\s*\/\/|$)/u', $normalized, $match)) {
+        return mb_strtoupper(clean_extracted_value((string) $match[1]));
+    }
+    if (preg_match('/\b(?:EN|AT|IN)\s+(?:EL\s+)?(?:PUERTO\s+DE|PUERTO|PORT\s+OF|PORT)?\s*([A-ZÁÉÍÓÚÜÑ ._-]{3,45})(?:\s+\b(?:A\s+LA\s+MAYOR|ASAP|URGENTE|URGENT|PROSPECTS?|UPDATE|ETA|ETB|ETD)\b|$)/u', $normalized, $match)) {
+        return mb_strtoupper(clean_extracted_value((string) $match[1]));
     }
     return '';
 }
@@ -329,15 +361,72 @@ function invalid_vessel_name(string $value): bool
         'BUQUE', 'VESSEL', 'BARCO', 'GABARRA', 'INFORMACION', 'INFORMATION',
         'SIGUIENTE', 'SIGUIENTE INFORMACION', 'PODRIAN REMITIR LA SIGUIENTE INFORMACION',
         'MERCANCIA', 'DOCUMENTOS', 'PREVISIONES', 'CONFIRMAR',
+        'OVERVELD', 'DHL', 'UPS', 'FEDEX', 'TNT', 'SEUR', 'MRW',
     ];
     if (in_array($token, $invalid, true)) return true;
-    return preg_match('/\b(?:PODRIAN|PODRÍAN|REMITIR|SIGUIENTE|INFORMACION|INFORMACIÓN)\b/u', $token) === 1;
+    return preg_match('/\b(?:PODRIAN|PODRÍAN|REMITIR|SIGUIENTE|INFORMACION|INFORMACIÓN|MAYOR\s+BREVEDAD|PUERTO|PORT|PREVISIONES|CONFIRMAR)\b/u', $token) === 1;
 }
 
 function safe_vessel_name(string $value): string
 {
-    $vessel = port_call_vessel_name($value);
+    $vessel = canonical_vessel_display_name($value);
     return invalid_vessel_name($vessel) ? '' : $vessel;
+}
+
+function vessel_from_operational_text(string $value): string
+{
+    $text = mb_strtoupper(clean_extracted_value($value));
+    if ($text === '') return '';
+    $patterns = [
+        '/\bBUQUE\s+([A-Z0-9][A-Z0-9 ._-]{2,80})(?:\s+[·\-]\s+|\s+EN\s+|\s+AT\s+|$)/u',
+        '/\bA\s+BORDO\s+(?:DEL|DE\s+LA|DE)\s+([A-Z0-9][A-Z0-9 ._-]{2,80})(?:\s+EN\s+|\s+AT\s+|,|\.|$)/u',
+        '/\bON\s+BOARD\s+(?:THE\s+)?([A-Z0-9][A-Z0-9 ._-]{2,80})(?:\s+AT\s+|\s+IN\s+|,|\.|$)/u',
+    ];
+    foreach ($patterns as $pattern) {
+        if (preg_match($pattern, $text, $match)) {
+            $candidate = safe_vessel_name((string) $match[1]);
+            if ($candidate !== '') return $candidate;
+        }
+    }
+    return '';
+}
+
+function best_case_vessel_name(array $case, array $mailHistory): string
+{
+    $best = '';
+    $bestScore = 0;
+    $addCandidate = static function (string $candidate, int $score) use (&$best, &$bestScore): void {
+        $candidate = safe_vessel_name($candidate);
+        if ($candidate === '' || $score <= $bestScore) return;
+        $best = $candidate;
+        $bestScore = $score;
+    };
+    $addCandidate((string) ($case['buque'] ?? ''), invalid_vessel_name((string) ($case['buque'] ?? '')) ? 5 : 45);
+    foreach ($mailHistory as $entry) {
+        $subject = (string) ($entry['subject'] ?? '');
+        $data = is_array($entry['data'] ?? null) ? $entry['data'] : [];
+        $addCandidate(subject_target_vessel($subject), 100);
+        $addCandidate((string) ($data['vessel'] ?? ''), 55);
+        $addCandidate(vessel_from_operational_text((string) ($data['operation_location'] ?? '')), 80);
+        $transport = is_array($data['transport'] ?? null) ? $data['transport'] : [];
+        $addCandidate(vessel_from_operational_text((string) ($transport['delivery'] ?? '')), 75);
+        foreach (is_array($data['tasks'] ?? null) ? $data['tasks'] : [] as $task) {
+            if (!is_array($task)) continue;
+            $addCandidate(vessel_from_operational_text((string) ($task['delivery'] ?? '')), 72);
+            $addCandidate(vessel_from_operational_text((string) ($task['summary'] ?? '')), 65);
+        }
+    }
+    return $best;
+}
+
+function normalize_transport_endpoint(string $value, string $vessel, string $port): string
+{
+    $clean = clean_extracted_value($value);
+    $targetVessel = vessel_from_operational_text($clean) ?: safe_vessel_name($vessel);
+    if ($targetVessel !== '' && preg_match('/\b(?:BUQUE|A\s+BORDO|ON\s+BOARD|VESSEL|SHIP)\b/iu', $clean)) {
+        return 'BUQUE ' . $targetVessel . ($port !== '' ? ' · ' . mb_strtoupper($port) : '');
+    }
+    return $clean;
 }
 
 function local_clear_service_fallback(array $email, string $text): array
@@ -725,6 +814,9 @@ CRITERIO OPERATIVO
 
 EXTRACCIÓN
 - Extrae el buque aunque aparezca como MV, M/V, VSL, vessel, ship o en el asunto.
+- El campo vessel debe contener SOLO el nombre del buque, sin puerto, urgencia ni descripción. Ejemplos correctos: "WASA EXPRESS", "DENSA PUMA", "GC SAPPHIRE". Incorrectos: "WASA EXPRESS EN ALGECIRAS A LA MAYOR BREVEDAD POSIBLE", "SAPPHIRE EN EL PUERTO DE TARRAGONA".
+- Si el asunto dice "ENTREGA DENSA PUMA @ SAGUNTO", vessel es DENSA PUMA y port es SAGUNTO. Si el cuerpo dice que la mercancía llega en/desde OVERVELD, OVERVELD es punto de recogida o transportista, no buque.
+- Si el asunto dice "WASA EXPRESS EN ALGECIRAS..." o "GC SAPPHIRE en el puerto de Tarragona", corta antes de "en/at/in puerto": vessel es WASA EXPRESS o GC SAPPHIRE, y el puerto va en port.
 - Extrae IMO (7 dÃ­gitos) y MMSI (9 dÃ­gitos) cuando aparezcan. No los inventes ni confundas con pedidos, telÃ©fonos o referencias.
 - En asuntos del tipo "TORC - GABARRA - BARCELONA", el buque objetivo es TORC; GABARRA/BARGE describe la operativa y BARCELONA es el puerto.
 - GABARRA/BARGE nunca es el buque ni el cliente. El buque sigue siendo el indicado en el asunto o cuerpo. Para una entrega mediante gabarra usa delivery_mode "barge", transport.required true y operation_location con el muelle, punto de carga, nombre o ubicación de la gabarra.
@@ -1034,6 +1126,15 @@ function extract_local_service(array $email): array
         if ($subjectPort !== '' && trim((string) ($data['port'] ?? '')) === '') {
             $data['port'] = $subjectPort;
         }
+        if (empty($data['vessel'])) {
+            $bodyVessel = vessel_from_operational_text($text);
+            if ($bodyVessel !== '') $data['vessel'] = $bodyVessel;
+        }
+        $data['vessel'] = safe_vessel_name((string) ($data['vessel'] ?? ''));
+        $data['port'] = mb_strtoupper(clean_extracted_value((string) ($data['port'] ?? '')));
+        $data['operation_location'] = normalize_transport_endpoint((string) ($data['operation_location'] ?? ''), (string) $data['vessel'], (string) $data['port']);
+        $data['transport'] = is_array($data['transport'] ?? null) ? $data['transport'] : [];
+        $data['transport']['delivery'] = normalize_transport_endpoint((string) ($data['transport']['delivery'] ?? ''), (string) $data['vessel'], (string) $data['port']);
         $normalizedSubject = normalized_mail_subject((string) ($email['subject'] ?? ''));
         if (preg_match('/\b(?:GABARRA|BARGE)\b/u', $normalizedSubject)) {
             $data['is_service'] = true;
@@ -1228,7 +1329,7 @@ function append_extracted_tasks_to_state(
         $validTime = is_valid_service_time($time);
         $validSlot = $validDate && $validTime;
         $pickup = trim((string) ($task['pickup'] ?? ''));
-        $delivery = trim((string) ($task['delivery'] ?? ''));
+        $delivery = normalize_transport_endpoint((string) ($task['delivery'] ?? ''), (string) ($data['vessel'] ?? ''), (string) ($data['port'] ?? ''));
         $cargo = trim((string) ($task['cargo'] ?? ''));
         $summary = trim((string) ($task['summary'] ?? ''));
         $evidence = trim((string) ($task['evidence'] ?? ''));
@@ -1348,7 +1449,7 @@ function update_case_tasks_from_schedule(
         $kind = (string) ($task['kind'] ?? 'other');
         $serviceName = extracted_task_service_name($task, $data);
         $pickup = trim((string) ($task['pickup'] ?? ''));
-        $delivery = trim((string) ($task['delivery'] ?? ''));
+        $delivery = normalize_transport_endpoint((string) ($task['delivery'] ?? ''), (string) ($data['vessel'] ?? ''), (string) ($data['port'] ?? ''));
         $route = ($pickup !== '' ? $pickup : 'Origen por confirmar')
             . ' → '
             . ($delivery !== '' ? $delivery : 'Destino por confirmar');
@@ -1549,7 +1650,7 @@ function apply_thread_update_to_state(
         [$transportDate, $transportTime] = port_call_operational_slot($data, 'transport');
         $start = $transportTime;
         $pickup = trim((string) ($data['transport']['pickup'] ?? ''));
-        $delivery = trim((string) ($data['transport']['delivery'] ?? ''));
+        $delivery = normalize_transport_endpoint((string) ($data['transport']['delivery'] ?? ''), (string) ($case['buque'] ?? $data['vessel'] ?? ''), (string) ($case['puerto'] ?? $data['port'] ?? ''));
         $route = ($pickup !== '' || $delivery !== '')
             ? ($pickup ?: 'Origen por confirmar') . ' → ' . ($delivery ?: 'Destino por confirmar')
             : '';
@@ -1773,7 +1874,7 @@ function apply_service_email(int $mailId, array $data, ?int $userId = null): str
             [$transportDate, $transportTime] = port_call_operational_slot($data, 'transport');
             $start = $transportTime;
             $pickup = trim((string) $data['transport']['pickup']) ?: 'Origen por confirmar';
-            $delivery = trim((string) ($data['transport']['delivery'] ?: $data['port'])) ?: 'Destino por confirmar';
+            $delivery = normalize_transport_endpoint((string) ($data['transport']['delivery'] ?: $data['port']), (string) ($data['vessel'] ?? ''), (string) ($data['port'] ?? '')) ?: 'Destino por confirmar';
             $route = $pickup . ' → ' . $delivery;
             $state['transports'][] = [
                 'id' => $transportRef, 'expediente' => $caseRef, 'ruta' => $route,
@@ -2495,8 +2596,8 @@ function ensure_operational_schedule_coherence(PDO $pdo): array
         }
         $vesselCatalog = [];
         $upsertVessel = static function (array $record) use (&$vesselCatalog): void {
-            $name = mb_strtoupper(trim((string) ($record['name'] ?? $record['buque'] ?? $record['vessel'] ?? '')));
-            $key = port_call_token(port_call_vessel_name($name));
+            $name = safe_vessel_name((string) ($record['name'] ?? $record['buque'] ?? $record['vessel'] ?? ''));
+            $key = port_call_token($name);
             if ($key === '') return;
             $existing = $vesselCatalog[$key] ?? [];
             $imo = preg_replace('/\D/', '', (string) ($record['imo'] ?? ''));
@@ -2556,7 +2657,7 @@ function ensure_operational_schedule_coherence(PDO $pdo): array
         ));
         $summary['removedNonTransportEvents'] = $beforeEvents - count($state['calendarEvents']);
         $mailRows = $pdo->query(
-            "SELECT case_ref, received_at, extracted FROM app_mail_items
+            "SELECT case_ref, subject, received_at, extracted FROM app_mail_items
              WHERE status = 'processed' AND case_ref IS NOT NULL AND extracted IS NOT NULL
              ORDER BY received_at ASC, id ASC"
         )->fetchAll();
@@ -2566,6 +2667,7 @@ function ensure_operational_schedule_coherence(PDO $pdo): array
             if (!is_array($decoded)) continue;
             $mailByCase[(string) $mailRow['case_ref']][] = [
                 'data' => $decoded,
+                'subject' => (string) ($mailRow['subject'] ?? ''),
                 'receivedAt' => (string) ($mailRow['received_at'] ?? ''),
             ];
         }
@@ -2573,9 +2675,15 @@ function ensure_operational_schedule_coherence(PDO $pdo): array
         foreach ($state['cases'] as $caseIndex => $case) {
             $caseRef = (string) ($case['id'] ?? '');
             if ($caseRef === '') continue;
-            if (!empty($case['autoTransportDisabled'])) continue;
             $mailHistory = $mailByCase[$caseRef] ?? [];
+            $canonicalVessel = best_case_vessel_name($case, $mailHistory);
+            if ($canonicalVessel !== '' && $canonicalVessel !== (string) ($case['buque'] ?? '')) {
+                $state['cases'][$caseIndex]['buque'] = $canonicalVessel;
+                $case['buque'] = $canonicalVessel;
+                $changed = true;
+            }
             $latestData = $mailHistory ? $mailHistory[count($mailHistory) - 1]['data'] : [];
+            if (!empty($case['autoTransportDisabled'])) continue;
             $explicitReceptionDate = '';
             $explicitReceptionTime = '';
             foreach ($mailHistory as $mailEntry) {
@@ -2646,8 +2754,8 @@ function ensure_operational_schedule_coherence(PDO $pdo): array
                 ? 'Transporte a gabarra'
                 : 'Transporte a buque';
             $pickup = trim((string) ($latestData['transport']['pickup'] ?? '')) ?: SWIFTPORT_WAREHOUSE_ADDRESS;
-            $delivery = trim((string) ($latestData['transport']['delivery'] ?? ''))
-                ?: trim((string) ($case['operationLocation'] ?? ''))
+            $delivery = normalize_transport_endpoint((string) ($latestData['transport']['delivery'] ?? ''), (string) ($case['buque'] ?? ''), (string) ($case['puerto'] ?? ''))
+                ?: normalize_transport_endpoint((string) ($case['operationLocation'] ?? ''), (string) ($case['buque'] ?? ''), (string) ($case['puerto'] ?? ''))
                 ?: trim((string) ($case['puerto'] ?? 'Destino por confirmar'));
             $route = $pickup . ' → ' . $delivery;
             if ($transportIndex === null) {
@@ -2725,6 +2833,28 @@ function ensure_operational_schedule_coherence(PDO $pdo): array
                     $changed = true;
                 }
             }
+        }
+        $vesselCatalog = [];
+        foreach ($state['vessels'] as $vessel) {
+            if (is_array($vessel)) $upsertVessel($vessel);
+        }
+        foreach ($state['cases'] as $case) {
+            if (!is_array($case)) continue;
+            $casePortCall = is_array($case['portCall'] ?? null) ? $case['portCall'] : [];
+            $upsertVessel([
+                'name' => (string) ($case['buque'] ?? ''),
+                'imo' => (string) ($case['imo'] ?? ''),
+                'mmsi' => (string) ($case['mmsi'] ?? ''),
+                'lastPort' => (string) ($case['puerto'] ?? ''),
+                'lastCase' => (string) ($case['id'] ?? ''),
+                'updatedAt' => (string) ($casePortCall['updatedAt'] ?? date(DATE_ATOM)),
+            ]);
+        }
+        $cleanVessels = array_values($vesselCatalog);
+        if ($cleanVessels !== $state['vessels']) {
+            $state['vessels'] = $cleanVessels;
+            $summary['updatedVessels']++;
+            $changed = true;
         }
         if ($changed) {
             $save = $pdo->prepare('UPDATE app_operational_state SET data = ?, updated_by = NULL WHERE id = 1');

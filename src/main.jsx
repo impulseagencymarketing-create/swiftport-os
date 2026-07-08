@@ -56,10 +56,12 @@ const sameVessel=(first,second)=>Boolean(vesselKey(first)&&vesselKey(first)===ve
 const cleanImo=value=>String(value||'').replace(/\D/g,'').slice(0,7);
 const cleanMmsi=value=>String(value||'').replace(/\D/g,'').slice(0,9);
 const vesselNameOf=value=>String(value?.name||value?.buque||value?.vessel||'').trim().toUpperCase();
+const cleanVesselDisplayName=value=>String(value||'').toUpperCase().replace(/^[#:\-\s]*(ENTREGA|DELIVERY|SERVICIO|SERVICE|RECOGIDA|PICK\s*UP|COLLECT(?:ION)?|SOLICITUD|REQUEST)\s+/,'').replace(/^(MV|M\/V|MT|M\/T|MY|M\/Y|MS|M\/S|SS|VSL|VESSEL|SHIP|BUQUE|BARCO)\s+/,'').split(/\s*(?:\/\/|\||;)\s*/)[0].replace(/\s+\b(EN|AT|IN)\s+(EL\s+)?(PUERTO(\s+DE)?|PORT(\s+OF)?|ALGECIRAS|SAGUNTO|TARRAGONA|BARCELONA|VINAR[OÓ]S|VINAROS|MAR[IÍ]N|A\s+CORU[ÑN]A|VALENCIA|CASTELL[OÓ]N|MARSEILLE|BILBAO|ALICANTE|M[ÁA]LAGA|ALMER[ÍI]A|HUELVA|C[ÁA]DIZ)\b.*$/u,'').replace(/\s+\b(A\s+LA\s+MAYOR\s+BREVEDAD|ASAP|URGENTE|URGENT|PROSPECTS?\s+UPDATE|UPDATE|ACTUALIZACI[ÓO]N|PREVISI[ÓO]N|PREVISIONES|ETA|ETB|ETD)\b.*$/u,'').replace(/\s+/g,' ').replace(/^[ .,_-]+|[ .,_-]+$/g,'');
 const findKnownVessel=(vessels,name)=>vessels.find(item=>sameVessel(vesselNameOf(item),name));
 const normalizeVesselRecord=(record={})=>{
-  const name=vesselNameOf(record);
+  const name=cleanVesselDisplayName(vesselNameOf(record));
   if(!vesselKey(name))return null;
+  if(['OVERVELD','DHL','UPS','FEDEX','TNT','SEUR','MRW'].includes(name))return null;
   return {
     id:record.id||`VES-${vesselKey(name).replace(/\s+/g,'-').toUpperCase()}`,
     name,
