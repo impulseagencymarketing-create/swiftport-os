@@ -971,6 +971,14 @@ function formatSchedule(date,start,end){if(!date||!start)return 'Por programar';
 const isTransportCalendarEvent=event=>String(event?.tipoServicio||'').toLowerCase().startsWith('transporte')||Boolean(event?.transporte);
 const calendarHasValidStart=event=>/^\d{2}:\d{2}$/.test(String(event?.inicio||''));
 const calendarNeedsTime=event=>!calendarHasValidStart(event)||String(event?.scheduleStatus||'')==='provisional';
+const calendarEventWithCaseSlot=(event,cases)=>{
+  const related=(cases||[]).find(item=>item.id===event?.expediente);
+  const slot=related?transportSlotFromCase(related):null;
+  if(!slot?.date)return event;
+  const start=/^\d{2}:\d{2}$/.test(String(slot.start||''))?slot.start:(event?.inicio||'');
+  const hasStart=/^\d{2}:\d{2}$/.test(String(start||''));
+  return {...event,fecha:slot.date,inicio:start,fin:hasStart?plusHourClient(start):(event?.fin||''),scheduleStatus:hasStart?'confirmed':'missing_time',scheduleNote:hasStart?`Programado por ${slot.source}`:`Falta hora ${slot.source||'ETB/ETA'}; pendiente de confirmar horario del buque`};
+};
 function DriverLegend({team}){return <div className="driver-legend"><span><i className="gray"/>Sin asignar</span>{team.map(member=><span key={member.id}><i className={driverTone(member.fullName,team)}/>{member.fullName}</span>)}</div>}
 function CalendarEventContent({event,cases}){const related=cases.find(item=>item.id===event.expediente);const schedule=related?portCallSchedule(related):null;const missingTime=calendarNeedsTime(event);const port=related?.puerto||event.puerto||'';return <><time>{missingTime?'FALTA HORARIO':`${event.inicio}${event.fin?`–${event.fin}`:''}`}</time><b className="calendar-vessel-name">{related?.buque||event.titulo||'Buque sin indicar'}</b>{port&&<b className="calendar-port-name">{port}</b>}<small className="calendar-service">{event.tipoServicio||'Transporte'}</small>{missingTime&&<small className="calendar-provisional">PENDIENTE ETB / HORA</small>}<small>{event.asignado||'Sin asignar'}</small>{schedule&&<small className="calendar-port-call">LLEGADA · ETA {schedule.eta}</small>}</>}
 const calendarMinutes=value=>{const [hour,minute]=String(value||'').split(':').map(Number);return Number.isFinite(hour)?hour*60+(minute||0):0};
@@ -1011,7 +1019,7 @@ function Calendario({events,team,cases,transports,providers,warehouseEntries,sav
   const hours=Array.from({length:16},(_,index)=>index+6);
   const dayLabel=new Intl.DateTimeFormat('es-ES',{weekday:'short',day:'numeric',month:'short'});
   const newEvent=()=>setEditing({id:'EV-'+Date.now(),titulo:'',tipoServicio:'Transporte',fecha:isoDate(days[0]),inicio:'',fin:'',asignado:'Sin asignar',expediente:'',transporte:'',color:'gray',scheduleStatus:'missing_time'});
-  const baseEvents=(mineOnly?events.filter(event=>samePerson(event.asignado,currentUser.fullName)):events).filter(isTransportCalendarEvent);
+  const baseEvents=(mineOnly?events.filter(event=>samePerson(event.asignado,currentUser.fullName)):events).filter(isTransportCalendarEvent).map(event=>calendarEventWithCaseSlot(event,cases));
   const timedEvents=baseEvents.filter(event=>!calendarNeedsTime(event));
   const missingTimeEvents=baseEvents.filter(calendarNeedsTime);
   const canDeleteEvent=hasRole(currentUser,'operations')||hasRole(currentUser,'admin');
@@ -1036,7 +1044,7 @@ function Calendario({events,team,cases,transports,providers,warehouseEntries,sav
 function DriverCalendar({events,cases,transports,warehouseEntries,currentUser,saveEvent,completeCaseStep,csrfToken}){
   const [selected,setSelected]=useState(null);
   const [scope,setScope]=useState('all');
-  const sorted=[...events].filter(isTransportCalendarEvent).sort((a,b)=>(a.fecha+a.inicio).localeCompare(b.fecha+b.inicio));
+  const sorted=[...events].filter(isTransportCalendarEvent).map(event=>calendarEventWithCaseSlot(event,cases)).sort((a,b)=>(a.fecha+a.inicio).localeCompare(b.fecha+b.inicio));
   const visible=sorted.filter(event=>scope==='mine'?samePerson(event.asignado,currentUser.fullName):scope==='unassigned'?(!event.asignado||event.asignado==='Sin asignar'):true);
   const pending=visible.filter(event=>cases.find(item=>item.id===event.expediente)?.estado!=='Completado').length;
   const claim=event=>{const updated={...event,asignado:currentUser.fullName};saveEvent(updated);setSelected(updated)};
@@ -1044,7 +1052,7 @@ function DriverCalendar({events,cases,transports,warehouseEntries,currentUser,sa
 }
 
 function DriverJobList({events,cases,currentUser,select}){
-  const transportEvents=(events||[]).filter(isTransportCalendarEvent);
+  const transportEvents=(events||[]).filter(isTransportCalendarEvent).map(event=>calendarEventWithCaseSlot(event,cases));
   if(!transportEvents.length)return <Empty text="No hay transportes en esta vista."/>;
   return <div className="driver-job-list">{transportEvents.map(event=>{
     const related=cases.find(item=>item.id===event.expediente);
@@ -1066,7 +1074,7 @@ function DriverWeekView({events,cases,select}){
   const days=Array.from({length:7},(_,index)=>addDays(weekStart,index));
   const hours=Array.from({length:16},(_,index)=>index+6);
   const dayLabel=new Intl.DateTimeFormat('es-ES',{weekday:'short',day:'numeric',month:'short'});
-  const transportEvents=(events||[]).filter(isTransportCalendarEvent);
+  const transportEvents=(events||[]).filter(isTransportCalendarEvent).map(event=>calendarEventWithCaseSlot(event,cases));
   const timedEvents=transportEvents.filter(event=>!calendarNeedsTime(event));
   const missingTimeEvents=transportEvents.filter(calendarNeedsTime);
   return <><section className="calendar-toolbar driver-week-toolbar"><div className="calendar-nav"><button className="button tertiary" onClick={()=>setWeekStart(addDays(weekStart,-7))}>‹</button><button className="button tertiary" onClick={()=>setWeekStart(startOfWeek(new Date()))}>Hoy</button><button className="button tertiary" onClick={()=>setWeekStart(addDays(weekStart,7))}>›</button><h2>{days[0].toLocaleDateString('es-ES',{day:'numeric',month:'long'})} – {days[6].toLocaleDateString('es-ES',{day:'numeric',month:'long',year:'numeric'})}</h2></div></section><section className="calendar-shell panel driver-week"><div className="calendar-scroll"><div className="calendar-head"><span className="calendar-zone">GMT+2</span>{days.map(day=><div key={isoDate(day)} className={isoDate(day)===isoDate(new Date())?'today':''}><b>{dayLabel.format(day).replace('.','')}</b></div>)}</div><div className="calendar-unscheduled-row"><span>Falta horario</span>{days.map(day=><div key={isoDate(day)}>{missingTimeEvents.filter(event=>event.fecha===isoDate(day)).map(event=><button key={event.id} className={`calendar-unscheduled-card ${event.color||'gray'}`} onClick={()=>select(event)}><CalendarEventContent event={event} cases={cases}/></button>)}</div>)}</div><div className="calendar-body"><div className="calendar-hours">{hours.map(hour=><span key={hour}>{String(hour).padStart(2,'0')}:00</span>)}</div>{days.map(day=><div className="calendar-day" key={isoDate(day)}>{hours.map(hour=><i className="calendar-line" key={hour}/>)}{layoutOverlappingEvents(timedEvents.filter(event=>event.fecha===isoDate(day))).map(event=>{const related=cases.find(item=>item.id===event.expediente);return <article key={event.id} className={`calendar-event driver-week-event ${event.color} ${event._columns>1?'is-overlap':''}`} style={calendarEventStyle(event)}><button className="calendar-event-open" onClick={()=>select(withoutCalendarLayout(event))}><CalendarEventContent event={event} cases={cases}/>{related&&<small className="driver-week-progress">{operationProgress(related)}% completado</small>}</button></article>})}</div>)}</div></div></section></>;
@@ -1078,7 +1086,7 @@ function DriverCalendarV2({events,cases,transports,warehouseEntries,currentUser,
   const [selected,setSelected]=useState(null);
   const [scope,setScope]=useState('all');
   const [view,setView]=useState('hub');
-  const sorted=[...events].filter(isTransportCalendarEvent).sort((a,b)=>(String(a.fecha)+String(a.inicio)).localeCompare(String(b.fecha)+String(b.inicio)));
+  const sorted=[...events].filter(isTransportCalendarEvent).map(event=>calendarEventWithCaseSlot(event,cases)).sort((a,b)=>(String(a.fecha)+String(a.inicio)).localeCompare(String(b.fecha)+String(b.inicio)));
   const isCompleted=event=>operationFlow(cases.find(item=>item.id===event.expediente)||{}).billingReady;
   const pendingEvents=sorted.filter(event=>cases.some(item=>item.id===event.expediente)&&!isCompleted(event));
   const completedSeen=new Set();
