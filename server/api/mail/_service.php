@@ -2480,6 +2480,7 @@ function ensure_operational_schedule_coherence(PDO $pdo): array
         'createdTransports' => 0,
         'updatedTransportEvents' => 0,
         'updatedTransports' => 0,
+        'updatedVessels' => 0,
     ];
     $pdo->beginTransaction();
     try {
@@ -2489,8 +2490,61 @@ function ensure_operational_schedule_coherence(PDO $pdo): array
             return $summary;
         }
         $state = json_decode((string) $row['data'], true, 512, JSON_THROW_ON_ERROR);
-        foreach (['cases', 'transports', 'calendarEvents'] as $collection) {
+        foreach (['cases', 'transports', 'calendarEvents', 'vessels'] as $collection) {
             $state[$collection] = is_array($state[$collection] ?? null) ? $state[$collection] : [];
+        }
+        $vesselCatalog = [];
+        $upsertVessel = static function (array $record) use (&$vesselCatalog): void {
+            $name = mb_strtoupper(trim((string) ($record['name'] ?? $record['buque'] ?? $record['vessel'] ?? '')));
+            $key = port_call_token(port_call_vessel_name($name));
+            if ($key === '') return;
+            $existing = $vesselCatalog[$key] ?? [];
+            $imo = preg_replace('/\D/', '', (string) ($record['imo'] ?? ''));
+            $mmsi = preg_replace('/\D/', '', (string) ($record['mmsi'] ?? ''));
+            $vesselCatalog[$key] = [
+                'id' => (string) ($existing['id'] ?? ('VES-' . preg_replace('/[^A-Z0-9]+/', '-', $key))),
+                'name' => $name,
+                'imo' => strlen($imo) === 7 ? $imo : (string) ($existing['imo'] ?? ''),
+                'mmsi' => strlen($mmsi) === 9 ? $mmsi : (string) ($existing['mmsi'] ?? ''),
+                'lastPort' => trim((string) ($record['lastPort'] ?? $record['puerto'] ?? $existing['lastPort'] ?? '')),
+                'lastCase' => trim((string) ($record['lastCase'] ?? $record['id'] ?? $existing['lastCase'] ?? '')),
+                'updatedAt' => (string) ($record['updatedAt'] ?? $existing['updatedAt'] ?? date(DATE_ATOM)),
+            ];
+        };
+        foreach ($state['vessels'] as $vessel) {
+            if (is_array($vessel)) $upsertVessel($vessel);
+        }
+        foreach ($state['cases'] as $index => $case) {
+            if (!is_array($case)) continue;
+            $key = port_call_token(port_call_vessel_name((string) ($case['buque'] ?? '')));
+            if ($key === '') continue;
+            if (isset($vesselCatalog[$key])) {
+                $known = $vesselCatalog[$key];
+                $caseImo = preg_replace('/\D/', '', (string) ($case['imo'] ?? ''));
+                $caseMmsi = preg_replace('/\D/', '', (string) ($case['mmsi'] ?? ''));
+                if (strlen($caseImo) !== 7 && strlen((string) ($known['imo'] ?? '')) === 7) {
+                    $state['cases'][$index]['imo'] = (string) $known['imo'];
+                    $summary['updatedVessels']++;
+                }
+                if (strlen($caseMmsi) !== 9 && strlen((string) ($known['mmsi'] ?? '')) === 9) {
+                    $state['cases'][$index]['mmsi'] = (string) $known['mmsi'];
+                    $summary['updatedVessels']++;
+                }
+            }
+            $casePortCall = is_array($state['cases'][$index]['portCall'] ?? null) ? $state['cases'][$index]['portCall'] : [];
+            $upsertVessel([
+                'name' => (string) ($state['cases'][$index]['buque'] ?? ''),
+                'imo' => (string) ($state['cases'][$index]['imo'] ?? ''),
+                'mmsi' => (string) ($state['cases'][$index]['mmsi'] ?? ''),
+                'lastPort' => (string) ($state['cases'][$index]['puerto'] ?? ''),
+                'lastCase' => (string) ($state['cases'][$index]['id'] ?? ''),
+                'updatedAt' => (string) ($casePortCall['updatedAt'] ?? date(DATE_ATOM)),
+            ]);
+        }
+        $nextVessels = array_values($vesselCatalog);
+        if ($nextVessels !== $state['vessels']) {
+            $state['vessels'] = $nextVessels;
+            $summary['updatedVessels']++;
         }
         $beforeEvents = count($state['calendarEvents']);
         $state['calendarEvents'] = array_values(array_filter(
@@ -2515,7 +2569,7 @@ function ensure_operational_schedule_coherence(PDO $pdo): array
                 'receivedAt' => (string) ($mailRow['received_at'] ?? ''),
             ];
         }
-        $changed = $summary['removedNonTransportEvents'] > 0;
+        $changed = $summary['removedNonTransportEvents'] > 0 || $summary['updatedVessels'] > 0;
         foreach ($state['cases'] as $caseIndex => $case) {
             $caseRef = (string) ($case['id'] ?? '');
             if ($caseRef === '') continue;

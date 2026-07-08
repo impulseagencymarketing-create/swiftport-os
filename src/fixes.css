@@ -139,6 +139,38 @@
   color: #55616f;
 }
 
+.vessel-memory-hint {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 12px;
+  border: 1px solid #cfe0f4;
+  border-radius: 10px;
+  background: #f5f9ff;
+  color: #1f5f9f;
+}
+
+.vessel-memory-hint svg {
+  width: 18px;
+  flex: 0 0 auto;
+}
+
+.vessel-memory-hint b,
+.vessel-memory-hint small {
+  display: block;
+}
+
+.vessel-memory-hint b {
+  font-size: 10px;
+}
+
+.vessel-memory-hint small {
+  margin-top: 2px;
+  color: #6382a6;
+  font-size: 8px;
+  line-height: 1.45;
+}
+
 @media (max-width: 720px) {
   .calendar-clean-bar {
     align-items: flex-start;
