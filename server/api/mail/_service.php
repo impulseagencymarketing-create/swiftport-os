@@ -2573,6 +2573,7 @@ function ensure_operational_schedule_coherence(PDO $pdo): array
         foreach ($state['cases'] as $caseIndex => $case) {
             $caseRef = (string) ($case['id'] ?? '');
             if ($caseRef === '') continue;
+            if (!empty($case['autoTransportDisabled'])) continue;
             $mailHistory = $mailByCase[$caseRef] ?? [];
             $latestData = $mailHistory ? $mailHistory[count($mailHistory) - 1]['data'] : [];
             $explicitReceptionDate = '';
@@ -2590,19 +2591,36 @@ function ensure_operational_schedule_coherence(PDO $pdo): array
             );
             $portCall = is_array($case['portCall'] ?? null) ? $case['portCall'] : [];
             $etbDate = trim((string) ($portCall['etbDate'] ?? ''));
-            $etaDate = trim((string) ($portCall['etaDate'] ?? ''));
-            $caseEta = trim((string) ($case['eta'] ?? ''));
-            $arrivalDate = is_valid_service_date($etbDate) ? $etbDate : '';
-            if ($arrivalDate === '' && is_valid_service_date($etaDate)) $arrivalDate = $etaDate;
-            if ($arrivalDate === '' && is_valid_service_date($caseEta)) $arrivalDate = $caseEta;
-            if ($arrivalDate === '' && is_valid_service_date($explicitTransportDate)) $arrivalDate = $explicitTransportDate;
-            if ($arrivalDate === '') continue;
             $etbTime = trim((string) ($portCall['etbTime'] ?? ''));
-            $arrivalTimeConfirmed = is_valid_service_time($etbTime);
-            $arrivalTime = $arrivalTimeConfirmed ? $etbTime : '';
+            $etaDate = trim((string) ($portCall['etaDate'] ?? ''));
+            $etaTime = trim((string) ($portCall['etaTime'] ?? ''));
+            $caseEta = trim((string) ($case['eta'] ?? ''));
+            $arrivalDate = '';
+            $arrivalSource = '';
+            $arrivalSourceTime = '';
+            if (is_valid_service_date($etbDate)) {
+                $arrivalDate = $etbDate;
+                $arrivalSource = 'ETB';
+                $arrivalSourceTime = $etbTime;
+            } elseif (is_valid_service_date($etaDate)) {
+                $arrivalDate = $etaDate;
+                $arrivalSource = 'ETA';
+                $arrivalSourceTime = $etaTime;
+            } elseif (is_valid_service_date($caseEta)) {
+                $arrivalDate = $caseEta;
+                $arrivalSource = 'ETA';
+                $arrivalSourceTime = $etaTime;
+            } elseif (is_valid_service_date($explicitTransportDate)) {
+                $arrivalDate = $explicitTransportDate;
+                $arrivalSource = 'CORREO';
+                $arrivalSourceTime = $explicitTransportTime;
+            }
+            if ($arrivalDate === '') continue;
+            $arrivalTimeConfirmed = is_valid_service_time($arrivalSourceTime);
+            $arrivalTime = $arrivalTimeConfirmed ? $arrivalSourceTime : '';
             $arrivalEnd = $arrivalTimeConfirmed ? plus_one_hour($arrivalTime) : '';
             $scheduleStatus = $arrivalTimeConfirmed ? 'confirmed' : 'missing_time';
-            $scheduleNote = $arrivalTimeConfirmed ? '' : 'Falta hora ETB; pendiente de confirmar horario del buque';
+            $scheduleNote = $arrivalTimeConfirmed ? 'Programado por ' . $arrivalSource : 'Falta hora ' . $arrivalSource . '; pendiente de confirmar horario del buque';
 
             $receptionDate = $explicitReceptionDate;
             $receptionTime = $explicitReceptionTime;
