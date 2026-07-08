@@ -477,6 +477,13 @@ function is_valid_service_date(string $value): bool
     return $date instanceof DateTime && $date->format('Y-m-d') === $value;
 }
 
+function is_current_operational_year_date(string $value): bool
+{
+    if (!is_valid_service_date($value)) return false;
+    $year = (int) substr($value, 0, 4);
+    return $year >= (int) date('Y');
+}
+
 function is_valid_service_time(string $value): bool
 {
     $value = trim($value);
@@ -937,7 +944,7 @@ function service_required_data_complete(array $data): bool
     if ($receptionRequired) {
         $receptionDate = trim((string) ($data['reception']['date'] ?? ''));
         $receptionTime = trim((string) ($data['reception']['time'] ?? ''));
-        if ($receptionDate !== '' && !is_valid_service_date($receptionDate)) {
+        if ($receptionDate !== '' && !is_current_operational_year_date($receptionDate)) {
             return false;
         }
         if ($receptionTime !== '' && !is_valid_service_time($receptionTime)) {
@@ -946,7 +953,7 @@ function service_required_data_complete(array $data): bool
     }
     if ($transportRequired) {
         [$transportDate, $transportTime] = port_call_operational_slot($data, 'transport');
-        if ($transportDate !== '' && !is_valid_service_date($transportDate)) {
+        if ($transportDate !== '' && !is_current_operational_year_date($transportDate)) {
             return false;
         }
         if ($transportTime !== '' && !is_valid_service_time($transportTime)) {
@@ -957,13 +964,13 @@ function service_required_data_complete(array $data): bool
         if (!is_array($task)) return false;
         $date = trim((string) ($task['date'] ?? ''));
         $time = trim((string) ($task['time'] ?? ''));
-        if ($date !== '' && !is_valid_service_date($date)) return false;
+        if ($date !== '' && !is_current_operational_year_date($date)) return false;
         if ($time !== '' && !is_valid_service_time($time)) return false;
     }
     foreach (['eta', 'etb', 'etd'] as $field) {
         $date = trim((string) ($data[$field] ?? ''));
         $time = trim((string) ($data[$field . '_time'] ?? ''));
-        if ($date !== '' && !is_valid_service_date($date)) return false;
+        if ($date !== '' && !is_current_operational_year_date($date)) return false;
         if ($time !== '' && !is_valid_service_time($time)) return false;
     }
     return true;
@@ -2440,6 +2447,8 @@ function process_mailboxes(string $triggerType): array
                 // Si la correlación no es suficientemente segura, permanece para revisión humana.
             }
         }
+        $summary['removedInvalidCases'] += remove_invalid_auto_cases($pdo);
+        $summary['removedOldCases'] += remove_outdated_auto_cases($pdo);
         $finish = $pdo->prepare(
             "UPDATE app_mail_runs SET status = ?, scanned = ?, processed = ?, review_count = ?,
              ignored = ?, errors = ?, finished_at = NOW() WHERE id = ?"

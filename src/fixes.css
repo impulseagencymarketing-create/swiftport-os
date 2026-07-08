@@ -13,3 +13,13 @@
 .icon-button.danger:hover {
   background: #ffe4e6;
 }
+
+.button.danger {
+  background: #dc2743;
+  color: #fff;
+  box-shadow: 0 6px 14px rgba(220, 39, 67, .16);
+}
+
+.button.danger:hover {
+  background: #bd1933;
+}

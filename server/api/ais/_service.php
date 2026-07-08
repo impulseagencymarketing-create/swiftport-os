@@ -57,6 +57,28 @@ function ais_operational_status(?float $distance, float $speed, int $navigationS
     return 'En navegación';
 }
 
+function ais_estimated_arrival(?float $distance, float $speed, string $timestamp): array
+{
+    if ($distance === null || $distance <= 0 || $speed < 2) {
+        return ['at' => '', 'hours' => null, 'confidence' => 'sin calcular'];
+    }
+    $hours = $distance / $speed;
+    if ($hours <= 0 || $hours > 24 * 14) {
+        return ['at' => '', 'hours' => null, 'confidence' => 'sin calcular'];
+    }
+    try {
+        $base = $timestamp !== '' ? new DateTimeImmutable($timestamp) : new DateTimeImmutable('now', new DateTimeZone('UTC'));
+    } catch (Throwable) {
+        $base = new DateTimeImmutable('now', new DateTimeZone('UTC'));
+    }
+    $minutes = max(1, (int) round($hours * 60));
+    return [
+        'at' => $base->modify('+' . $minutes . ' minutes')->format(DATE_ATOM),
+        'hours' => round($hours, 1),
+        'confidence' => $hours <= 36 ? 'media' : 'baja',
+    ];
+}
+
 function ais_operational_cases(): array
 {
     $stateRow = db()->query('SELECT data FROM app_operational_state WHERE id = 1')->fetch();
@@ -123,6 +145,8 @@ function ais_save_positions(array $positions): int
                 $alertMessage = trim((string) ($cases[$caseRef]['buque'] ?? 'El buque')) . ': ' . mb_strtolower($status) . $distanceLabel . '.';
             }
         }
+        $sourceTimestamp = trim((string) ($position['timestamp'] ?? ''));
+        $estimatedArrival = ais_estimated_arrival($distance, $speed, $sourceTimestamp);
         $tracking = [
             'mmsi' => $mmsi,
             'latitude' => round((float) $latitude, 6),
@@ -134,10 +158,13 @@ function ais_save_positions(array $positions): int
             'distanceToPortNm' => $distance === null ? null : round($distance, 1),
             'status' => $status,
             'approachingPort' => $approaching,
+            'estimatedArrivalAt' => $estimatedArrival['at'],
+            'estimatedArrivalHours' => $estimatedArrival['hours'],
+            'estimatedArrivalConfidence' => $estimatedArrival['confidence'],
             'alertKey' => $alertKey,
             'alertMessage' => $alertMessage,
             'statusChangedAt' => $statusChangedAt,
-            'sourceTimestamp' => trim((string) ($position['timestamp'] ?? '')),
+            'sourceTimestamp' => $sourceTimestamp,
             'receivedAt' => gmdate(DATE_ATOM),
             'source' => 'AISStream · prueba gratuita',
         ];
