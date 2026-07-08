@@ -23,3 +23,52 @@
 .button.danger:hover {
   background: #bd1933;
 }
+
+.button.warning {
+  background: #fff4df;
+  color: #9a5b08;
+  border: 1px solid #f3d39a;
+}
+
+.button.warning:hover {
+  background: #ffe8bd;
+}
+
+.calendar-clean-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 14px;
+  margin: 0 0 12px;
+  padding: 12px 14px;
+  border: 1px solid #f0d49d;
+  border-radius: 12px;
+  background: #fffaf0;
+  color: #6f4b10;
+}
+
+.calendar-clean-bar b,
+.calendar-clean-bar small {
+  display: block;
+}
+
+.calendar-clean-bar b {
+  font-size: 12px;
+}
+
+.calendar-clean-bar small {
+  margin-top: 3px;
+  font-size: 10px;
+  color: #8a6a33;
+}
+
+@media (max-width: 720px) {
+  .calendar-clean-bar {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .calendar-clean-bar .button {
+    width: 100%;
+  }
+}
