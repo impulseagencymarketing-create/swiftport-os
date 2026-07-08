@@ -512,6 +512,9 @@ function App({auth,finance,onFinanceChange,onLogout}){
         try{localStorage.setItem(storageKey,JSON.stringify(current))}catch{}
       }
       setCases(result.data.cases.map(normalizeMerchandise));setTransports(result.data.transports);setWarehouseEntries(result.data.warehouseEntries);if(result.data.customs)setCustoms(result.data.customs);if(result.data.calendarEvents)setCalendarEvents(result.data.calendarEvents);if(Array.isArray(result.data.providers))setProviders(result.data.providers)
+      const coherence=result.scheduleCoherence||{};
+      const synced=Number(coherence.createdReceptionEvents||0)+Number(coherence.createdTransportEvents||0)+Number(coherence.createdTransports||0);
+      if(synced)notify(`${synced} trabajos sincronizados con calendario`);
     }
     setOperationalLoaded(true)
   }).catch(reason=>{setOperationalLoaded(true);notify(reason.message)});
@@ -1380,7 +1383,9 @@ function Correos({csrfToken,notify,openCase,reloadOperational,canRebuild}){
       const repaired=Number(summary.reconciliation?.mergedCases||0)+Number(summary.reconciliation?.correctedCases||0)+Number(summary.reconciliation?.removedEmptyCases||0);
       const removedOld=Number(summary.removedOldCases||0);
       const removedInvalid=Number(summary.removedInvalidCases||0);
-      notify(`${summary.scanned} correos nuevos · ${summary.processed} trabajos creados · ${summary.review} para revisar${removedInvalid?` · ${removedInvalid} inválidos retirados`:''}${removedOld?` · ${removedOld} antiguos retirados`:''}${repaired?` · ${repaired} duplicados corregidos`:''}`);
+      const coherence=summary.scheduleCoherence||{};
+      const synced=Number(coherence.createdReceptionEvents||0)+Number(coherence.createdTransportEvents||0)+Number(coherence.createdTransports||0);
+      notify(`${summary.scanned} correos nuevos · ${summary.processed} trabajos creados · ${summary.review} para revisar${synced?` · ${synced} trabajos al calendario`:''}${removedInvalid?` · ${removedInvalid} inválidos retirados`:''}${removedOld?` · ${removedOld} antiguos retirados`:''}${repaired?` · ${repaired} duplicados corregidos`:''}`);
       await Promise.all([load(filter),reloadOperational()]);
     }catch(reason){setError(reason.message)}
     finally{setProcessing(false)}

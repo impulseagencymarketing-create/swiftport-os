@@ -1,11 +1,13 @@
 <?php
 declare(strict_types=1);
 require __DIR__ . '/_bootstrap.php';
+require_once __DIR__ . '/mail/_service.php';
 
 ensure_schema();
 $user = require_auth();
 
 if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'GET') {
+    $scheduleCoherence = ensure_operational_schedule_coherence(db());
     $statement = db()->query('SELECT data, updated_at FROM app_operational_state WHERE id = 1');
     $row = $statement->fetch();
     $data = $row ? json_decode($row['data'], true, 512, JSON_THROW_ON_ERROR) : null;
@@ -23,6 +25,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'GET') {
     respond([
         'data' => $data,
         'updatedAt' => $row['updated_at'] ?? null,
+        'scheduleCoherence' => $scheduleCoherence,
     ]);
 }
 

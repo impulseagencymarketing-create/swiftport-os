@@ -2458,6 +2458,7 @@ function process_mailboxes(string $triggerType): array
             $summary['scanned'], $summary['processed'], $summary['review'],
             $summary['ignored'], $summary['errors'], $runId,
         ]);
+        $summary['scheduleCoherence'] = ensure_operational_schedule_coherence($pdo);
         return $summary;
     } finally {
         $pdo->query("SELECT RELEASE_LOCK('swiftport_mail_processor')");
@@ -2529,27 +2530,34 @@ function ensure_operational_schedule_coherence(PDO $pdo): array
             if ($caseRef === '') continue;
             $mailHistory = $mailByCase[$caseRef] ?? [];
             $latestData = $mailHistory ? $mailHistory[count($mailHistory) - 1]['data'] : [];
-            $portCall = is_array($case['portCall'] ?? null) ? $case['portCall'] : [];
-            $arrivalDate = trim((string) ($portCall['etaDate'] ?? ''));
-            if (!is_valid_service_date($arrivalDate)) $arrivalDate = trim((string) ($portCall['etbDate'] ?? ''));
-            if (!is_valid_service_date($arrivalDate)) $arrivalDate = trim((string) ($case['eta'] ?? ''));
-            $receivedDate = $mailHistory ? substr((string) $mailHistory[0]['receivedAt'], 0, 10) : '';
-            if (!is_valid_service_date($arrivalDate)) $arrivalDate = is_valid_service_date($receivedDate) ? $receivedDate : '';
-            if ($arrivalDate === '') continue;
-            $arrivalTime = trim((string) ($portCall['etaTime'] ?? ''));
-            if (!is_valid_service_time($arrivalTime)) $arrivalTime = trim((string) ($portCall['etbTime'] ?? ''));
-            $arrivalTimeConfirmed = is_valid_service_time($arrivalTime);
-            if (!$arrivalTimeConfirmed) $arrivalTime = '09:00';
-
-            $receptionDate = '';
-            $receptionTime = '';
+            $explicitReceptionDate = '';
+            $explicitReceptionTime = '';
             foreach ($mailHistory as $mailEntry) {
                 $mailData = $mailEntry['data'];
                 $candidateDate = trim((string) ($mailData['reception']['date'] ?? ''));
                 $candidateTime = trim((string) ($mailData['reception']['time'] ?? ''));
-                if (is_valid_service_date($candidateDate)) $receptionDate = $candidateDate;
-                if (is_valid_service_time($candidateTime)) $receptionTime = $candidateTime;
+                if (is_valid_service_date($candidateDate)) $explicitReceptionDate = $candidateDate;
+                if (is_valid_service_time($candidateTime)) $explicitReceptionTime = $candidateTime;
             }
+            [$explicitTransportDate, $explicitTransportTime] = port_call_operational_slot(
+                is_array($latestData) ? $latestData : [],
+                'transport'
+            );
+            $portCall = is_array($case['portCall'] ?? null) ? $case['portCall'] : [];
+            $arrivalDate = trim((string) ($portCall['etaDate'] ?? ''));
+            if (!is_valid_service_date($arrivalDate)) $arrivalDate = trim((string) ($portCall['etbDate'] ?? ''));
+            if (!is_valid_service_date($arrivalDate)) $arrivalDate = trim((string) ($case['eta'] ?? ''));
+            if (!is_valid_service_date($arrivalDate)) $arrivalDate = is_valid_service_date($explicitTransportDate) ? $explicitTransportDate : '';
+            if (!is_valid_service_date($arrivalDate)) $arrivalDate = is_valid_service_date($explicitReceptionDate) ? $explicitReceptionDate : '';
+            if ($arrivalDate === '') continue;
+            $arrivalTime = trim((string) ($portCall['etaTime'] ?? ''));
+            if (!is_valid_service_time($arrivalTime)) $arrivalTime = trim((string) ($portCall['etbTime'] ?? ''));
+            if (!is_valid_service_time($arrivalTime)) $arrivalTime = is_valid_service_time($explicitTransportTime) ? $explicitTransportTime : '';
+            $arrivalTimeConfirmed = is_valid_service_time($arrivalTime);
+            if (!$arrivalTimeConfirmed) $arrivalTime = '09:00';
+
+            $receptionDate = $explicitReceptionDate;
+            $receptionTime = $explicitReceptionTime;
             $receptionConfirmed = $receptionDate !== '' && $receptionTime !== '';
             if ($receptionDate === '') $receptionDate = $arrivalDate;
             if ($receptionTime === '') $receptionTime = schedule_time_minus($arrivalTime, 2);
