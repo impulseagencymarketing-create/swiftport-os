@@ -113,6 +113,30 @@
   padding: 6px 30px 6px 7px;
 }
 
+.calendar-event .calendar-vessel-name,
+.calendar-unscheduled-card .calendar-vessel-name {
+  margin-top: 2px;
+  font-size: 10px;
+  line-height: 1.08;
+  font-weight: 950;
+  letter-spacing: .01em;
+}
+
+.calendar-event .calendar-port-name,
+.calendar-unscheduled-card .calendar-port-name {
+  margin-top: 1px;
+  font-size: 10px;
+  line-height: 1.08;
+  font-weight: 950;
+  letter-spacing: .01em;
+  text-transform: uppercase;
+}
+
+.calendar-event.is-overlap .calendar-vessel-name,
+.calendar-event.is-overlap .calendar-port-name {
+  font-size: 8px;
+}
+
 .calendar-event-delete {
   position: absolute;
   top: 4px;
