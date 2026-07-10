@@ -747,12 +747,19 @@ function App({auth,finance,onFinanceChange,onLogout}){
   };
   const saveProvider=provider=>{const exists=providers.some(item=>item.id===provider.id);const next=exists?providers.map(item=>item.id===provider.id?provider:item):[...providers,{...provider,id:'PRV-'+String(providers.length+1).padStart(3,'0')}];setProviders(next);saveOperational(cases,transports,warehouseEntries,customs,calendarEvents,next);notify(exists?'Proveedor actualizado':'Proveedor añadido')};
   const saveVessel=vessel=>{
-    const clean={...vessel,name:String(vessel.name||'').trim().toUpperCase(),imo:cleanImo(vessel.imo),mmsi:cleanMmsi(vessel.mmsi),lastPort:String(vessel.lastPort||'').trim().toUpperCase(),updatedAt:new Date().toISOString()};
+    const clean={...vessel,name:String(vessel.name||'').trim().toUpperCase(),imo:cleanImo(vessel.imo),mmsi:cleanMmsi(vessel.mmsi),lastPort:String(vessel.lastPort||'').trim().toUpperCase(),photoUrl:String(vessel.photoUrl||'').trim(),updatedAt:new Date().toISOString()};
     if(!clean.name){notify('Indica el nombre del buque');return}
     const exists=vessels.some(item=>sameVessel(vesselNameOf(item),clean.name));
     const nextVessels=exists?vessels.map(item=>sameVessel(vesselNameOf(item),clean.name)?{...item,...clean,id:item.id||clean.id||clean.name}:item):[{...clean,id:clean.id||clean.name},...vessels];
     const nextCases=cases.map(item=>sameVessel(item.buque,clean.name)?hydrateCaseWithVessel(item,nextVessels):item);
     setVessels(nextVessels);setCases(nextCases);saveOperational(nextCases,transports,warehouseEntries,customs,calendarEvents,providers,nextVessels);notify(exists?'Ficha de buque actualizada':'Ficha de buque creada');
+  };
+  const deleteVessel=vessel=>{
+    const name=vesselNameOf(vessel);
+    if(!name)return;
+    if(!window.confirm(`¿Borrar la ficha del buque ${name}?\n\nNo se borrarán expedientes, almacén ni transportes.`))return;
+    const nextVessels=vessels.filter(item=>!sameVessel(vesselNameOf(item),name));
+    setVessels(nextVessels);saveOperational(cases,transports,warehouseEntries,customs,calendarEvents,providers,nextVessels);notify('Ficha de buque borrada');
   };
   const completeCaseStep=(id,stepKey,note='',evidence=null)=>{
     const target=cases.find(item=>item.id===id);
@@ -896,7 +903,7 @@ function App({auth,finance,onFinanceChange,onLogout}){
         {tab==='calendario'&&<>{!driverOnly&&<DriverLegend team={operationalTeam}/>}<Calendario events={calendarEvents} team={operationalTeam} cases={cases} transports={transports} providers={providers} warehouseEntries={warehouseEntries} saveEvent={saveCalendarEvent} deleteEvent={deleteCalendarService} completeCaseStep={completeCaseStep} undoCaseStep={undoCaseStep} openCase={openCase} currentUser={visibleUser} csrfToken={auth.csrfToken} reloadOperational={loadOperational} notify={notify}/></>}
         {tab==='expedientes'&&<Expedientes cases={casesWithFinance} selected={selected} select={setSelectedId} search={search} setSearch={setSearch} completeCaseStep={completeCaseStep} notify={notify} showFinance={showFinance} updateCase={updateCase} deleteCase={deleteCase} clientOptions={clientOptions} warehouseEntries={warehouseEntries} transports={transports} calendarEvents={calendarEvents} team={operationalTeam} providers={providers} vessels={vessels} saveEvent={saveCalendarEvent} csrfToken={auth.csrfToken} reloadOperational={loadOperational} currentUser={visibleUser}/>}
         {tab==='almacen'&&<Almacen items={warehouseEntries} cases={casesWithFinance} openCase={openCase} registerEntry={registerWarehouseEntry} updateEntry={updateWarehouseEntry} showFinance={showFinance} storageTotal={finance.warehouseStorageTotal} csrfToken={auth.csrfToken}/>}
-        {tab==='buques'&&<Buques vessels={vessels} cases={casesWithFinance} warehouseEntries={warehouseEntries} saveVessel={saveVessel} openCase={openCase}/>}
+        {tab==='buques'&&<Buques vessels={vessels} cases={casesWithFinance} warehouseEntries={warehouseEntries} saveVessel={saveVessel} deleteVessel={deleteVessel} openCase={openCase}/>}
         {tab==='transportes'&&<Transportes items={transports} update={updateTransport} openCase={openCase} team={operationalTeam} providers={providers} saveProvider={saveProvider}/>}
         {tab==='aduanas'&&<Aduanas items={customs} update={updateCustom} openCase={openCase} notify={notify}/>}
         {tab==='correos'&&<Correos csrfToken={auth.csrfToken} notify={notify} openCase={openCase} reloadOperational={loadOperational} canRebuild={hasRole(effectiveRoles,'admin')}/>}
@@ -1032,10 +1039,12 @@ const layoutOverlappingEvents=events=>{
 };
 const calendarEventStyle=event=>{
   const start=calendarMinutes(event.inicio),end=Math.max(start+30,calendarMinutes(event.fin)||start+60);
+  const visibleStart=Math.max(360,Math.min(1320,start));
+  const visibleEnd=Math.max(visibleStart+30,Math.min(1320,end));
   const columns=event._columns||1,lane=event._lane||0;
   return {
-    top:(start-360)/60*64,
-    height:Math.max(56,(end-start)/60*64),
+    top:(visibleStart-360)/60*64,
+    height:Math.max(56,(visibleEnd-visibleStart)/60*64),
     left:`calc(4px + (100% - 8px) * ${lane}/${columns})`,
     width:`calc((100% - 8px) / ${columns} - ${columns>1?2:0}px)`,
     right:'auto'
@@ -1485,17 +1494,19 @@ function Almacen({items,cases,openCase,registerEntry,updateEntry,showFinance,sto
 }
 function Summary({icon:Icon,label,value}){return <article><span><Icon/></span><div><small>{label}</small><b>{value}</b></div></article>}
 
-function Buques({vessels,cases,warehouseEntries,saveVessel,openCase}){
+const vesselPhotoUrl=vessel=>String(vessel.photoUrl||vessel.image||'').trim();
+const vesselInitials=name=>String(name||'BUQUE').split(/\s+/).filter(Boolean).slice(0,2).map(word=>word[0]).join('');
+function Buques({vessels,cases,warehouseEntries,saveVessel,deleteVessel,openCase}){
   const [query,setQuery]=useState('');
   const [editing,setEditing]=useState(null);
   const rows=[...vessels].sort((a,b)=>vesselNameOf(a).localeCompare(vesselNameOf(b))).filter(vessel=>vesselNameOf(vessel).toLowerCase().includes(query.toLowerCase()));
-  return <><section className="panel vessels-panel"><SectionHeader title="Fichas de buque" subtitle="Guarda IMO, MMSI y último puerto para reutilizarlo en futuras escalas" action={<button className="button secondary" onClick={()=>setEditing({name:'',imo:'',mmsi:'',lastPort:''})}><Plus/> Nuevo buque</button>}/><label className="search-box standalone"><Search/><input value={query} onChange={event=>setQuery(event.target.value)} placeholder="Buscar buque…"/></label><div className="vessel-grid">{rows.map(vessel=>{const name=vesselNameOf(vessel);const relatedCases=cases.filter(item=>sameVessel(item.buque,name));const activeStock=warehouseEntries.filter(entry=>activeWarehouseEntry(entry)&&sameVessel(entry.buque,name));const lastCase=relatedCases[0];return <article className="vessel-card" key={vessel.id||name}><header><span><Ship/></span><div><h3>{name}</h3><small>{vessel.lastPort||lastCase?.puerto||'PUERTO PENDIENTE'}</small></div><button className="icon-button compact" onClick={()=>setEditing(vessel)}><PencilLine/></button></header><div className="vessel-data"><span><small>IMO</small><b>{vessel.imo||'Pendiente'}</b></span><span><small>MMSI</small><b>{vessel.mmsi||'Pendiente'}</b></span><span><small>Expedientes</small><b>{relatedCases.length}</b></span><span><small>Stock</small><b>{activeStock.reduce((sum,item)=>sum+Number(item.bultos||0),0)} bultos</b></span></div>{lastCase&&<button className="button tertiary full" onClick={()=>openCase(lastCase.id)}>Abrir última escala {lastCase.id}</button>}</article>})}</div>{!rows.length&&<Empty text="No hay fichas de buque con ese nombre."/>}</section>{editing&&<VesselModal item={editing} close={()=>setEditing(null)} submit={item=>{saveVessel(item);setEditing(null)}}/>}</>;
+  return <><section className="panel vessels-panel"><SectionHeader title="Fichas de buque" subtitle="Guarda el buque una sola vez: foto, IMO, MMSI, puerto y última escala." action={<button className="button secondary" onClick={()=>setEditing({name:'',imo:'',mmsi:'',lastPort:'',photoUrl:''})}><Plus/> Nuevo buque</button>}/><label className="search-box standalone vessel-search"><Search/><input value={query} onChange={event=>setQuery(event.target.value)} placeholder="Buscar buque…"/></label><div className="vessel-list">{rows.map(vessel=>{const name=vesselNameOf(vessel);const photo=vesselPhotoUrl(vessel);const relatedCases=cases.filter(item=>sameVessel(item.buque,name));const activeStock=warehouseEntries.filter(entry=>activeWarehouseEntry(entry)&&sameVessel(entry.buque,name));const lastCase=relatedCases[0];const stock=activeStock.reduce((sum,item)=>sum+Number(item.bultos||0),0);return <article className="vessel-row" key={vessel.id||name}><div className="vessel-photo">{photo?<img src={photo} alt={name}/>:<span><Ship/><b>{vesselInitials(name)}</b></span>}</div><div className="vessel-main"><h3>{name}</h3><small>{vessel.lastPort||lastCase?.puerto||'PUERTO PENDIENTE'}</small></div><div className="vessel-metrics"><span><small>IMO</small><b>{vessel.imo||'Pendiente'}</b></span><span><small>MMSI</small><b>{vessel.mmsi||'Pendiente'}</b></span><span><small>Expedientes</small><b>{relatedCases.length}</b></span><span><small>Stock</small><b>{stock} bultos</b></span></div><div className="vessel-actions">{lastCase&&<button className="button tertiary" onClick={()=>openCase(lastCase.id)}>Abrir {lastCase.id}</button>}<button className="icon-button compact" title="Editar buque" onClick={()=>setEditing(vessel)}><PencilLine/></button><button className="icon-button compact danger" title="Borrar buque" onClick={()=>deleteVessel(vessel)}><Trash2/></button></div></article>})}</div>{!rows.length&&<Empty text="No hay fichas de buque con ese nombre."/>}</section>{editing&&<VesselModal item={editing} close={()=>setEditing(null)} submit={item=>{saveVessel(item);setEditing(null)}}/>}</>;
 }
 
 function VesselModal({item,close,submit}){
-  const [form,setForm]=useState({id:item.id||item.name||'',name:vesselNameOf(item),imo:item.imo||'',mmsi:item.mmsi||'',lastPort:item.lastPort||''});
+  const [form,setForm]=useState({id:item.id||item.name||'',name:vesselNameOf(item),imo:item.imo||'',mmsi:item.mmsi||'',lastPort:item.lastPort||'',photoUrl:item.photoUrl||''});
   const update=event=>setForm({...form,[event.target.name]:event.target.value});
-  return <div className="modal-backdrop" onMouseDown={event=>{if(event.target===event.currentTarget)close()}}><section className="modal" role="dialog" aria-modal="true"><div className="modal-head"><div><span className="overline">Ficha de buque</span><h2>{item.name?'Editar buque':'Nuevo buque'}</h2><p>Esta información se reutiliza al crear expedientes y para seguimiento AIS.</p></div><button className="icon-button" onClick={close}><X/></button></div><form onSubmit={event=>{event.preventDefault();submit(form)}}><label className="field wide"><span>Nombre del buque *</span><input name="name" value={form.name} onChange={update} required autoFocus/></label><label className="field"><span>IMO</span><input name="imo" inputMode="numeric" maxLength="7" value={form.imo} onChange={update} placeholder="7 dígitos"/></label><label className="field"><span>MMSI</span><input name="mmsi" inputMode="numeric" maxLength="9" value={form.mmsi} onChange={update} placeholder="9 dígitos"/></label><label className="field wide"><span>Puerto habitual / último puerto</span><input name="lastPort" value={form.lastPort} onChange={update} placeholder="Ej. SAGUNTO"/></label><div className="modal-actions wide"><button type="button" className="button tertiary" onClick={close}>Cancelar</button><button className="button primary"><Save/> Guardar ficha</button></div></form></section></div>;
+  return <div className="modal-backdrop" onMouseDown={event=>{if(event.target===event.currentTarget)close()}}><section className="modal vessel-modal" role="dialog" aria-modal="true"><div className="modal-head"><div><span className="overline">Ficha de buque</span><h2>{item.name?'Editar buque':'Nuevo buque'}</h2><p>Esta información se reutiliza al crear expedientes y para seguimiento AIS.</p></div><button className="icon-button" onClick={close}><X/></button></div><form onSubmit={event=>{event.preventDefault();submit(form)}}><label className="field wide"><span>Nombre del buque *</span><input name="name" value={form.name} onChange={update} required autoFocus/></label><label className="field"><span>IMO</span><input name="imo" inputMode="numeric" maxLength="7" value={form.imo} onChange={update} placeholder="7 dígitos"/></label><label className="field"><span>MMSI</span><input name="mmsi" inputMode="numeric" maxLength="9" value={form.mmsi} onChange={update} placeholder="9 dígitos"/></label><label className="field wide"><span>Puerto habitual / último puerto</span><input name="lastPort" value={form.lastPort} onChange={update} placeholder="Ej. SAGUNTO"/></label><label className="field wide"><span>Foto del buque (URL opcional)</span><input name="photoUrl" value={form.photoUrl} onChange={update} placeholder="https://..."/></label><div className="modal-actions wide"><button type="button" className="button tertiary" onClick={close}>Cancelar</button><button className="button primary"><Save/> Guardar ficha</button></div></form></section></div>;
 }
 
 function Transportes({items,update,openCase,team,providers,saveProvider}){

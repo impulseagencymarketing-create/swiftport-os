@@ -89,6 +89,77 @@
 .calendar-event-modal{width:min(960px,calc(100vw - 36px));overflow-x:hidden}.calendar-event-modal form{grid-template-columns:repeat(2,minmax(0,1fr));align-items:start}.calendar-event-modal form>*{min-width:0;max-width:100%}.calendar-event-modal form>.wide{grid-column:1/-1}.calendar-event-modal .driver-manifest{width:100%;overflow:hidden}.calendar-event-modal .driver-manifest b,.calendar-event-modal .driver-manifest small,.calendar-event-modal .driver-manifest p span{overflow-wrap:anywhere}.calendar-event-modal .calendar-case-link{width:max-content}.calendar-event-modal .modal-actions{position:sticky;bottom:-24px;z-index:2;margin:0 -24px -24px;padding:16px 24px;background:#fff;border-top:1px solid var(--line)}
 @media(max-width:720px){.calendar-event-modal{width:100%;max-width:none}.calendar-event-modal form{grid-template-columns:1fr}.calendar-event-modal form>.wide{grid-column:auto}.calendar-event-modal .modal-actions{bottom:-24px;margin-inline:-18px;padding-inline:18px}.calendar-event-modal .calendar-case-link{width:100%}}
 
+/* Pulido visual operativo: alta manual, fichas de buque y calendario */
+.new-case-modal{width:min(980px,calc(100vw - 32px));max-height:90vh;overflow:hidden;border-radius:18px}
+.new-case-modal .modal-head{padding:22px 26px 16px}
+.new-case-modal form{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px 18px;max-height:calc(90vh - 118px);overflow-y:auto;overflow-x:hidden;padding:18px 26px 0}
+.new-case-modal form>*{min-width:0}
+.new-case-modal .wide{grid-column:1/-1}
+.new-case-modal .field input,.new-case-modal .field select{width:100%;min-width:0}
+.new-case-modal .case-service-fieldset{min-width:0;background:#fbfdff}
+.new-case-modal .case-service-fields{grid-template-columns:repeat(3,minmax(0,1fr))}
+.new-case-modal .modal-actions{position:sticky;bottom:0;z-index:3;margin:8px -26px 0;padding:16px 26px;background:#fff;border-top:1px solid var(--line);box-shadow:0 -10px 22px rgba(15,43,74,.06)}
+.vessels-panel{padding-bottom:18px}
+.vessel-search{max-width:430px;margin:0 20px 18px}
+.vessel-list{display:grid;gap:10px;padding:0 20px 20px}
+.vessel-row{display:grid;grid-template-columns:96px minmax(190px,1.1fr) minmax(360px,1.7fr) auto;align-items:center;gap:16px;padding:12px;border:1px solid var(--line);border-radius:16px;background:linear-gradient(180deg,#fff,#fbfdff);box-shadow:0 10px 28px rgba(15,43,74,.045)}
+.vessel-photo{width:96px;height:66px;border-radius:13px;overflow:hidden;background:linear-gradient(135deg,#eaf3ff,#f6faff);display:grid;place-items:center;color:var(--blue)}
+.vessel-photo img{width:100%;height:100%;object-fit:cover;display:block}
+.vessel-photo span{display:grid;place-items:center;gap:3px;font-weight:900}
+.vessel-photo svg{width:22px}
+.vessel-photo b{font-size:10px;letter-spacing:.08em}
+.vessel-main{min-width:0}
+.vessel-main h3{margin:0;font:900 19px/1.1 Manrope,sans-serif;color:var(--ink);letter-spacing:-.02em}
+.vessel-main small{display:block;margin-top:6px;color:var(--muted);font-size:9px;text-transform:uppercase;font-weight:850}
+.vessel-metrics{display:grid;grid-template-columns:repeat(4,minmax(88px,1fr));gap:8px}
+.vessel-metrics span{display:block;min-width:0;padding:10px;border-radius:12px;background:#f5f8fc}
+.vessel-metrics small,.vessel-metrics b{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.vessel-metrics small{color:#6d8196;font-size:7px;text-transform:uppercase;font-weight:900;letter-spacing:.06em}
+.vessel-metrics b{margin-top:4px;font-size:11px;color:var(--ink)}
+.vessel-actions{display:flex;align-items:center;justify-content:flex-end;gap:7px}
+.icon-button.danger{border-color:#ffd2d8;background:#fff2f4;color:#dd2f4a}
+.icon-button.danger:hover{background:#ffe7eb}
+.vessel-modal{width:min(620px,calc(100vw - 32px));overflow:hidden}
+.vessel-modal form{grid-template-columns:repeat(2,minmax(0,1fr))}
+.vessel-modal form>*{min-width:0}
+.calendar-scroll{max-height:calc(100vh - 175px)}
+.calendar-unscheduled-row{display:grid;grid-template-columns:64px repeat(7,minmax(142px,1fr));min-width:1058px;align-items:stretch;background:#fff8e8;border-bottom:1px solid #f1d7a2}
+.calendar-unscheduled-row>span{position:sticky;left:0;z-index:6;display:grid;place-items:center;padding:8px 6px;border-right:1px solid #f1d7a2;background:#fff4d8;color:#9b6108;text-transform:uppercase;font-size:8px;font-weight:950;line-height:1.2;text-align:center}
+.calendar-unscheduled-row>div{display:grid;align-content:start;gap:6px;min-height:82px;padding:7px;border-left:1px solid #f1d7a2}
+.calendar-unscheduled-card{position:relative;display:block;width:100%;min-height:58px;border:1px solid #d6e0ea;border-left:4px solid #8b96a3;border-radius:8px;background:#f4f6f8;color:#314255;box-shadow:0 4px 10px rgba(25,45,70,.08);overflow:hidden}
+.calendar-unscheduled-card.blue{border-left-color:#4285f4;background:#edf5ff;color:#174f9e}
+.calendar-unscheduled-card.orange{border-left-color:#f39a2e;background:#fff1dc;color:#99590c}
+.calendar-unscheduled-card .calendar-event-open{padding:7px 8px}
+.calendar-unscheduled-card time{font-size:8px;margin:0 0 3px;color:#9b6108}
+.calendar-unscheduled-card .calendar-vessel-name{font-size:10px;line-height:1.1}
+.calendar-unscheduled-card .calendar-port-name{font-size:10px;line-height:1.1}
+.calendar-unscheduled-card .calendar-service,.calendar-unscheduled-card .calendar-provisional{font-size:7px}
+.calendar-unscheduled-card .calendar-port-call{display:none}
+.calendar-event-delete{position:absolute;right:4px;top:4px;z-index:5;display:grid;place-items:center;width:18px;height:18px;border:1px solid rgba(221,47,74,.25);border-radius:6px;background:rgba(255,255,255,.88);color:#dd2f4a;opacity:0;transition:opacity .15s}
+.calendar-event:hover .calendar-event-delete,.calendar-unscheduled-card:hover .calendar-event-delete{opacity:1}
+.calendar-event-delete svg{width:11px}
+.calendar-event{max-height:100%;contain:layout paint}
+.calendar-event-open{min-width:0}
+.calendar-event .calendar-vessel-name,.calendar-event .calendar-port-name{font-size:10px;line-height:1.1}
+.calendar-event .calendar-port-name{margin-top:1px;text-transform:uppercase}
+.calendar-event.is-overlap .calendar-port-name{font-size:7px}
+@media(max-width:900px){
+  .vessel-row{grid-template-columns:78px minmax(0,1fr);align-items:start}
+  .vessel-photo{width:78px;height:58px}
+  .vessel-metrics,.vessel-actions{grid-column:1/-1}
+  .vessel-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .vessel-actions{justify-content:flex-start}
+}
+@media(max-width:720px){
+  .new-case-modal{width:100%;max-height:92vh;border-radius:16px 16px 0 0}
+  .new-case-modal form{grid-template-columns:1fr;padding-inline:18px;max-height:calc(92vh - 112px)}
+  .new-case-modal .case-service-fields{grid-template-columns:1fr}
+  .new-case-modal .modal-actions{margin-inline:-18px;padding-inline:18px}
+  .vessel-search{margin-inline:16px}
+  .vessel-list{padding-inline:16px}
+  .calendar-unscheduled-row{grid-template-columns:54px repeat(7,150px);min-width:1104px}
+}
+
 .button.device-alert-enabled{border:1px solid #9fd9c2;background:#e8f7f0;color:#137354}.button.device-alert-enabled svg{fill:#137354}.ais-actions>p{flex:1;min-width:180px}
 .warehouse-transport-review{display:grid;gap:10px;padding:13px;border:1px solid #b9d5f7;border-radius:12px;background:#f4f9ff}.warehouse-review-head{display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:10px}.warehouse-review-head>svg{width:22px;color:var(--blue)}.warehouse-review-head b,.warehouse-review-head small{display:block}.warehouse-review-head b{font-size:10px;text-transform:uppercase;color:var(--ink)}.warehouse-review-head small{margin-top:3px;font-size:8px;line-height:1.45;color:#5f7792}.warehouse-review-head strong{padding:5px 8px;border-radius:999px;background:#e5f1ff;color:#145ebc;font-size:8px;text-transform:uppercase}.warehouse-review-list{display:grid;gap:7px;max-height:190px;overflow:auto}.warehouse-review-list article{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,1.4fr) minmax(0,.8fr);gap:9px;align-items:center;padding:9px;border:1px solid #d8e6f4;border-radius:9px;background:#fff}.warehouse-review-list b,.warehouse-review-list small,.warehouse-review-list em{display:block}.warehouse-review-list b{font-size:9px}.warehouse-review-list small{font-size:7px;color:#6b8198}.warehouse-review-list em{font-size:8px;font-style:normal;font-weight:800;color:#17324d}.warehouse-transport-review>p{display:flex;align-items:center;gap:7px;margin:0;padding:9px;border-radius:8px;background:#fff8e8;color:#8a6425;font-size:8px}.warehouse-transport-review>p svg{width:15px}.warehouse-review-check{display:flex;align-items:flex-start;gap:9px;padding:10px;border-radius:9px;background:#eaf7ef;color:#176044;font-size:9px;font-weight:800;cursor:pointer}.warehouse-review-check input{margin-top:2px;accent-color:var(--success)}
 @media(max-width:760px){.warehouse-review-head{grid-template-columns:auto 1fr}.warehouse-review-head strong{grid-column:2}.warehouse-review-list article{grid-template-columns:1fr}.warehouse-review-list{max-height:none}}
