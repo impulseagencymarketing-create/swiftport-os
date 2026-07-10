@@ -979,6 +979,27 @@ const calendarEventWithCaseSlot=(event,cases)=>{
   const hasStart=/^\d{2}:\d{2}$/.test(String(start||''));
   return {...event,fecha:slot.date,inicio:start,fin:hasStart?plusHourClient(start):(event?.fin||''),scheduleStatus:hasStart?'confirmed':'missing_time',scheduleNote:hasStart?`Programado por ${slot.source}`:`Falta hora ${slot.source||'ETB/ETA'}; pendiente de confirmar horario del buque`};
 };
+const localDay=date=>{const value=new Date(date);value.setHours(0,0,0,0);return value};
+const driverTimeLabel=event=>calendarNeedsTime(event)?'Falta hora':event.inicio;
+const driverEventTimestamp=event=>{
+  if(!event?.fecha)return Number.MAX_SAFE_INTEGER;
+  const start=calendarHasValidStart(event)?event.inicio:'23:59';
+  const value=new Date(`${event.fecha}T${start}:00`).getTime();
+  return Number.isFinite(value)?value:Number.MAX_SAFE_INTEGER;
+};
+const driverEventSort=(first,second)=>driverEventTimestamp(first)-driverEventTimestamp(second)||String(first?.titulo||'').localeCompare(String(second?.titulo||''));
+const driverDueInfo=event=>{
+  if(!event?.fecha)return {label:'Sin fecha',detail:'Revisar expediente',tone:'missing'};
+  const today=localDay(new Date());
+  const target=localDay(`${event.fecha}T12:00:00`);
+  const days=Math.round((target-today)/86400000);
+  const time=driverTimeLabel(event);
+  if(days<0)return {label:'Atrasado',detail:`Hace ${Math.abs(days)} día${Math.abs(days)===1?'':'s'} · ${time}`,tone:'late'};
+  if(days===0)return {label:'Hoy',detail:time,tone:'today'};
+  if(days===1)return {label:'Mañana',detail:time,tone:'soon'};
+  if(days<=6)return {label:`En ${days} días`,detail:time,tone:'soon'};
+  return {label:new Date(event.fecha+'T12:00:00').toLocaleDateString('es-ES',{day:'2-digit',month:'short'}).replace('.',''),detail:time,tone:'later'};
+};
 function DriverLegend({team}){return <div className="driver-legend"><span><i className="gray"/>Sin asignar</span>{team.map(member=><span key={member.id}><i className={driverTone(member.fullName,team)}/>{member.fullName}</span>)}</div>}
 function CalendarEventContent({event,cases}){const related=cases.find(item=>item.id===event.expediente);const schedule=related?portCallSchedule(related):null;const missingTime=calendarNeedsTime(event);const port=related?.puerto||event.puerto||'';return <><time>{missingTime?'FALTA HORARIO':`${event.inicio}${event.fin?`–${event.fin}`:''}`}</time><b className="calendar-vessel-name">{related?.buque||event.titulo||'Buque sin indicar'}</b>{port&&<b className="calendar-port-name">{port}</b>}<small className="calendar-service">{event.tipoServicio||'Transporte'}</small>{missingTime&&<small className="calendar-provisional">PENDIENTE ETB / HORA</small>}<small>{event.asignado||'Sin asignar'}</small>{schedule&&<small className="calendar-port-call">LLEGADA · ETA {schedule.eta}</small>}</>}
 const calendarMinutes=value=>{const [hour,minute]=String(value||'').split(':').map(Number);return Number.isFinite(hour)?hour*60+(minute||0):0};
@@ -1052,7 +1073,7 @@ function DriverCalendar({events,cases,transports,warehouseEntries,currentUser,sa
 }
 
 function DriverJobList({events,cases,currentUser,select}){
-  const transportEvents=(events||[]).filter(isTransportCalendarEvent).map(event=>calendarEventWithCaseSlot(event,cases));
+  const transportEvents=(events||[]).filter(isTransportCalendarEvent).map(event=>calendarEventWithCaseSlot(event,cases)).sort(driverEventSort);
   if(!transportEvents.length)return <Empty text="No hay transportes en esta vista."/>;
   return <div className="driver-job-list">{transportEvents.map(event=>{
     const related=cases.find(item=>item.id===event.expediente);
@@ -1061,9 +1082,11 @@ function DriverJobList({events,cases,currentUser,select}){
     const next=nextOperationStep(related);
     const mine=samePerson(event.asignado,currentUser.fullName);
     const schedule=portCallSchedule(related);
+    const due=driverDueInfo(event);
+    const assignment=mine?'TU TRABAJO':event.asignado&&event.asignado!=='Sin asignar'?`ASIGNADO A ${event.asignado.toUpperCase()}`:'SIN ASIGNAR';
     return <button key={event.id} className={(completed?'completed ':'')+(mine?'mine':'')} onClick={()=>select(event)}>
-      <time><b>{calendarNeedsTime(event)?'Falta hora':event.inicio}</b><small>{event.fecha?new Date(event.fecha+'T12:00:00').toLocaleDateString('es-ES',{weekday:'short',day:'2-digit',month:'short'}):'Sin fecha'}</small></time>
-      <span className="driver-job-main"><b>{related.buque||event.titulo}</b><small>{event.tipoServicio} · {related.puerto||'Puerto pendiente'}</small><small className="driver-port-call">LLEGADA DEL BUQUE · ETA {schedule.eta}</small><em>{completed?'Trabajo terminado':next?.title||'Abrir trabajo'}</em><i>{mine?'TU TRABAJO':event.asignado&&event.asignado!=='Sin asignar'?`ASIGNADO A ${event.asignado.toUpperCase()}`:'SIN ASIGNAR'}</i></span>
+      <time><b>{driverTimeLabel(event)}</b><small>{event.fecha?new Date(event.fecha+'T12:00:00').toLocaleDateString('es-ES',{weekday:'short',day:'2-digit',month:'short'}):'Sin fecha'}</small></time>
+      <span className="driver-job-main"><span className="driver-job-title-row"><b>{related.buque||event.titulo}</b><span className={`driver-due-badge ${due.tone}`}><strong>{due.label}</strong><small>{due.detail}</small></span></span><small>{related.puerto||'Puerto pendiente'} · {event.tipoServicio||'Transporte a buque'}</small><small className="driver-port-call">BUQUE: {schedule.etb!=='POR CONFIRMAR'?`ETB ${schedule.etb}`:`ETA ${schedule.eta}`}</small><em>{completed?'Trabajo terminado':next?.title||'Abrir trabajo'}</em><i>{assignment}</i></span>
       <span className={'driver-job-status '+(completed?'done':'')}><CheckCircle2/><small>{completed?'Completo':`${operationProgress(related)}%`}</small></span><ChevronRight/>
     </button>;
   })}</div>;
@@ -1086,7 +1109,7 @@ function DriverCalendarV2({events,cases,transports,warehouseEntries,currentUser,
   const [selected,setSelected]=useState(null);
   const [scope,setScope]=useState('all');
   const [view,setView]=useState('hub');
-  const sorted=[...events].filter(isTransportCalendarEvent).map(event=>calendarEventWithCaseSlot(event,cases)).sort((a,b)=>(String(a.fecha)+String(a.inicio)).localeCompare(String(b.fecha)+String(b.inicio)));
+  const sorted=[...events].filter(isTransportCalendarEvent).map(event=>calendarEventWithCaseSlot(event,cases)).sort(driverEventSort);
   const isCompleted=event=>operationFlow(cases.find(item=>item.id===event.expediente)||{}).billingReady;
   const pendingEvents=sorted.filter(event=>cases.some(item=>item.id===event.expediente)&&!isCompleted(event));
   const completedSeen=new Set();
