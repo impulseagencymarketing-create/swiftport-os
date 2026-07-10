@@ -157,7 +157,31 @@
   .new-case-modal .modal-actions{margin-inline:-18px;padding-inline:18px}
   .vessel-search{margin-inline:16px}
   .vessel-list{padding-inline:16px}
-  .calendar-unscheduled-row{grid-template-columns:54px repeat(7,150px);min-width:1104px}
+.calendar-unscheduled-row{grid-template-columns:54px repeat(7,150px);min-width:1104px}
+}
+
+/* Buques como base de datos: listado compacto para elegir en expedientes */
+.vessels-panel .section-head{align-items:flex-end}
+.vessel-list{gap:0;border:1px solid var(--line);border-radius:16px;overflow:hidden;background:#fff}
+.vessel-list-head{display:grid;grid-template-columns:minmax(260px,1.35fr) minmax(220px,.9fr) 110px 110px minmax(220px,.85fr);gap:14px;align-items:center;padding:10px 14px;background:#f5f8fc;border-bottom:1px solid var(--line);color:#6a7d91;font-size:8px;font-weight:950;text-transform:uppercase;letter-spacing:.08em}
+.vessel-row{grid-template-columns:58px minmax(190px,1.35fr) minmax(220px,.9fr) minmax(220px,.85fr);gap:12px;padding:10px 14px;border:0;border-bottom:1px solid var(--line);border-radius:0;background:#fff;box-shadow:none}
+.vessel-row:last-child{border-bottom:0}
+.vessel-row:hover{background:#f8fbff}
+.vessel-photo{width:58px;height:42px;border-radius:10px}
+.vessel-photo svg{width:18px}
+.vessel-photo b{font-size:8px}
+.vessel-main h3{font-size:14px}
+.vessel-main small{font-size:7px;margin-top:4px}
+.vessel-metrics{grid-template-columns:repeat(4,minmax(70px,1fr));gap:6px}
+.vessel-metrics span{padding:7px 8px;background:#f7f9fc;border-radius:9px}
+.vessel-metrics small{font-size:6px}
+.vessel-metrics b{font-size:9px}
+.vessel-actions .button{min-height:32px;padding:0 10px;font-size:9px}
+.vessel-picker-field select{font-weight:850;text-transform:uppercase}
+@media(max-width:900px){
+  .vessel-list-head{display:none}
+  .vessel-row{grid-template-columns:64px minmax(0,1fr);padding:12px}
+  .vessel-photo{width:64px;height:48px}
 }
 
 .button.device-alert-enabled{border:1px solid #9fd9c2;background:#e8f7f0;color:#137354}.button.device-alert-enabled svg{fill:#137354}.ais-actions>p{flex:1;min-width:180px}
