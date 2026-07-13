@@ -198,13 +198,13 @@ const transportRoute=transport=>{
   return `${origen} → ${destino}`;
 };
 const OPERATION_STEPS=[
-  {key:'review',title:'Expediente revisado',next:'Comprobar los datos del servicio y la mercancía',responsibility:'ADMINISTRACIÓN / OPERACIONES',roles:['admin','operations']},
-  {key:'cargo',title:'Mercancía recibida o recogida',next:'Recibir en almacén o recoger en el punto indicado',responsibility:'ALMACÉN · OPERACIONES / CONDUCTOR',roles:['operations','driver']},
-  {key:'documents',title:'Documentación del envío revisada',next:'Revisar y adjuntar la documentación antes de la entrega',responsibility:'ADMINISTRACIÓN / OPERACIONES',roles:['admin','operations']},
-  {key:'assignment',title:'Conductor asignado',next:'Asignar el transporte a un conductor',responsibility:'OPERACIONES / CONDUCTOR',roles:['operations','driver']},
-  {key:'delivery',title:'Entrega confirmada con POD',next:'Entregar la mercancía y registrar fotos y POD firmado',responsibility:'CONDUCTOR / OPERACIONES',roles:['driver','operations']}
+  {key:'review',title:'Expediente revisado',next:'Comprobar los datos del servicio y la mercancía',responsibility:'LIBRE PARA TODOS',roles:['admin','operations','driver','finance']},
+  {key:'cargo',title:'Mercancía recibida o recogida',next:'Recibir en almacén o recoger en el punto indicado',responsibility:'LIBRE PARA TODOS',roles:['admin','operations','driver','finance']},
+  {key:'documents',title:'Documentación del envío revisada',next:'Revisar y adjuntar la documentación antes de la entrega',responsibility:'LIBRE PARA TODOS',roles:['admin','operations','driver','finance']},
+  {key:'assignment',title:'Conductor asignado',next:'Asignar o confirmar el responsable del transporte',responsibility:'LIBRE PARA TODOS',roles:['admin','operations','driver','finance']},
+  {key:'delivery',title:'Entrega confirmada con POD',next:'Entregar la mercancía y registrar fotos y POD firmado',responsibility:'LIBRE PARA TODOS',roles:['admin','operations','driver','finance']}
 ];
-const canCompleteOperationStep=(roles,key)=>Boolean(OPERATION_STEPS.find(step=>step.key===key)?.roles.some(role=>hasRole(roles,role)));
+const canCompleteOperationStep=()=>true;
 const operationFlow=item=>{
   if(item.operationalFlow){const stored=item.operationalFlow;const delivery=Boolean(stored.delivery||stored.pod);const assigned=Boolean(item.conductor&&item.conductor!=='Sin asignar');return {review:false,cargo:false,documents:false,assignment:false,delivery:false,billingReady:false,...stored,assignment:stored.assignment??Boolean(delivery||(stored.documents&&assigned)),delivery,billingReady:Boolean(stored.billingReady||delivery),review:stored.review??Boolean(stored.cargo||stored.documents||stored.delivered||stored.pod||stored.delivery)}};
   const progress=Number(item.progreso)||0;
@@ -770,8 +770,6 @@ function App({auth,finance,onFinanceChange,onLogout}){
     if(!target)return;
     const expected=nextOperationStep(target);
     if(!expected||expected.key!==stepKey){notify('Completa primero el paso anterior');return}
-    if(!canCompleteOperationStep(effectiveRoles,stepKey)){notify(`Este paso corresponde a ${expected.responsibility}`);return}
-    if(stepKey==='assignment'){notify('Asigna el conductor desde el transporte o desde el calendario');return}
     const evidenceFiles=Array.isArray(evidence)?evidence.filter(Boolean):evidence?[evidence]:[];
     const cargoEvidence=stepKey==='cargo'?evidenceFiles:[];
     const documentEvidence=stepKey==='documents'?evidenceFiles:[];
@@ -1190,7 +1188,7 @@ function DriverTaskModal({event,item,transport,warehouseEntries,currentUser,csrf
   if(!item)return null;
   const flow=operationFlow(item);
   const lastCompleted=[...OPERATION_STEPS].reverse().find(entry=>flow[entry.key]);
-  const mine=samePerson(event.asignado,currentUser.fullName);
+  const mine=true;
   const inWarehouse=warehouseEntries.some(entry=>entry.expediente===item.id&&!entry.archivado&&entry.estado!=='Expedido');
   const instructions={
     review:'Lee el servicio completo y comprueba buque, fecha, puerto, ruta, mercancía y observaciones antes de empezar.',
@@ -1226,7 +1224,7 @@ function DriverTaskModal({event,item,transport,warehouseEntries,currentUser,csrf
       <div className="modal-head"><div><span className="overline">{event.inicio}–{event.fin} · {event.tipoServicio}</span><h2>{item.buque}</h2><p>{caseLabel(item)}</p></div><button className="icon-button" onClick={close}><X/></button></div>
       <div className="driver-task-body">
         <div className="driver-route"><MapPin/><span><small>PUERTO / RUTA</small><b>{transport?.ruta||item.puerto}</b></span></div>
-        {!mine&&<div className="driver-owner-alert"><UserRound/><span><b>{event.asignado&&event.asignado!=='Sin asignar'?`Asignado a ${event.asignado}`:'Trabajo sin conductor'}</b><small>Asígnatelo antes de registrar avances.</small></span><button className="button secondary" onClick={claim}>Asignarme</button></div>}
+        {false&&<div className="driver-owner-alert"><UserRound/><span><b>{event.asignado&&event.asignado!=='Sin asignar'?`Asignado a ${event.asignado}`:'Trabajo sin conductor'}</b><small>Asígnatelo antes de registrar avances.</small></span><button className="button secondary" onClick={claim}>Asignarme</button></div>}
         <OperationChecklist item={item} csrfToken={csrfToken} reloadOperational={reloadOperational} notify={notify} currentRoles={currentUser}/>
         <CargoManifest item={item}/>
         {flow.cargo&&<ShipmentDocuments item={item}/>}
@@ -1235,7 +1233,7 @@ function DriverTaskModal({event,item,transport,warehouseEntries,currentUser,csrf
           {step.key==='delivery'&&<WarehouseTransportReview entries={vesselWarehouseEntries} item={item} checked={warehouseReviewed} setChecked={setWarehouseReviewed}/>}
           {needsEvidence&&<div className="pod-scanner evidence-capture">
             <div><Camera/><span><b>{step.key==='cargo'?'Fotos de la mercancía recibida':'Evidencias de la entrega'}</b><small>{step.key==='cargo'?'Se requiere al menos una foto; puedes añadir todas las necesarias.':'Se requiere foto de la entrega y POD firmado.'}</small></span></div>
-            {!mine&&<div className="evidence-assignment-lock"><LockKeyhole/><span><b>Activa el registro de este trabajo</b><small>{event.asignado&&event.asignado!=='Sin asignar'?`Ahora figura asignado a ${event.asignado}. Asígnatelo para activar la cámara y el POD.`:'El servicio todavía no tiene conductor. Asígnatelo para activar la cámara y el POD.'}</small></span><button className="button secondary" onClick={claim}>Asignarme y activar</button></div>}
+            {false&&<div className="evidence-assignment-lock"><LockKeyhole/><span><b>Activa el registro de este trabajo</b><small>{event.asignado&&event.asignado!=='Sin asignar'?`Ahora figura asignado a ${event.asignado}. Asígnatelo para activar la cámara y el POD.`:'El servicio todavía no tiene conductor. Asígnatelo para activar la cámara y el POD.'}</small></span><button className="button secondary" onClick={claim}>Asignarme y activar</button></div>}
             <div className="pod-scanner-actions">
               <label className={`button primary${!mine?' disabled':''}`}><Camera/> {uploading?'Procesando…':step.key==='cargo'?'Añadir fotos de recepción':'Añadir fotos de entrega'}<input type="file" accept="image/*" capture="environment" multiple disabled={uploading||!mine} onChange={change=>{uploadEvidence(change.target.files,step.key==='cargo'?'cargo-photo':'delivery-photo');change.target.value=''}}/></label>
               {step.key==='delivery'&&<><label className={`button secondary${!mine?' disabled':''}`}><ScanLine/> Escanear POD<input type="file" accept="image/*" capture="environment" multiple disabled={uploading||!mine} onChange={change=>{uploadEvidence(change.target.files,'pod');change.target.value=''}}/></label><label className={`button tertiary${!mine?' disabled':''}`}><FileText/> Añadir PDFs de POD<input type="file" accept="application/pdf" multiple disabled={uploading||!mine} onChange={change=>{uploadEvidence(change.target.files,'pod');change.target.value=''}}/></label></>}
@@ -1244,8 +1242,8 @@ function DriverTaskModal({event,item,transport,warehouseEntries,currentUser,csrf
             {evidenceFiles.length>0&&<div className="evidence-file-list">{evidenceFiles.map((file,index)=><a className="pod-uploaded" href={file.url} target="_blank" rel="noreferrer" key={`${file.id}-${index}`}><CheckCircle2/><span><b>{evidenceLabel(file)} {file.evidenceType==='pod'?'':index+1}</b><small>{file.name}</small></span><ExternalLink/></a>)}</div>}
             {error&&<p className="form-error"><CircleAlert/>{error}</p>}
           </div>}
-          <label className="field"><span>Observación del trabajo (opcional)</span><input value={note} disabled={!mine} onChange={change=>setNote(change.target.value)} placeholder="Persona que recibe, incidencia, referencia…"/></label>
-          {canCompleteOperationStep(currentUser,step.key)&&step.key!=='assignment'?<button className="button primary full driver-confirm" disabled={!mine||uploading||!evidenceReady} onClick={()=>submit(step.key,note,evidenceFiles)}><CheckCircle2/> {!evidenceReady?(step.key==='cargo'?'Añade una foto para confirmar':'Revisa almacén, foto de entrega y POD'):`Confirmar: ${step.title}`}</button>:<div className="step-owner-wait"><LockKeyhole/><span><b>{step.key==='assignment'?'Asigna o asígnate el transporte':'Esperando al equipo responsable'}</b><small>{step.responsibility}</small></span></div>}
+          <label className="field"><span>Observación del trabajo (opcional)</span><input value={note} onChange={change=>setNote(change.target.value)} placeholder="Persona que recibe, incidencia, referencia…"/></label>
+          <button className="button primary full driver-confirm" disabled={uploading||!evidenceReady} onClick={()=>submit(step.key,note,evidenceFiles)}><CheckCircle2/> {!evidenceReady?(step.key==='cargo'?'Añade una foto para confirmar':'Revisa almacén, foto de entrega y POD'):`Confirmar: ${step.title}`}</button>
         </>:<div className="driver-finished"><CheckCircle2/><span><b>Trabajo terminado</b><small>POD recibido y expediente listo para facturación.</small></span></div>}
         {mine&&lastCompleted&&<button className="button tertiary full driver-undo-step" onClick={()=>undo(lastCompleted.key)}><Undo2/> Deshacer: {lastCompleted.title}</button>}
         <button className="button tertiary full" onClick={close}>{flow.billingReady?'Cerrar':'Volver al calendario'}</button>
@@ -1353,7 +1351,7 @@ function ActualTimeline({item}){
 function OperationChecklist({item,csrfToken,reloadOperational,notify,currentRoles}){
   const flow=operationFlow(item);
   const current=nextOperationStep(item);
-  return <><AisTrackingPanel item={item} csrfToken={csrfToken} reloadOperational={reloadOperational} notify={notify}/><section className="operation-checklist"><div><b>FLUJO OPERATIVO</b><small>Orden y responsable de cada paso</small></div><ol>{OPERATION_STEPS.map((step,index)=><li key={step.key} className={`${flow[step.key]?'done':current?.key===step.key?'current':''} ${currentRoles&&!canCompleteOperationStep(currentRoles,step.key)?'other-role':''}`}><span>{flow[step.key]?<CheckCircle2/>:index+1}</span><span><b>{step.title}</b><small>{step.responsibility}</small></span></li>)}<li className={flow.billingReady?'done':''}><span>{flow.billingReady?<CheckCircle2/>:OPERATION_STEPS.length+1}</span><span><b>Listo para facturar</b><small>ADMINISTRACIÓN</small></span></li></ol></section></>;
+  return <><AisTrackingPanel item={item} csrfToken={csrfToken} reloadOperational={reloadOperational} notify={notify}/><section className="operation-checklist"><div><b>FLUJO OPERATIVO</b><small>Pasos libres para todo el equipo</small></div><ol>{OPERATION_STEPS.map((step,index)=><li key={step.key} className={`${flow[step.key]?'done':current?.key===step.key?'current':''}`}><span>{flow[step.key]?<CheckCircle2/>:index+1}</span><span><b>{step.title}</b><small>{step.responsibility}</small></span></li>)}<li className={flow.billingReady?'done':''}><span>{flow.billingReady?<CheckCircle2/>:OPERATION_STEPS.length+1}</span><span><b>Listo para facturar</b><small>LIBRE PARA TODOS</small></span></li></ol></section></>;
 }
 
 function OperationStepModal({item,warehouseEntries,transports,csrfToken,currentUser,close,submit}){
@@ -1402,7 +1400,7 @@ function OperationStepModal({item,warehouseEntries,transports,csrfToken,currentU
         <div className="operation-guidance"><ClipboardCheck/><div><b>Qué debes comprobar</b><p>{guidance[step.key]}</p>{step.key==='delivery'&&transport&&<small>{transport.id} · {transport.ruta}</small>}</div></div>
         {['documents','assignment','delivery'].includes(step.key)&&<ShipmentDocuments item={item}/>}
         {step.key==='delivery'&&<WarehouseTransportReview entries={vesselWarehouseEntries} item={item} checked={warehouseReviewed} setChecked={setWarehouseReviewed}/>}
-        {step.key==='documents'&&canCompleteOperationStep(currentUser,step.key)&&<div className="pod-scanner shipment-document-upload">
+        {step.key==='documents'&&<div className="pod-scanner shipment-document-upload">
           <div><FileCheck2/><span><b>Adjuntar documentación del envío</b><small>Packing list, delivery note, CMR, T1, levante u otros documentos.</small></span></div>
           <div className="pod-scanner-actions"><label className="button primary"><UploadCloud/> {uploading?'Subiendo…':'Añadir varios PDFs'}<input type="file" accept="application/pdf,image/*" multiple disabled={uploading} onChange={event=>{uploadEvidence(event.target.files,'shipment-document');event.target.value=''}}/></label></div>
           {shipmentFiles.length>0&&<div className="evidence-file-list">{shipmentFiles.map((file,index)=><a className="pod-uploaded" href={file.url} target="_blank" rel="noreferrer" key={`${file.id}-${index}`}><CheckCircle2/><span><b>{documentLabel(file.name)}</b><small>{file.name}</small></span><ExternalLink/></a>)}</div>}
@@ -1418,7 +1416,7 @@ function OperationStepModal({item,warehouseEntries,transports,csrfToken,currentU
           {error&&<p className="form-error"><CircleAlert/>{error}</p>}
         </div>}
         <label className="field"><span>Observación (opcional)</span><input value={note} onChange={event=>setNote(event.target.value)} placeholder="Incidencias, persona que recibe, referencia…"/></label>
-        <div className="modal-actions"><button className="button tertiary" onClick={close}>Cancelar</button>{canCompleteOperationStep(currentUser,step.key)&&step.key!=='assignment'?<button className="button primary" disabled={uploading||!evidenceReady} onClick={()=>submit(step.key,note,evidenceFiles)}><CheckCircle2/> {!evidenceReady?(step.key==='cargo'?'Añade una foto':'Revisa almacén, foto de entrega y POD'):'Confirmar paso'}</button>:<div className="step-owner-wait"><LockKeyhole/><span><b>{step.key==='assignment'?'Asigna el conductor en el calendario':'Paso reservado a otro equipo'}</b><small>{step.responsibility}</small></span></div>}</div>
+        <div className="modal-actions"><button className="button tertiary" onClick={close}>Cancelar</button><button className="button primary" disabled={uploading||!evidenceReady} onClick={()=>submit(step.key,note,evidenceFiles)}><CheckCircle2/> {!evidenceReady?(step.key==='cargo'?'Añade una foto':'Revisa almacén, foto de entrega y POD'):'Confirmar paso'}</button></div>
       </div>
     </section>
   </div>;
