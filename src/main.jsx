@@ -533,6 +533,7 @@ function App({auth,finance,onFinanceChange,onLogout}){
   const [calendarEvents,setCalendarEvents]=useState(eventosCalendarioIniciales);
   const [providers,setProviders]=useState(proveedoresIniciales);
   const [vessels,setVessels]=useState(()=>mergeVesselCatalog([],expedientesIniciales));
+  const [deletedVesselKeys,setDeletedVesselKeys]=useState([]);
   const [team,setTeam]=useState([]);
   const [clientOptions,setClientOptions]=useState(clientNames);
   const [operationalLoaded,setOperationalLoaded]=useState(false);
@@ -559,8 +560,9 @@ function App({auth,finance,onFinanceChange,onLogout}){
         try{localStorage.setItem(storageKey,JSON.stringify(current))}catch{}
       }
       const loadedCases=result.data.cases.map(normalizeMerchandise);
-      const loadedVessels=mergeVesselCatalog(Array.isArray(result.data.vessels)?result.data.vessels:[],loadedCases);
-      setCases(loadedCases.map(item=>hydrateCaseWithVessel(item,loadedVessels)));setVessels(loadedVessels);setTransports(result.data.transports);setWarehouseEntries(result.data.warehouseEntries);if(result.data.customs)setCustoms(result.data.customs);if(result.data.calendarEvents)setCalendarEvents(result.data.calendarEvents.filter(isTransportCalendarEvent));if(Array.isArray(result.data.providers))setProviders(result.data.providers)
+      const hiddenVessels=Array.isArray(result.data.deletedVesselKeys)?result.data.deletedVesselKeys.filter(Boolean):[];
+      const loadedVessels=mergeVesselCatalog(Array.isArray(result.data.vessels)?result.data.vessels:[],loadedCases).filter(vessel=>!hiddenVessels.includes(vesselKey(vessel.name)));
+      setDeletedVesselKeys(hiddenVessels);setCases(loadedCases.map(item=>hydrateCaseWithVessel(item,loadedVessels)));setVessels(loadedVessels);setTransports(result.data.transports);setWarehouseEntries(result.data.warehouseEntries);if(result.data.customs)setCustoms(result.data.customs);if(result.data.calendarEvents)setCalendarEvents(result.data.calendarEvents.filter(isTransportCalendarEvent));if(Array.isArray(result.data.providers))setProviders(result.data.providers)
       const coherence=result.scheduleCoherence||{};
       const synced=Number(coherence.createdTransportEvents||0)+Number(coherence.createdTransports||0)+Number(coherence.updatedTransportEvents||0)+Number(coherence.updatedTransports||0);
       if(synced)notify(`${synced} transportes sincronizados con calendario`);
@@ -591,7 +593,7 @@ function App({auth,finance,onFinanceChange,onLogout}){
     notify(message);
     if(localStorage.getItem('swiftport-device-alerts')==='1')showDeviceNotification(`Swiftport · ${item.buque}`,message,tracking.alertKey).catch(()=>{});
   },[cases,calendarEvents,operationalLoaded]);
-  const saveOperational=(nextCases=cases,nextTransports=transports,nextWarehouse=warehouseEntries,nextCustoms=customs,nextCalendar=calendarEvents,nextProviders=providers,nextVessels=vessels)=>api('/api/operational.php',{method:'PUT',headers:{'X-CSRF-Token':auth.csrfToken},body:JSON.stringify({data:{cases:nextCases,transports:nextTransports,warehouseEntries:nextWarehouse,customs:nextCustoms,calendarEvents:nextCalendar,providers:nextProviders,vessels:nextVessels}})}).catch(reason=>notify(reason.message));
+  const saveOperational=(nextCases=cases,nextTransports=transports,nextWarehouse=warehouseEntries,nextCustoms=customs,nextCalendar=calendarEvents,nextProviders=providers,nextVessels=vessels,nextDeletedVesselKeys=deletedVesselKeys)=>api('/api/operational.php',{method:'PUT',headers:{'X-CSRF-Token':auth.csrfToken},body:JSON.stringify({data:{cases:nextCases,transports:nextTransports,warehouseEntries:nextWarehouse,customs:nextCustoms,calendarEvents:nextCalendar,providers:nextProviders,vessels:nextVessels,deletedVesselKeys:nextDeletedVesselKeys}})}).catch(reason=>notify(reason.message));
   const operationalTeam=useMemo(()=>team.filter(member=>hasRole(member,'operations')||hasRole(member,'driver')),[team]);
   useEffect(()=>{if(driverOnly&&!['calendario','almacen'].includes(tab))setTab('calendario')},[driverOnly,tab]);
   useEffect(()=>{
@@ -751,15 +753,17 @@ function App({auth,finance,onFinanceChange,onLogout}){
     if(!clean.name){notify('Indica el nombre del buque');return}
     const exists=vessels.some(item=>sameVessel(vesselNameOf(item),clean.name));
     const nextVessels=exists?vessels.map(item=>sameVessel(vesselNameOf(item),clean.name)?{...item,...clean,id:item.id||clean.id||clean.name}:item):[{...clean,id:clean.id||clean.name},...vessels];
+    const nextDeletedVesselKeys=deletedVesselKeys.filter(key=>key!==vesselKey(clean.name));
     const nextCases=cases.map(item=>sameVessel(item.buque,clean.name)?hydrateCaseWithVessel(item,nextVessels):item);
-    setVessels(nextVessels);setCases(nextCases);saveOperational(nextCases,transports,warehouseEntries,customs,calendarEvents,providers,nextVessels);notify(exists?'Ficha de buque actualizada':'Ficha de buque creada');
+    setDeletedVesselKeys(nextDeletedVesselKeys);setVessels(nextVessels);setCases(nextCases);saveOperational(nextCases,transports,warehouseEntries,customs,calendarEvents,providers,nextVessels,nextDeletedVesselKeys);notify(exists?'Ficha de buque actualizada':'Ficha de buque creada');
   };
   const deleteVessel=vessel=>{
     const name=vesselNameOf(vessel);
     if(!name)return;
     if(!window.confirm(`¿Borrar la ficha del buque ${name}?\n\nNo se borrarán expedientes, almacén ni transportes.`))return;
     const nextVessels=vessels.filter(item=>!sameVessel(vesselNameOf(item),name));
-    setVessels(nextVessels);saveOperational(cases,transports,warehouseEntries,customs,calendarEvents,providers,nextVessels);notify('Ficha de buque borrada');
+    const nextDeletedVesselKeys=[...new Set([...deletedVesselKeys,vesselKey(name)])];
+    setDeletedVesselKeys(nextDeletedVesselKeys);setVessels(nextVessels);saveOperational(cases,transports,warehouseEntries,customs,calendarEvents,providers,nextVessels,nextDeletedVesselKeys);notify('Ficha de buque borrada');
   };
   const completeCaseStep=(id,stepKey,note='',evidence=null)=>{
     const target=cases.find(item=>item.id===id);
