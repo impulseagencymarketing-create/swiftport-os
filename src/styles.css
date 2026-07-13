@@ -140,8 +140,8 @@
 .calendar-event:hover .calendar-event-delete,.calendar-unscheduled-card:hover .calendar-event-delete{opacity:1}
 .calendar-event-delete svg{width:11px}
 .calendar-event{max-height:100%;contain:layout paint}
-.calendar-event[draggable="true"],.calendar-unscheduled-card[draggable="true"]{cursor:grab}
-.calendar-event.dragging,.calendar-unscheduled-card.dragging{opacity:.45;filter:saturate(.8);cursor:grabbing}
+.calendar-event,.calendar-unscheduled-card{cursor:grab;touch-action:none}
+.calendar-event.dragging,.calendar-unscheduled-card.dragging{opacity:.45;filter:saturate(.8);cursor:grabbing;pointer-events:none}
 .calendar-day.drop-target{background:linear-gradient(180deg,#eef6ff,#fff)}
 .calendar-unscheduled-row>div.drop-target{background:#fff0c8;outline:2px dashed #e4a12a;outline-offset:-5px}
 .calendar-day.drop-target:after{content:"Soltar aquí";position:absolute;left:8px;right:8px;top:8px;z-index:1;display:grid;place-items:center;height:34px;border:1px dashed #7fb3f0;border-radius:8px;background:rgba(235,246,255,.92);color:#1f65b7;font-size:9px;font-weight:900;text-transform:uppercase;letter-spacing:.04em;pointer-events:none}
