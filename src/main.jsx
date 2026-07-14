@@ -1109,7 +1109,6 @@ function Calendario({events,team,cases,transports,providers,warehouseEntries,sav
   const startMoveMode=(event,click)=>{
     click?.stopPropagation?.();
     setMovingEvent(withoutCalendarLayout(event));
-    notify?.('Modo mover activado: pulsa el día/hora destino en el calendario.');
   };
   const startPointerDrag=(pointer,event)=>{
     if(pointer.button!==undefined&&pointer.button!==0)return;
@@ -1173,6 +1172,7 @@ function Calendario({events,team,cases,transports,providers,warehouseEntries,sav
           {layoutOverlappingEvents(timedEvents.filter(event=>event.fecha===isoDate(day))).map(event=><DraggableCalendarEvent key={event.id} event={event} cases={cases} setEditing={setEditing} canDeleteEvent={canDeleteEvent} deleteEvent={deleteEvent} startPointerDrag={startPointerDrag} startMoveMode={startMoveMode} draggingId={draggingId} suppressClick={()=>suppressCalendarClick.current||Boolean(movingEvent)}/>)}</div>)}</div>
       </div>
     </section>
+    {movingEvent&&<CalendarQuickMoveModal item={movingEvent} cases={cases} close={()=>setMovingEvent(null)} submit={item=>{saveEvent(item);setMovingEvent(null)}}/>}
     {editing&&<CalendarEventModal item={editing} team={team} cases={cases} transports={transports} providers={providers} close={()=>setEditing(null)} submit={item=>{saveEvent(item);setEditing(null)}} openCase={openCase}/>}
   </>;
 }
@@ -1185,6 +1185,21 @@ function DraggableCalendarEvent({event,cases,setEditing,canDeleteEvent,deleteEve
     {canDeleteEvent&&deleteEvent&&<button type="button" className="calendar-event-delete" title="Eliminar servicio" onClick={click=>{click.stopPropagation();deleteEvent(clean)}}><Trash2/></button>}
     {event._columns>1&&<span className="overlap-indicator">{event._lane+1}/{event._columns}</span>}
   </article>;
+}
+
+function CalendarQuickMoveModal({item,cases,close,submit}){
+  const related=cases.find(entry=>entry.id===item.expediente);
+  const defaultStart=calendarHasValidStart(item)?item.inicio:'09:00';
+  const [form,setForm]=useState({fecha:item.fecha||isoDate(new Date()),inicio:calendarHasValidStart(item)?item.inicio:'',fin:item.fin||plusHourClient(defaultStart)});
+  const update=event=>setForm({...form,[event.target.name]:event.target.value});
+  const save=event=>{
+    event.preventDefault();
+    const inicio=form.inicio||'';
+    const fin=inicio?(form.fin||plusHourClient(inicio)):'';
+    submit({...withoutCalendarLayout(item),fecha:form.fecha,inicio,fin,scheduleStatus:inicio?'confirmed':'missing_time',scheduleNote:inicio?'':'Falta hora ETB; pendiente de confirmar horario'});
+  };
+  const markMissing=()=>submit({...withoutCalendarLayout(item),fecha:form.fecha,inicio:'',fin:'',scheduleStatus:'missing_time',scheduleNote:'Falta hora ETB; pendiente de confirmar horario'});
+  return <div className="modal-backdrop" onMouseDown={event=>{if(event.target===event.currentTarget)close()}}><section className="modal quick-move-modal" role="dialog" aria-modal="true"><div className="modal-head"><div><span className="overline">Mover transporte</span><h2>{related?.buque||item.titulo||'Transporte'}</h2><p>{related?.puerto||item.destino||'Selecciona nueva fecha y hora'}</p></div><button className="icon-button" onClick={close}><X/></button></div><form onSubmit={save}><label className="field wide"><span>Fecha del transporte *</span><input name="fecha" type="date" value={form.fecha} onChange={update} required autoFocus/></label><label className="field"><span>Hora inicio</span><input name="inicio" type="time" value={form.inicio} onChange={update}/></label><label className="field"><span>Hora fin</span><input name="fin" type="time" value={form.fin} onChange={update}/></label><div className="quick-move-summary wide"><CalendarDays/><span><b>{form.fecha||'Sin fecha'} {form.inicio?`· ${form.inicio}${form.fin?`–${form.fin}`:''}`:'· FALTA HORARIO'}</b><small>Se actualizará el calendario, el transporte y el expediente relacionado.</small></span></div><div className="modal-actions wide"><button type="button" className="button tertiary" onClick={close}>Cancelar</button><button type="button" className="button secondary" onClick={markMissing}>Dejar sin hora</button><button className="button primary"><Save/> Mover transporte</button></div></form></section></div>;
 }
 
 function DriverCalendar({events,cases,transports,warehouseEntries,currentUser,saveEvent,completeCaseStep,csrfToken}){
