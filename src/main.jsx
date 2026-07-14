@@ -667,11 +667,13 @@ function App({auth,finance,onFinanceChange,onLogout}){
     const known=findKnownVessel(vessels,form.buque)||{};
     const item=normalizeMerchandise({id,buque:form.buque.toUpperCase(),imo:cleanImo(form.imo)||known.imo||'',mmsi:cleanMmsi(form.mmsi)||known.mmsi||'',cliente:form.cliente,puerto:form.puerto,eta:etaDate||'Por confirmar',portCall:{etaDate,etaTime,etbDate:'',etbTime:'',etdDate:'',etdTime:'',updatedAt:new Date().toISOString()},estado:'Nuevo',prioridad:form.prioridad,conductor:'Sin asignar',servicios:[form.createReception&&'Recepción',form.createTransport&&'Transporte'].filter(Boolean),bultos:Number(form.bultos)||0,peso:'Por registrar',progreso:0,siguiente:'Revisar expediente y servicios programados',aduana:'Por revisar',autoTransportDisabled:false});
     const stamp=Date.now();
-    const receptionEvent=form.createReception?{id:`EV-${stamp}-R`,titulo:form.receptionLocation||'Recepción en almacén',tipoServicio:'Recepción',fecha:form.receptionDate,inicio:form.receptionStart,fin:form.receptionEnd,asignado:'Sin asignar',expediente:id,transporte:'',color:'gray'}:null;
-    const transportId=form.createTransport?`TR-${stamp}`:'';
+    const receptionEvent=form.createReception&&form.receptionDate?{id:`EV-${stamp}-R`,titulo:form.receptionLocation||'Recepción en almacén',tipoServicio:'Recepción',fecha:form.receptionDate,inicio:form.receptionStart,fin:form.receptionEnd,asignado:'Sin asignar',expediente:id,transporte:'',color:'gray'}:null;
+    const transportDate=form.transportDate||etaDate;
+    const shouldCreateTransport=Boolean(form.createTransport&&transportDate);
+    const transportId=shouldCreateTransport?`TR-${stamp}`:'';
     const route=[form.transportPickup,form.transportDelivery].filter(Boolean).join(' → ')||`ALMACÉN → ${form.puerto}`;
     const assignedDriver=form.transportConductor||'Sin asignar';
-    const transport=form.createTransport?{id:transportId,expediente:id,origen:form.transportPickup,destino:form.transportDelivery,ruta:route,fecha:form.transportDate,inicio:form.transportStart,fin:form.transportEnd,hora:formatSchedule(form.transportDate,form.transportStart,form.transportEnd),conductor:assignedDriver,proveedorId:'',vehiculo:'Por asignar',estado:assignedDriver==='Sin asignar'?'Sin asignar':'Asignado'}:null;
+    const transport=shouldCreateTransport?{id:transportId,expediente:id,origen:form.transportPickup,destino:form.transportDelivery,ruta:route,fecha:transportDate,inicio:form.transportStart,fin:form.transportEnd,hora:formatSchedule(transportDate,form.transportStart,form.transportEnd),conductor:assignedDriver,proveedorId:'',vehiculo:'Por asignar',estado:assignedDriver==='Sin asignar'?'Sin asignar':'Asignado'}:null;
     const transportEvent=transport?{id:`EV-${stamp}-T`,titulo:route,origen:transport.origen,destino:transport.destino,tipoServicio:'Transporte',fecha:transport.fecha,inicio:transport.inicio,fin:transport.fin,asignado:assignedDriver,expediente:id,transporte:transportId,proveedorId:'',color:driverTone(assignedDriver,operationalTeam)}:null;
     const nextCases=[item,...cases];
     const nextTransports=transport?[transport,...transports]:transports;
@@ -1959,7 +1961,7 @@ function CalendarEventModal({item,team,cases,transports,providers,close,submit,o
 
 function NewCaseModal({clientOptions=[],vessels=[],team=[],close,submit}){
   const warehouse=SWIFTPORT_WAREHOUSE;
-  const [form,setForm]=useState({buque:'',imo:'',mmsi:'',cliente:clientOptions[0]||'UME Shipping',puerto:'Barcelona',eta:'',prioridad:'Media',bultos:'1',createReception:true,receptionDate:'',receptionStart:'09:00',receptionEnd:'10:00',receptionLocation:warehouse,createTransport:true,transportDate:'',transportStart:'09:00',transportEnd:'10:00',transportPickup:warehouse,transportDelivery:'BUQUE POR CONFIRMAR · Barcelona',transportConductor:'Sin asignar'});
+  const [form,setForm]=useState({buque:'',imo:'',mmsi:'',cliente:clientOptions[0]||'UME Shipping',puerto:'Barcelona',eta:'',prioridad:'Media',bultos:'1',createReception:false,receptionDate:'',receptionStart:'09:00',receptionEnd:'10:00',receptionLocation:warehouse,createTransport:false,transportDate:'',transportStart:'09:00',transportEnd:'10:00',transportPickup:warehouse,transportDelivery:'BUQUE POR CONFIRMAR · Barcelona',transportConductor:'Sin asignar'});
   const update=event=>{
     const {name,value,type,checked}=event.target;
     if(name==='eta'){
