@@ -228,3 +228,7 @@
   .warehouse-entry-modal .cargo-line .remove-cargo{grid-column:2;justify-self:end}
   .warehouse-entry-modal .modal-actions{margin-inline:-16px;margin-bottom:-16px;padding-inline:16px}
 }
+
+/* Calendario operativo 24 horas: los servicios portuarios no terminan a las 21:00 */
+.calendar-day{height:1536px}
+.driver-week .calendar-body{min-height:1536px}

@@ -1104,11 +1104,11 @@ const layoutOverlappingEvents=events=>{
 };
 const calendarEventStyle=event=>{
   const start=calendarMinutes(event.inicio),end=Math.max(start+30,calendarMinutes(event.fin)||start+60);
-  const visibleStart=Math.max(360,Math.min(1320,start));
-  const visibleEnd=Math.max(visibleStart+30,Math.min(1320,end));
+  const visibleStart=Math.max(0,Math.min(1439,start));
+  const visibleEnd=Math.max(visibleStart+30,Math.min(1440,end));
   const columns=event._columns||1,lane=event._lane||0;
   return {
-    top:(visibleStart-360)/60*64,
+    top:visibleStart/60*64,
     height:Math.max(56,(visibleEnd-visibleStart)/60*64),
     left:`calc(4px + (100% - 8px) * ${lane}/${columns})`,
     width:`calc((100% - 8px) / ${columns} - ${columns>1?2:0}px)`,
@@ -1127,8 +1127,8 @@ const eventDurationMinutes=event=>{
 const calendarDropTime=(mouseEvent,dayElement)=>{
   const rect=dayElement.getBoundingClientRect();
   const y=Math.max(0,Math.min(rect.height,mouseEvent.clientY-rect.top));
-  const minutes=360+Math.round(((y/64)*60)/15)*15;
-  return minutesToClock(Math.max(360,Math.min(1290,minutes)));
+  const minutes=Math.round(((y/64)*60)/15)*15;
+  return minutesToClock(Math.max(0,Math.min(1410,minutes)));
 };
 function Calendario({events,team,cases,transports,providers,warehouseEntries,saveEvent,deleteEvent,completeCaseStep,undoCaseStep,openCase,currentUser,csrfToken,reloadOperational,notify}){
   const [weekStart,setWeekStart]=useState(startOfWeek(new Date()));
@@ -1140,7 +1140,7 @@ function Calendario({events,team,cases,transports,providers,warehouseEntries,sav
   const suppressCalendarClick=useRef(false);
   if(isDriverOnly(currentUser))return <DriverCalendarV2 events={events} cases={cases} transports={transports} warehouseEntries={warehouseEntries} currentUser={currentUser} saveEvent={saveEvent} completeCaseStep={completeCaseStep} undoCaseStep={undoCaseStep} csrfToken={csrfToken} reloadOperational={reloadOperational} notify={notify}/>;
   const days=Array.from({length:7},(_,index)=>addDays(weekStart,index));
-  const hours=Array.from({length:16},(_,index)=>index+6);
+  const hours=Array.from({length:24},(_,index)=>index);
   const dayLabel=new Intl.DateTimeFormat('es-ES',{weekday:'short',day:'numeric',month:'short'});
   const newEvent=()=>setEditing({id:'EV-'+Date.now(),titulo:'',tipoServicio:'Transporte',fecha:isoDate(days[0]),inicio:'',fin:'',asignado:'Sin asignar',expediente:'',transporte:'',color:'gray',scheduleStatus:'missing_time'});
   const baseEvents=(mineOnly?events.filter(event=>samePerson(event.asignado,currentUser.fullName)):events).filter(isTransportCalendarEvent).map(event=>calendarEventWithCaseSlot(event,cases));
@@ -1271,7 +1271,7 @@ function DriverWeekView({events,cases,select,saveEvent,notify}){
   const [draggingId,setDraggingId]=useState('');
   const [dropTarget,setDropTarget]=useState('');
   const days=Array.from({length:7},(_,index)=>addDays(weekStart,index));
-  const hours=Array.from({length:16},(_,index)=>index+6);
+  const hours=Array.from({length:24},(_,index)=>index);
   const dayLabel=new Intl.DateTimeFormat('es-ES',{weekday:'short',day:'numeric',month:'short'});
   const transportEvents=(events||[]).filter(isTransportCalendarEvent).map(event=>calendarEventWithCaseSlot(event,cases));
   const timedEvents=transportEvents.filter(event=>!calendarNeedsTime(event));
