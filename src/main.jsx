@@ -197,6 +197,27 @@ const transportRoute=transport=>{
   const {origen,destino}=routeParts(transport);
   return `${origen} → ${destino}`;
 };
+const escapeRegex=value=>String(value||'').replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
+const replaceLinkedVesselText=(value,previousCase,nextCase)=>{
+  const text=String(value||'').trim();
+  const nextName=String(nextCase?.buque||'').trim().toUpperCase();
+  if(!text||!nextName)return text;
+  const previousName=String(previousCase?.buque||'').trim();
+  let result=text;
+  if(previousName){
+    result=result.replace(new RegExp(escapeRegex(previousName),'gi'),nextName);
+  }
+  if(/^BUQUE(?:\s+POR\s+CONFIRMAR)?(?:\s*[·-]\s*.*)?$/i.test(result)){
+    result=`BUQUE ${nextName}${nextCase?.puerto?` · ${nextCase.puerto}`:''}`;
+  }
+  return result;
+};
+const syncLinkedTransportWithCase=(transport,previousCase,nextCase)=>{
+  const parts=routeParts(transport);
+  const origen=replaceLinkedVesselText(parts.origen,previousCase,nextCase);
+  const destino=replaceLinkedVesselText(parts.destino,previousCase,nextCase);
+  return {...transport,origen,destino,ruta:`${origen} → ${destino}`};
+};
 const OPERATION_STEPS=[
   {key:'review',title:'Expediente revisado',next:'Comprobar los datos del servicio y la mercancía',responsibility:'LIBRE PARA TODOS',roles:['admin','operations','driver','finance']},
   {key:'cargo',title:'Mercancía recibida o recogida',next:'Recibir en almacén o recoger en el punto indicado',responsibility:'LIBRE PARA TODOS',roles:['admin','operations','driver','finance']},
@@ -661,18 +682,33 @@ function App({auth,finance,onFinanceChange,onLogout}){
   const updateTransport=updated=>{const parts=routeParts(updated);const normalized={...updated,...parts,ruta:`${parts.origen} → ${parts.destino}`,hora:formatSchedule(updated.fecha,updated.inicio,updated.fin),scheduleSource:'manual',scheduleStatus:updated.inicio?'confirmed':'missing_time',scheduleNote:updated.inicio?'':'Falta hora ETB; pendiente de confirmar horario'};const nextTransports=transports.map(item=>item.id===updated.id?normalized:item);const nextCases=cases.map(item=>{if(item.id!==updated.expediente)return item;const flow=operationFlow(item);const assigned=Boolean(updated.conductor&&updated.conductor!=='Sin asignar');const changed=assigned&&item.conductor!==updated.conductor;const now=new Date();return normalizeMerchandise({...item,autoTransportDisabled:false,conductor:updated.conductor,operationalFlow:{...flow,assignment:flow.delivery||assigned},timelineCustom:changed?[{id:`ASSIGN-${item.id}-${Date.now()}`,fecha:now.toLocaleDateString('es-ES'),hora:now.toLocaleTimeString('es-ES',{hour:'2-digit',minute:'2-digit'}),titulo:'Conductor asignado',detalle:`${updated.conductor} · ${normalized.ruta}`,actor:visibleUser.fullName,estado:'done'},...(item.timelineCustom||[])]:item.timelineCustom})});const linkedEvent=calendarEvents.find(item=>item.transporte===updated.id);const synchronized={titulo:normalized.ruta,origen:normalized.origen,destino:normalized.destino,tipoServicio:'Transporte',fecha:updated.fecha,inicio:updated.inicio,fin:updated.fin,asignado:updated.conductor,proveedorId:updated.proveedorId||'',expediente:updated.expediente,transporte:updated.id,color:driverTone(updated.conductor,operationalTeam),scheduleSource:'manual',scheduleStatus:normalized.scheduleStatus,scheduleNote:normalized.scheduleNote};const nextCalendar=(linkedEvent?calendarEvents.map(item=>item.transporte===updated.id?{...item,...synchronized}:item):[...calendarEvents,{id:'EV-'+Date.now(),...synchronized}]).filter(isTransportCalendarEvent);setTransports(nextTransports);setCases(nextCases);setCalendarEvents(nextCalendar);saveOperational(nextCases,nextTransports,warehouseEntries,customs,nextCalendar);notify('Ruta, transporte y calendario actualizados')};
   const updateCase=updated=>{
     const {importe,...rawCase}=updated;
+    const previousCase=cases.find(item=>item.id===rawCase.id)||{};
     const known=findKnownVessel(vessels,rawCase.buque)||{};
-    const operationalCase=normalizeMerchandise({...rawCase,imo:cleanImo(rawCase.imo)||known.imo||'',mmsi:cleanMmsi(rawCase.mmsi)||known.mmsi||''});
+    const operationalCase=normalizeMerchandise({...rawCase,buque:String(rawCase.buque||'').trim().toUpperCase(),imo:cleanImo(rawCase.imo)||known.imo||'',mmsi:cleanMmsi(rawCase.mmsi)||known.mmsi||''});
     const next=cases.map(item=>item.id===operationalCase.id?operationalCase:item);
     const nextVessels=upsertVesselFromCase(vessels,operationalCase);
     const activeEntries=warehouseEntries.filter(entry=>entry.expediente===operationalCase.id&&!entry.archivado);
-    const nextWarehouse=warehouseEntries.map(entry=>activeEntries.length===1&&entry.ref===activeEntries[0].ref?{...entry,buque:operationalCase.buque,mercancias:operationalCase.mercancias,bultos:merchandiseCount(operationalCase.mercancias),peso:merchandiseWeightLabel(operationalCase.mercancias)}:entry);
+    const nextWarehouse=warehouseEntries.map(entry=>{
+      if(entry.expediente!==operationalCase.id)return entry;
+      const renamed={...entry,buque:operationalCase.buque};
+      return activeEntries.length===1&&entry.ref===activeEntries[0].ref?{...renamed,mercancias:operationalCase.mercancias,bultos:merchandiseCount(operationalCase.mercancias),peso:merchandiseWeightLabel(operationalCase.mercancias)}:renamed;
+    });
     const slot=transportSlotFromCase(operationalCase);
     const end=slot.start?plusHourClient(slot.start):'';
     const scheduleStatus=slot.start?'confirmed':'missing_time';
     const scheduleNote=slot.start?`Programado por ${slot.source}`:`Falta hora ${slot.source||'ETB/ETA'}; pendiente de confirmar horario del buque`;
-    const nextTransports=slot.date?transports.map(item=>item.expediente===operationalCase.id?{...item,fecha:slot.date,inicio:slot.start,fin:end,hora:slot.start?formatSchedule(slot.date,slot.start,end):`${slot.date} · FALTA HORARIO`,scheduleStatus,scheduleNote}:item):transports;
-    const nextCalendar=slot.date?calendarEvents.map(event=>event.expediente===operationalCase.id&&isTransportCalendarEvent(event)&&event.scheduleSource!=='manual'?{...event,fecha:slot.date,inicio:slot.start,fin:end,scheduleStatus,scheduleNote}:event):calendarEvents;
+    const nextTransports=transports.map(item=>{
+      if(item.expediente!==operationalCase.id)return item;
+      const linked=syncLinkedTransportWithCase(item,previousCase,operationalCase);
+      return slot.date?{...linked,fecha:slot.date,inicio:slot.start,fin:end,hora:slot.start?formatSchedule(slot.date,slot.start,end):`${slot.date} · FALTA HORARIO`,scheduleStatus,scheduleNote}:linked;
+    });
+    const nextCalendar=calendarEvents.map(event=>{
+      if(event.expediente!==operationalCase.id||!isTransportCalendarEvent(event))return event;
+      const linkedTransport=nextTransports.find(item=>item.id===event.transporte);
+      const syncedRoute=linkedTransport?transportRoute(linkedTransport):replaceLinkedVesselText(event.titulo,previousCase,operationalCase);
+      const base={...event,titulo:syncedRoute,origen:linkedTransport?.origen||event.origen,destino:linkedTransport?.destino||event.destino};
+      return slot.date&&event.scheduleSource!=='manual'?{...base,fecha:slot.date,inicio:slot.start,fin:end,scheduleStatus,scheduleNote}:base;
+    });
     setCases(next);setVessels(nextVessels);setWarehouseEntries(nextWarehouse);setTransports(nextTransports);setCalendarEvents(nextCalendar);
     saveOperational(next,nextTransports,nextWarehouse,customs,nextCalendar,providers,nextVessels);
     notify(slot.date?'Expediente, buque, almacén y calendario actualizados':(activeEntries.length===1?'Expediente, buque y almacén actualizados':'Expediente y buque actualizados'));
