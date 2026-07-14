@@ -2775,21 +2775,47 @@ function ensure_operational_schedule_coherence(PDO $pdo): array
                     'scheduleStatus' => $scheduleStatus,
                     'scheduleNote' => $scheduleNote,
                 ];
+                $transportIndex = count($state['transports']) - 1;
                 $summary['createdTransports']++;
                 $changed = true;
             } else {
                 $transportRef = (string) $state['transports'][$transportIndex]['id'];
                 $existingTransport = $state['transports'][$transportIndex];
-                $updatedTransport = array_merge($existingTransport, [
-                    'ruta' => $route,
+                $manualEvent = null;
+                foreach ($state['calendarEvents'] as $event) {
+                    if (($event['expediente'] ?? '') !== $caseRef) continue;
+                    if (($event['transporte'] ?? '') === $transportRef || str_starts_with((string) ($event['tipoServicio'] ?? ''), 'Transporte')) {
+                        if (($event['scheduleSource'] ?? '') === 'manual') {
+                            $manualEvent = $event;
+                            break;
+                        }
+                    }
+                }
+                $manualSchedule = (($existingTransport['scheduleSource'] ?? '') === 'manual') || is_array($manualEvent);
+                $manualDate = (string) ($manualEvent['fecha'] ?? $existingTransport['fecha'] ?? $arrivalDate);
+                $manualStart = (string) ($manualEvent['inicio'] ?? $existingTransport['inicio'] ?? '');
+                $manualEnd = (string) ($manualEvent['fin'] ?? $existingTransport['fin'] ?? '');
+                $manualHasTime = is_valid_service_time($manualStart);
+                $schedulePayload = $manualSchedule ? [
+                    'fecha' => $manualDate,
+                    'inicio' => $manualStart,
+                    'fin' => $manualEnd,
+                    'hora' => $manualHasTime ? $manualDate . ' · ' . $manualStart . ($manualEnd !== '' ? '–' . $manualEnd : '') : $manualDate . ' · FALTA HORARIO',
+                    'scheduleSource' => 'manual',
+                    'scheduleStatus' => $manualHasTime ? 'confirmed' : 'missing_time',
+                    'scheduleNote' => (string) ($manualEvent['scheduleNote'] ?? $existingTransport['scheduleNote'] ?? ($manualHasTime ? 'Programado manualmente' : 'Falta hora; pendiente de confirmar')),
+                ] : [
                     'fecha' => $arrivalDate,
                     'inicio' => $arrivalTime,
                     'fin' => $arrivalEnd,
                     'hora' => $arrivalTimeConfirmed ? $arrivalDate . ' · ' . $arrivalTime . '–' . $arrivalEnd : $arrivalDate . ' · FALTA HORARIO',
-                    'tipoServicio' => $transportType,
                     'scheduleStatus' => $scheduleStatus,
                     'scheduleNote' => $scheduleNote,
-                ]);
+                ];
+                $updatedTransport = array_merge($existingTransport, [
+                    'ruta' => $route,
+                    'tipoServicio' => $transportType,
+                ], $schedulePayload);
                 if ($updatedTransport !== $existingTransport) {
                     $state['transports'][$transportIndex] = $updatedTransport;
                     $summary['updatedTransports']++;
@@ -2826,6 +2852,19 @@ function ensure_operational_schedule_coherence(PDO $pdo): array
                 $changed = true;
             } else {
                 $existingEvent = $state['calendarEvents'][$transportEventIndex];
+                $eventIsManual = (($existingEvent['scheduleSource'] ?? '') === 'manual') || (($state['transports'][$transportIndex]['scheduleSource'] ?? '') === 'manual');
+                if ($eventIsManual) {
+                    $manualDate = (string) ($existingEvent['fecha'] ?? $state['transports'][$transportIndex]['fecha'] ?? $arrivalDate);
+                    $manualStart = (string) ($existingEvent['inicio'] ?? $state['transports'][$transportIndex]['inicio'] ?? '');
+                    $manualEnd = (string) ($existingEvent['fin'] ?? $state['transports'][$transportIndex]['fin'] ?? '');
+                    $manualHasTime = is_valid_service_time($manualStart);
+                    $eventPayload['fecha'] = $manualDate;
+                    $eventPayload['inicio'] = $manualStart;
+                    $eventPayload['fin'] = $manualEnd;
+                    $eventPayload['scheduleSource'] = 'manual';
+                    $eventPayload['scheduleStatus'] = $manualHasTime ? 'confirmed' : 'missing_time';
+                    $eventPayload['scheduleNote'] = (string) ($existingEvent['scheduleNote'] ?? $state['transports'][$transportIndex]['scheduleNote'] ?? ($manualHasTime ? 'Programado manualmente' : 'Falta hora; pendiente de confirmar'));
+                }
                 $updatedEvent = array_merge($existingEvent, $eventPayload);
                 if ($updatedEvent !== $existingEvent) {
                     $state['calendarEvents'][$transportEventIndex] = $updatedEvent;
