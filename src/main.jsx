@@ -1119,7 +1119,13 @@ function Calendario({events,team,cases,transports,providers,warehouseEntries,sav
     pointer.stopPropagation();
   };
   useEffect(()=>{
-    const targetAt=pointer=>document.elementFromPoint(pointer.clientX,pointer.clientY)?.closest?.('[data-calendar-day],[data-missing-day]');
+    const targetAt=pointer=>{
+      const targets=[...document.querySelectorAll('[data-calendar-day],[data-missing-day]')];
+      return targets.find(target=>{
+        const rect=target.getBoundingClientRect();
+        return pointer.clientX>=rect.left&&pointer.clientX<=rect.right&&pointer.clientY>=rect.top&&pointer.clientY<=rect.bottom;
+      })||null;
+    };
     const targetKey=target=>target?.dataset?.calendarDay?`time-${target.dataset.calendarDay}`:target?.dataset?.missingDay?`missing-${target.dataset.missingDay}`:'';
     const onMove=pointer=>{
       const drag=pointerDrag.current;
