@@ -772,16 +772,20 @@ function App({auth,finance,onFinanceChange,onLogout}){
     setDeletedVesselKeys(nextDeletedVesselKeys);setVessels(nextVessels);saveOperational(cases,transports,warehouseEntries,customs,calendarEvents,providers,nextVessels,nextDeletedVesselKeys);notify('Ficha de buque borrada');
   };
   const completeCaseStep=(id,stepKey,note='',evidence=null)=>{
-    const target=cases.find(item=>item.id===id);
+  const target=cases.find(item=>item.id===id);
     if(!target)return;
     const expected=nextOperationStep(target);
     if(!expected||expected.key!==stepKey){notify('Completa primero el paso anterior');return}
-    const evidenceFiles=Array.isArray(evidence)?evidence.filter(Boolean):evidence?[evidence]:[];
+    const evidencePayload=evidence&&typeof evidence==='object'&&!Array.isArray(evidence)&&Array.isArray(evidence.files)?evidence:null;
+    const evidenceFiles=Array.isArray(evidence)?evidence.filter(Boolean):evidencePayload?evidencePayload.files.filter(Boolean):evidence?[evidence]:[];
+    const selectedWarehouseRefs=Array.isArray(evidencePayload?.warehouseRefs)?evidencePayload.warehouseRefs:[];
+    const selectedWarehouseEntries=stepKey==='cargo'?warehouseEntries.filter(entry=>selectedWarehouseRefs.includes(entry.ref)):[]; 
     const cargoEvidence=stepKey==='cargo'?evidenceFiles:[];
+    const cargoHasWarehouse=stepKey==='cargo'&&selectedWarehouseEntries.length>0;
     const documentEvidence=stepKey==='documents'?evidenceFiles:[];
     const deliveryPhotos=stepKey==='delivery'?evidenceFiles.filter(file=>file.evidenceType==='delivery-photo'):[];
     const podFiles=stepKey==='delivery'?evidenceFiles.filter(file=>file.evidenceType==='pod'||(!file.evidenceType&&file)):[];
-    if(stepKey==='cargo'&&!cargoEvidence.length){notify('Añade al menos una foto de la mercancía');return}
+    if(stepKey==='cargo'&&!cargoEvidence.length&&!cargoHasWarehouse){notify('Añade una foto o selecciona una mercancía existente en almacén');return}
     if(stepKey==='delivery'&&!deliveryPhotos.length){notify('Añade al menos una foto de la mercancía entregada');return}
     if(stepKey==='delivery'&&!podFiles.length){notify('Escanea o adjunta el POD firmado');return}
     const flow={...operationFlow(target),[stepKey]:true};
@@ -791,17 +795,19 @@ function App({auth,finance,onFinanceChange,onLogout}){
     const now=new Date();
     const deliveryWarehouseScope=ready?warehouseEntriesForVessel(warehouseEntries,target):[];
     const warehouseReviewNote=ready?` Almacén revisado: ${deliveryWarehouseScope.length} partida(s) activa(s) para ${target.buque}.`:'';
-    const timelineEntry={id:`FLOW-${id}-${stepKey}-${Date.now()}`,fecha:now.toLocaleDateString('es-ES'),hora:now.toLocaleTimeString('es-ES',{hour:'2-digit',minute:'2-digit'}),titulo:expected.title,detalle:`${note||'Paso confirmado sin incidencias'}${warehouseReviewNote}`,actor:visibleUser.fullName,archivo:ready?podFiles[0]||null:null,archivos:stepKey==='cargo'?cargoEvidence:stepKey==='documents'?documentEvidence:[...deliveryPhotos,...podFiles.slice(1)],estado:'done'};
+    const linkedWarehouseNote=cargoHasWarehouse?` Almacén vinculado: ${selectedWarehouseEntries.map(entry=>entry.ref).join(', ')}.`:'';
+    const timelineEntry={id:`FLOW-${id}-${stepKey}-${Date.now()}`,fecha:now.toLocaleDateString('es-ES'),hora:now.toLocaleTimeString('es-ES',{hour:'2-digit',minute:'2-digit'}),titulo:expected.title,detalle:`${note||'Paso confirmado sin incidencias'}${linkedWarehouseNote}${warehouseReviewNote}`,actor:visibleUser.fullName,archivo:ready?podFiles[0]||null:null,archivos:stepKey==='cargo'?[...cargoEvidence,...selectedWarehouseEntries.flatMap(entry=>[...(entry.fotos||[]),...(entry.documentosRecepcion||[])])]:stepKey==='documents'?documentEvidence:[...deliveryPhotos,...podFiles.slice(1)],estado:'done'};
     const linkedTransport=transports.find(item=>item.expediente===id);
-    const cargoMerchandise=(target.mercancias||[]).length?target.mercancias:[{id:`${id}-AUTO-${Date.now()}`,tipo:'CAJA',cantidad:Math.max(1,Number(target.bultos)||1),seguimiento:'',peso:target.peso&&!/registrar|pendiente/i.test(target.peso)?target.peso:'PESO PENDIENTE',documentos:[]}];
+    const warehouseMerchandise=selectedWarehouseEntries.flatMap(entry=>entry.mercancias||[]);
+    const cargoMerchandise=warehouseMerchandise.length?warehouseMerchandise:(target.mercancias||[]).length?target.mercancias:[{id:`${id}-AUTO-${Date.now()}`,tipo:'CAJA',cantidad:Math.max(1,Number(target.bultos)||1),seguimiento:'',peso:target.peso&&!/registrar|pendiente/i.test(target.peso)?target.peso:'PESO PENDIENTE',documentos:[]}];
     const cargoPhotos=cargoEvidence.map((file,index)=>({...file,tipo:index===0?'VISTA GENERAL':'ESTADO DE EMBALAJE',mercancia:cargoMerchandise.map(line=>`${line.cantidad} ${line.tipo}${line.cantidad===1?'':'S'} · ${line.peso||'PESO PENDIENTE'}`).join(' · '),nota:`Registrado por ${visibleUser.fullName}`}));
     const cargoReference=`ALM-${Date.now()}`;
-    const cargoReception=stepKey==='cargo'?{ref:cargoReference,source:'driver-flow',fecha:now.toISOString(),zona:linkedTransport?.origen||'PENDIENTE DE UBICAR',peso:merchandiseWeightLabel(cargoMerchandise),mercancias:cargoMerchandise,fotos:cargoPhotos,documentos:[]}:null;
-    const nextCases=cases.map(item=>item.id===id?normalizeMerchandise({...item,mercancias:stepKey==='cargo'?cargoMerchandise:item.mercancias,operationalFlow:flow,progreso:ready?100:Math.round(OPERATION_STEPS.filter(step=>flow[step.key]).length/OPERATION_STEPS.length*100),siguiente:ready?'Listo para facturar':nextStep?.next||'',estado:ready?'Completado':'En curso',recepciones:cargoReception?[cargoReception,...(item.recepciones||[])]:item.recepciones,documentacionMercancia:stepKey==='documents'?{...item.documentacionMercancia,archivosEnvio:[...(item.documentacionMercancia?.archivosEnvio||[]),...documentEvidence],revisada:true}:ready?{...item.documentacionMercancia,podDisponible:true,podArchivo:podFiles[0]||item.documentacionMercancia?.podArchivo||null,podArchivos:podFiles,fotosEntrega:deliveryPhotos}:item.documentacionMercancia,timelineCustom:[timelineEntry,...(item.timelineCustom||[])]}):item);
+    const cargoReceptions=stepKey==='cargo'?(cargoHasWarehouse?selectedWarehouseEntries.map(entry=>({ref:entry.ref,source:'warehouse-linked',fecha:entry.fechaRecepcion||entry.entrada||now.toISOString(),zona:entry.zona||'ALMACÉN',peso:entry.peso||merchandiseWeightLabel(entry.mercancias||[]),mercancias:entry.mercancias||[],fotos:entry.fotos||[],documentos:entry.documentosRecepcion||[]})):[{ref:cargoReference,source:'driver-flow',fecha:now.toISOString(),zona:linkedTransport?.origen||'PENDIENTE DE UBICAR',peso:merchandiseWeightLabel(cargoMerchandise),mercancias:cargoMerchandise,fotos:cargoPhotos,documentos:[]}]):[];
+    const nextCases=cases.map(item=>item.id===id?normalizeMerchandise({...item,mercancias:stepKey==='cargo'?cargoMerchandise:item.mercancias,operationalFlow:flow,progreso:ready?100:Math.round(OPERATION_STEPS.filter(step=>flow[step.key]).length/OPERATION_STEPS.length*100),siguiente:ready?'Listo para facturar':nextStep?.next||'',estado:ready?'Completado':'En curso',recepciones:cargoReceptions.length?[...cargoReceptions,...(item.recepciones||[])]:item.recepciones,documentacionMercancia:stepKey==='documents'?{...item.documentacionMercancia,archivosEnvio:[...(item.documentacionMercancia?.archivosEnvio||[]),...documentEvidence],revisada:true}:ready?{...item.documentacionMercancia,podDisponible:true,podArchivo:podFiles[0]||item.documentacionMercancia?.podArchivo||null,podArchivos:podFiles,fotosEntrega:deliveryPhotos}:item.documentacionMercancia,timelineCustom:[timelineEntry,...(item.timelineCustom||[])]}):item);
     const nextTransports=ready?transports.map(item=>item.expediente===id?{...item,estado:'Entregado'}:item):transports;
     const alreadyInWarehouse=warehouseEntries.some(item=>item.expediente===id&&!item.archivado&&item.estado!=='Expedido');
     const automaticWarehouseEntry=stepKey==='cargo'&&!alreadyInWarehouse?{ref:cargoReference,source:'driver-flow',expediente:id,buque:target.buque,zona:'PENDIENTE',entrada:formatReceptionDate(now.toISOString()),fechaRecepcion:now.toISOString(),bultos:merchandiseCount(cargoMerchandise),peso:merchandiseWeightLabel(cargoMerchandise),mercancias:cargoMerchandise,fotos:cargoPhotos,documentosRecepcion:[],dias:0,estado:'En stock',archivado:false}:null;
-    const nextWarehouse=ready?warehouseEntries.map(item=>deliveryWarehouseScope.includes(item)?{...item,expediente:item.expediente||id,estado:'Expedido',archivado:true,salida:new Date().toISOString()}:item):automaticWarehouseEntry?[automaticWarehouseEntry,...warehouseEntries]:warehouseEntries;
+    const nextWarehouse=ready?warehouseEntries.map(item=>deliveryWarehouseScope.includes(item)?{...item,expediente:item.expediente||id,estado:'Expedido',archivado:true,salida:new Date().toISOString()}:item):cargoHasWarehouse?warehouseEntries.map(entry=>selectedWarehouseRefs.includes(entry.ref)?{...entry,expediente:id,buque:target.buque,estado:entry.estado||'En stock',archivado:false}:entry):automaticWarehouseEntry?[automaticWarehouseEntry,...warehouseEntries]:warehouseEntries;
     setCases(nextCases);setTransports(nextTransports);setWarehouseEntries(nextWarehouse);
     saveOperational(nextCases,nextTransports,nextWarehouse);
     notify(ready?'POD registrado: expediente listo para facturar':expected.title+' registrado');
@@ -1289,6 +1295,23 @@ function WarehouseTransportReview({entries,item,checked,setChecked}){
   </section>;
 }
 
+function WarehouseCargoReception({entries,selectedRefs,toggle}){
+  const totalUnits=entries.reduce((sum,entry)=>sum+(Number(entry.bultos)||merchandiseCount(entry.mercancias)),0);
+  return <section className="warehouse-cargo-reception">
+    <div className="warehouse-review-head"><WarehouseIcon/><span><b>Mercancía ya registrada en almacén</b><small>{entries.length?'Selecciona las entradas que corresponden a este expediente para recepcionarlas aquí.':'No hay stock activo detectado para este buque/expediente. Puedes tomar fotos de recepción para crear la entrada.'}</small></span><strong>{totalUnits} bultos</strong></div>
+    {entries.length?<div className="warehouse-cargo-list">{entries.map((entry,index)=>{
+      const pieces=(entry.mercancias||[]).length?(entry.mercancias||[]).map(line=>`${line.cantidad} ${line.tipo}${Number(line.cantidad)===1?'':'S'}${line.peso?` · ${line.peso} KG`:''}${line.seguimiento?` · ${line.seguimiento}`:''}`).join(' · '):`${entry.bultos||0} bultos${entry.peso?` · ${entry.peso}`:''}`;
+      const photos=entry.fotos||[];
+      const docs=entry.documentosRecepcion||[];
+      return <article key={entry.ref||index} className={selectedRefs.includes(entry.ref)?'selected':''}>
+        <label><input type="checkbox" checked={selectedRefs.includes(entry.ref)} onChange={()=>toggle(entry.ref)}/><span><b>{entry.ref||`Entrada ${index+1}`}</b><small>{entry.expediente?`Expediente ${entry.expediente}`:'Sin expediente'} · {entry.entrada||formatReceptionDate(entry.fechaRecepcion||entry.fecha)||'Fecha pendiente'} · {entry.zona||'Ubicación pendiente'}</small></span></label>
+        <p>{pieces}</p>
+        {(photos.length||docs.length)?<div className="warehouse-cargo-evidence">{photos.slice(0,3).map((photo,photoIndex)=><a href={photo.url} target="_blank" rel="noreferrer" key={photo.id||photo.url||photoIndex}><Camera/> Foto {photoIndex+1}</a>)}{docs.slice(0,3).map((file,fileIndex)=><a href={file.url} target="_blank" rel="noreferrer" key={file.id||file.url||fileIndex}><FileText/> {documentLabel(file.name)}</a>)}</div>:<small className="warehouse-cargo-warning"><CircleAlert/> Sin fotos/documentos adjuntos en esta entrada</small>}
+      </article>;
+    })}</div>:<p><CircleAlert/> Si la mercancía ya está físicamente en almacén pero no aparece aquí, regístrala primero desde Almacén o toma fotos en este paso.</p>}
+  </section>;
+}
+
 function PodDocuments({item,notify}){
   const documentation=item?.documentacionMercancia||{};
   const pods=(documentation.podArchivos||[]).length?documentation.podArchivos:(documentation.podArchivo?[documentation.podArchivo]:[]);
@@ -1479,6 +1502,7 @@ function OperationStepModal({item,warehouseEntries,transports,csrfToken,currentU
   const [uploading,setUploading]=useState(false);
   const [error,setError]=useState('');
   const [warehouseReviewed,setWarehouseReviewed]=useState(false);
+  const [selectedWarehouseRefs,setSelectedWarehouseRefs]=useState(()=>warehouseEntriesForVessel(warehouseEntries,item).map(entry=>entry.ref));
   if(!step)return null;
   const inWarehouse=warehouseEntries.some(entry=>entry.expediente===item.id&&!entry.archivado&&entry.estado!=='Expedido');
   const transport=transports.find(entry=>entry.expediente===item.id);
@@ -1508,14 +1532,17 @@ function OperationStepModal({item,warehouseEntries,transports,csrfToken,currentU
   const deliveryPhotos=evidenceFiles.filter(file=>file.evidenceType==='delivery-photo');
   const podFiles=evidenceFiles.filter(file=>file.evidenceType==='pod');
   const vesselWarehouseEntries=warehouseEntriesForVessel(warehouseEntries,item);
+  const selectedWarehouseEntries=vesselWarehouseEntries.filter(entry=>selectedWarehouseRefs.includes(entry.ref));
   const needsEvidence=['cargo','delivery'].includes(step.key);
-  const evidenceReady=step.key==='cargo'?cargoPhotos.length>0:step.key==='delivery'?warehouseReviewed&&deliveryPhotos.length>0&&podFiles.length>0:true;
+  const evidenceReady=step.key==='cargo'?cargoPhotos.length>0||selectedWarehouseEntries.length>0:step.key==='delivery'?warehouseReviewed&&deliveryPhotos.length>0&&podFiles.length>0:true;
+  const toggleWarehouseEntry=ref=>setSelectedWarehouseRefs(current=>current.includes(ref)?current.filter(item=>item!==ref):[...current,ref]);
   return <div className="modal-backdrop" onMouseDown={event=>{if(event.target===event.currentTarget)close()}}>
     <section className="modal operation-modal">
       <div className="modal-head"><div><span className="overline">Paso operativo</span><h2>{step.title}</h2><p>{item.id} · {item.buque}</p></div><button className="icon-button" onClick={close}><X/></button></div>
       <div className="operation-modal-body">
         <OperationChecklist item={item} currentRoles={currentUser}/>
         <div className="operation-guidance"><ClipboardCheck/><div><b>Qué debes comprobar</b><p>{guidance[step.key]}</p>{step.key==='delivery'&&transport&&<small>{transport.id} · {transport.ruta}</small>}</div></div>
+        {step.key==='cargo'&&<WarehouseCargoReception entries={vesselWarehouseEntries} selectedRefs={selectedWarehouseRefs} toggle={toggleWarehouseEntry}/>}
         {['documents','assignment','delivery'].includes(step.key)&&<ShipmentDocuments item={item}/>}
         {step.key==='delivery'&&<WarehouseTransportReview entries={vesselWarehouseEntries} item={item} checked={warehouseReviewed} setChecked={setWarehouseReviewed}/>}
         {step.key==='documents'&&<div className="pod-scanner shipment-document-upload">
@@ -1534,7 +1561,7 @@ function OperationStepModal({item,warehouseEntries,transports,csrfToken,currentU
           {error&&<p className="form-error"><CircleAlert/>{error}</p>}
         </div>}
         <label className="field"><span>Observación (opcional)</span><input value={note} onChange={event=>setNote(event.target.value)} placeholder="Incidencias, persona que recibe, referencia…"/></label>
-        <div className="modal-actions"><button className="button tertiary" onClick={close}>Cancelar</button><button className="button primary" disabled={uploading||!evidenceReady} onClick={()=>submit(step.key,note,evidenceFiles)}><CheckCircle2/> {!evidenceReady?(step.key==='cargo'?'Añade una foto':'Revisa almacén, foto de entrega y POD'):'Confirmar paso'}</button></div>
+        <div className="modal-actions"><button className="button tertiary" onClick={close}>Cancelar</button><button className="button primary" disabled={uploading||!evidenceReady} onClick={()=>submit(step.key,note,step.key==='cargo'?{files:evidenceFiles,warehouseRefs:selectedWarehouseRefs}:evidenceFiles)}><CheckCircle2/> {!evidenceReady?(step.key==='cargo'?'Añade una foto o selecciona almacén':'Revisa almacén, foto de entrega y POD'):'Confirmar paso'}</button></div>
       </div>
     </section>
   </div>;
