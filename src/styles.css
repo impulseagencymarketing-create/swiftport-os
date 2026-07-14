@@ -139,23 +139,12 @@
 .calendar-event-delete{position:absolute;right:4px;top:4px;z-index:5;display:grid;place-items:center;width:18px;height:18px;border:1px solid rgba(221,47,74,.25);border-radius:6px;background:rgba(255,255,255,.88);color:#dd2f4a;opacity:0;transition:opacity .15s}
 .calendar-event:hover .calendar-event-delete,.calendar-unscheduled-card:hover .calendar-event-delete{opacity:1}
 .calendar-event-delete svg{width:11px}
-.calendar-event-move{position:absolute;right:26px;top:4px;z-index:5;display:grid;place-items:center;width:18px;height:18px;border:1px solid rgba(20,112,216,.22);border-radius:6px;background:rgba(255,255,255,.94);color:var(--blue);opacity:1;transition:transform .15s}
-.calendar-event-move:hover,.calendar-unscheduled-card .calendar-event-move:hover{transform:scale(1.08)}
-.calendar-event-move svg{width:11px}
 .calendar-event{max-height:100%;contain:layout paint}
 .calendar-event,.calendar-unscheduled-card{cursor:grab;touch-action:none}
 .calendar-event.dragging,.calendar-unscheduled-card.dragging{opacity:.45;filter:saturate(.8);cursor:grabbing;pointer-events:none}
 .calendar-day.drop-target{background:linear-gradient(180deg,#eef6ff,#fff)}
 .calendar-unscheduled-row>div.drop-target{background:#fff0c8;outline:2px dashed #e4a12a;outline-offset:-5px}
 .calendar-day.drop-target:after{content:"Soltar aquí";position:absolute;left:8px;right:8px;top:8px;z-index:1;display:grid;place-items:center;height:34px;border:1px dashed #7fb3f0;border-radius:8px;background:rgba(235,246,255,.92);color:#1f65b7;font-size:9px;font-weight:900;text-transform:uppercase;letter-spacing:.04em;pointer-events:none}
-.calendar-move-mode{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.4fr) auto;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid #bdd7f4;background:#eef6ff;color:#174f9e}
-.calendar-move-mode b{font-size:10px;text-transform:uppercase;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.calendar-move-mode span{font-size:9px;color:#47627e}.calendar-move-mode .button{min-height:30px}
-.calendar-day.move-target{background:linear-gradient(180deg,#f7fbff,#fff);cursor:crosshair}.calendar-day.move-target:hover{outline:2px solid #6aa9ed;outline-offset:-2px;background:#eef6ff}
-.calendar-unscheduled-row>div.move-target{cursor:crosshair}.calendar-unscheduled-row>div.move-target:hover{outline:2px solid #e4a12a;outline-offset:-5px;background:#fff0c8}
-.quick-move-modal{width:min(520px,calc(100vw - 32px))}
-.quick-move-modal form{grid-template-columns:repeat(2,minmax(0,1fr))}
-.quick-move-summary{display:flex;align-items:center;gap:10px;padding:12px;border:1px solid #cfe0f3;border-radius:10px;background:#f7fbff;color:#17324d}
-.quick-move-summary svg{width:18px;color:var(--blue)}.quick-move-summary b,.quick-move-summary small{display:block}.quick-move-summary b{font-size:11px}.quick-move-summary small{margin-top:3px;color:var(--muted);font-size:8px}
 .calendar-event-open{min-width:0}
 .calendar-event .calendar-vessel-name,.calendar-event .calendar-port-name{font-size:10px;line-height:1.1}
 .calendar-event .calendar-port-name{margin-top:1px;text-transform:uppercase}
