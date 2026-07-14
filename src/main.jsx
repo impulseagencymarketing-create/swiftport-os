@@ -614,7 +614,8 @@ function App({auth,finance,onFinanceChange,onLogout}){
     notify(message);
     if(localStorage.getItem('swiftport-device-alerts')==='1')showDeviceNotification(`Swiftport · ${item.buque}`,message,tracking.alertKey).catch(()=>{});
   },[cases,calendarEvents,operationalLoaded]);
-  const saveOperational=(nextCases=cases,nextTransports=transports,nextWarehouse=warehouseEntries,nextCustoms=customs,nextCalendar=calendarEvents,nextProviders=providers,nextVessels=vessels,nextDeletedVesselKeys=deletedVesselKeys)=>api('/api/operational.php',{method:'PUT',headers:{'X-CSRF-Token':auth.csrfToken},body:JSON.stringify({data:{cases:nextCases,transports:nextTransports,warehouseEntries:nextWarehouse,customs:nextCustoms,calendarEvents:nextCalendar,providers:nextProviders,vessels:nextVessels,deletedVesselKeys:nextDeletedVesselKeys}})}).catch(reason=>notify(reason.message));
+  const persistOperational=(nextCases=cases,nextTransports=transports,nextWarehouse=warehouseEntries,nextCustoms=customs,nextCalendar=calendarEvents,nextProviders=providers,nextVessels=vessels,nextDeletedVesselKeys=deletedVesselKeys)=>api('/api/operational.php',{method:'PUT',headers:{'X-CSRF-Token':auth.csrfToken},body:JSON.stringify({data:{cases:nextCases,transports:nextTransports,warehouseEntries:nextWarehouse,customs:nextCustoms,calendarEvents:nextCalendar,providers:nextProviders,vessels:nextVessels,deletedVesselKeys:nextDeletedVesselKeys}})});
+  const saveOperational=(...args)=>persistOperational(...args).catch(reason=>notify(reason.message));
   const operationalTeam=useMemo(()=>team.filter(member=>hasRole(member,'operations')||hasRole(member,'driver')),[team]);
   useEffect(()=>{if(driverOnly&&!['calendario','almacen'].includes(tab))setTab('calendario')},[driverOnly,tab]);
   useEffect(()=>{
@@ -659,13 +660,15 @@ function App({auth,finance,onFinanceChange,onLogout}){
     if(changed){setTransports(normalized);setCalendarEvents(normalizedCalendar);saveOperational(cases,normalized,warehouseEntries,customs,normalizedCalendar)}
   },[operationalLoaded,team.length]);
   const openCase=id=>{setSelectedId(id);navigate('expedientes')};
-  const createCase=form=>{
-    const nextNumber=49+cases.length-expedientesIniciales.length;
+  const createCase=async form=>{
+    const vessel=String(form.buque||'').trim().toUpperCase();
+    if(!vessel){notify('Indica el buque para crear el expediente');return}
+    const nextNumber=Math.max(0,...cases.map(entry=>Number(String(entry.id||'').match(/^SW-2026-(\d+)$/)?.[1]||0)))+1;
     const id='SW-2026-'+String(nextNumber).padStart(4,'0');
     const etaDate=String(form.eta||'').slice(0,10);
     const etaTime=String(form.eta||'').slice(11,16);
-    const known=findKnownVessel(vessels,form.buque)||{};
-    const item=normalizeMerchandise({id,buque:form.buque.toUpperCase(),imo:cleanImo(form.imo)||known.imo||'',mmsi:cleanMmsi(form.mmsi)||known.mmsi||'',cliente:form.cliente,puerto:form.puerto,eta:etaDate||'Por confirmar',portCall:{etaDate,etaTime,etbDate:'',etbTime:'',etdDate:'',etdTime:'',updatedAt:new Date().toISOString()},estado:'Nuevo',prioridad:form.prioridad,conductor:'Sin asignar',servicios:[form.createReception&&'Recepción',form.createTransport&&'Transporte'].filter(Boolean),bultos:Number(form.bultos)||0,peso:'Por registrar',progreso:0,siguiente:'Revisar expediente y servicios programados',aduana:'Por revisar',autoTransportDisabled:false});
+    const known=findKnownVessel(vessels,vessel)||{};
+    const item=normalizeMerchandise({id,buque:vessel,imo:cleanImo(form.imo)||known.imo||'',mmsi:cleanMmsi(form.mmsi)||known.mmsi||'',cliente:form.cliente,puerto:form.puerto,eta:etaDate||'Por confirmar',portCall:{etaDate,etaTime,etbDate:'',etbTime:'',etdDate:'',etdTime:'',updatedAt:new Date().toISOString()},estado:'Nuevo',prioridad:form.prioridad,conductor:'Sin asignar',servicios:[form.createReception&&'Recepción',form.createTransport&&'Transporte'].filter(Boolean),bultos:Number(form.bultos)||0,peso:'Por registrar',progreso:0,siguiente:'Revisar expediente y servicios programados',aduana:'Por revisar',autoTransportDisabled:false,manualVesselName:true,manualEditedAt:new Date().toISOString()});
     const stamp=Date.now();
     const receptionEvent=form.createReception&&form.receptionDate?{id:`EV-${stamp}-R`,titulo:form.receptionLocation||'Recepción en almacén',tipoServicio:'Recepción',fecha:form.receptionDate,inicio:form.receptionStart,fin:form.receptionEnd,asignado:'Sin asignar',expediente:id,transporte:'',color:'gray'}:null;
     const transportDate=form.transportDate||etaDate;
@@ -679,7 +682,8 @@ function App({auth,finance,onFinanceChange,onLogout}){
     const nextTransports=transport?[transport,...transports]:transports;
     const nextCalendar=[transportEvent].filter(Boolean).concat(calendarEvents.filter(isTransportCalendarEvent));
     const nextVessels=upsertVesselFromCase(vessels,item);
-    setCases(nextCases);setTransports(nextTransports);setCalendarEvents(nextCalendar);setVessels(nextVessels);saveOperational(nextCases,nextTransports,warehouseEntries,customs,nextCalendar,providers,nextVessels);setSelectedId(item.id);setNewOpen(false);setTab('expedientes');notify(`Expediente ${item.id} creado con ${nextCalendar.length-calendarEvents.length} trabajos programados`);
+    try{await persistOperational(nextCases,nextTransports,warehouseEntries,customs,nextCalendar,providers,nextVessels);setCases(nextCases);setTransports(nextTransports);setCalendarEvents(nextCalendar);setVessels(nextVessels);setSelectedId(item.id);setNewOpen(false);setTab('expedientes');notify(`Expediente ${item.id} creado y guardado`)}
+    catch(reason){notify('No se pudo guardar el expediente: '+reason.message)}
   };
   const updateTransport=updated=>{const parts=routeParts(updated);const normalized={...updated,...parts,ruta:`${parts.origen} → ${parts.destino}`,hora:formatSchedule(updated.fecha,updated.inicio,updated.fin),scheduleSource:'manual',scheduleStatus:updated.inicio?'confirmed':'missing_time',scheduleNote:updated.inicio?'':'Falta hora ETB; pendiente de confirmar horario'};const nextTransports=transports.map(item=>item.id===updated.id?normalized:item);const nextCases=cases.map(item=>{if(item.id!==updated.expediente)return item;const flow=operationFlow(item);const assigned=Boolean(updated.conductor&&updated.conductor!=='Sin asignar');const changed=assigned&&item.conductor!==updated.conductor;const now=new Date();return normalizeMerchandise({...item,autoTransportDisabled:false,conductor:updated.conductor,operationalFlow:{...flow,assignment:flow.delivery||assigned},timelineCustom:changed?[{id:`ASSIGN-${item.id}-${Date.now()}`,fecha:now.toLocaleDateString('es-ES'),hora:now.toLocaleTimeString('es-ES',{hour:'2-digit',minute:'2-digit'}),titulo:'Conductor asignado',detalle:`${updated.conductor} · ${normalized.ruta}`,actor:visibleUser.fullName,estado:'done'},...(item.timelineCustom||[])]:item.timelineCustom})});const linkedEvent=calendarEvents.find(item=>item.transporte===updated.id);const synchronized={titulo:normalized.ruta,origen:normalized.origen,destino:normalized.destino,tipoServicio:'Transporte',fecha:updated.fecha,inicio:updated.inicio,fin:updated.fin,asignado:updated.conductor,proveedorId:updated.proveedorId||'',expediente:updated.expediente,transporte:updated.id,color:driverTone(updated.conductor,operationalTeam),scheduleSource:'manual',scheduleStatus:normalized.scheduleStatus,scheduleNote:normalized.scheduleNote};const nextCalendar=(linkedEvent?calendarEvents.map(item=>item.transporte===updated.id?{...item,...synchronized}:item):[...calendarEvents,{id:'EV-'+Date.now(),...synchronized}]).filter(isTransportCalendarEvent);setTransports(nextTransports);setCases(nextCases);setCalendarEvents(nextCalendar);saveOperational(nextCases,nextTransports,warehouseEntries,customs,nextCalendar);notify('Ruta, transporte y calendario actualizados')};
   const updateCase=updated=>{
