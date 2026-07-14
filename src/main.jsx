@@ -681,22 +681,28 @@ function App({auth,finance,onFinanceChange,onLogout}){
   const rebuildCalendarServices=async()=>{const activeCaseIds=new Set(cases.filter(item=>item.estado!=='Completado').map(item=>item.id));const affected=calendarEvents.filter(event=>activeCaseIds.has(event.expediente)).length;const affectedTransports=transports.filter(item=>activeCaseIds.has(item.expediente)).length;if(!affected&&!affectedTransports){notify('No hay servicios activos que limpiar');return}if(!window.confirm(`¿Limpiar y reconstruir el calendario?\n\nSe quitarán ${affected} tarjetas del calendario y ${affectedTransports} transportes planificados de expedientes activos. No se borran expedientes, mercancía ni documentos. Después se reconstruirá SOLO con transportes usando ETB/fecha del buque.`))return;const nextCalendar=calendarEvents.filter(event=>!activeCaseIds.has(event.expediente));const nextTransports=transports.filter(item=>!activeCaseIds.has(item.expediente));setCalendarEvents(nextCalendar);setTransports(nextTransports);await saveOperational(cases,nextTransports,warehouseEntries,customs,nextCalendar);notify('Calendario limpiado; reconstruyendo solo transportes');await loadOperational()};
   const updateClient=updated=>{const next={...finance,clients:finance.clients.map(item=>item.codigo===updated.codigo?updated:item)};onFinanceChange(next).then(()=>notify('Cliente y tarifas actualizados')).catch(reason=>notify(reason.message))};
   const updateInvoice=updated=>{const next={...finance,invoices:finance.invoices.map(item=>item.id===updated.id?updated:item)};onFinanceChange(next).then(()=>notify('Documento actualizado')).catch(reason=>notify(reason.message))};
+  const syncCaseWithWarehouseEntries=(item,nextWarehouse)=>{
+    const linkedEntries=nextWarehouse.filter(entry=>entry.expediente===item.id&&!entry.archivado&&entry.estado!=='Expedido');
+    const linkedRefs=new Set(linkedEntries.map(entry=>entry.ref));
+    const warehouseReceptions=linkedEntries.map(entry=>({ref:entry.ref,fecha:entry.fechaRecepcion||entry.entrada,zona:entry.zona,peso:entry.peso,mercancias:entry.mercancias||[],fotos:entry.fotos||[],documentos:entry.documentosRecepcion||[],source:entry.source||'warehouse'}));
+    const otherReceptions=(item.recepciones||[]).filter(reception=>!linkedRefs.has(reception.ref));
+    const linkedMerchandise=linkedEntries.flatMap(entry=>entry.mercancias||[]);
+    return normalizeMerchandise({...item,mercancias:linkedMerchandise,recepciones:[...warehouseReceptions,...otherReceptions],bultos:merchandiseCount(linkedMerchandise),peso:linkedMerchandise.length?merchandiseWeightLabel(linkedMerchandise):'Por registrar'});
+  };
   const updateWarehouseEntry=updated=>{
     const previous=warehouseEntries.find(item=>item.ref===updated.ref);
     const relatedCase=cases.find(item=>item.id===updated.expediente);
     const normalized={...updated,buque:relatedCase?.buque||updated.buque||'Mercancía sin identificar',expediente:updated.expediente||'',sinExpediente:!updated.expediente};
     const next=warehouseEntries.map(item=>item.ref===updated.ref?normalized:item);
     let nextCases=cases;
-    if(relatedCase&&previous?.expediente!==updated.expediente){
-      const reception={ref:normalized.ref,fecha:normalized.fechaRecepcion||normalized.entrada,zona:normalized.zona,peso:normalized.peso,mercancias:normalized.mercancias||[],fotos:normalized.fotos||[],documentos:normalized.documentosRecepcion||[]};
+    const affectedCaseIds=[previous?.expediente,normalized.expediente].filter(Boolean);
+    if(affectedCaseIds.length){
       const now=new Date();
-      nextCases=cases.map(item=>item.id===relatedCase.id?normalizeMerchandise({
-        ...item,
-        mercancias:[...(item.mercancias||[]),...(normalized.mercancias||[])],
-        recepciones:[reception,...(item.recepciones||[])],
-        operationalFlow:{...operationFlow(item),review:true,cargo:true},
-        estado:'En curso',
-        timelineCustom:[{
+      nextCases=cases.map(item=>affectedCaseIds.includes(item.id)?{
+        ...syncCaseWithWarehouseEntries(item,next),
+        operationalFlow:normalized.expediente===item.id?{...operationFlow(item),review:true,cargo:true}:operationFlow(item),
+        estado:normalized.expediente===item.id?'En curso':item.estado,
+        timelineCustom:normalized.expediente===item.id&&previous?.expediente!==updated.expediente?[{
           id:`WAREHOUSE-LINK-${normalized.ref}-${Date.now()}`,
           fecha:now.toLocaleDateString('es-ES'),
           hora:now.toLocaleTimeString('es-ES',{hour:'2-digit',minute:'2-digit'}),
@@ -704,11 +710,18 @@ function App({auth,finance,onFinanceChange,onLogout}){
           detalle:`${normalized.ref} · ${normalized.bultos} bultos · ${normalized.peso} · Zona ${normalized.zona}`,
           actor:visibleUser.fullName,
           estado:'done'
-        },...(item.timelineCustom||[])]
-      }):item);
+        },...(item.timelineCustom||[])]:item.timelineCustom
+      }:item);
     }
     setWarehouseEntries(next);setCases(nextCases);saveOperational(nextCases,transports,next);
     notify(relatedCase&&previous?.expediente!==updated.expediente?'Mercancía vinculada al expediente':'Entrada de almacén actualizada');
+  };
+  const deleteWarehouseEntry=entry=>{
+    if(!window.confirm(`¿Eliminar la entrada ${entry.ref} de almacén?\n\nSe quitará del stock y del expediente vinculado, pero no tocará documentos subidos en otros pasos.`))return;
+    const nextWarehouse=warehouseEntries.filter(item=>item.ref!==entry.ref);
+    const affectedCaseIds=[entry.expediente].filter(Boolean);
+    const nextCases=affectedCaseIds.length?cases.map(item=>affectedCaseIds.includes(item.id)?syncCaseWithWarehouseEntries({...item,recepciones:(item.recepciones||[]).filter(reception=>reception.ref!==entry.ref)},nextWarehouse):item):cases;
+    setWarehouseEntries(nextWarehouse);setCases(nextCases);saveOperational(nextCases,transports,nextWarehouse);notify('Entrada de almacén eliminada');
   };
   const updateCustom=updated=>{const next=customs.map(item=>item.id===updated.id?updated:item);setCustoms(next);saveOperational(cases,transports,warehouseEntries,next);notify('Trámite aduanero actualizado')};
   const deleteCalendarService=event=>{
@@ -916,7 +929,7 @@ function App({auth,finance,onFinanceChange,onLogout}){
         {tab==='dashboard'&&<Dashboard cases={casesWithFinance} warehouseEntries={warehouseEntries} calendarEvents={calendarEvents} openCase={openCase} navigate={navigate} showFinance={showFinance} user={visibleUser}/>}
         {tab==='calendario'&&<>{!driverOnly&&<DriverLegend team={operationalTeam}/>}<Calendario events={calendarEvents} team={operationalTeam} cases={cases} transports={transports} providers={providers} warehouseEntries={warehouseEntries} saveEvent={saveCalendarEvent} deleteEvent={deleteCalendarService} completeCaseStep={completeCaseStep} undoCaseStep={undoCaseStep} openCase={openCase} currentUser={visibleUser} csrfToken={auth.csrfToken} reloadOperational={loadOperational} notify={notify}/></>}
         {tab==='expedientes'&&<Expedientes cases={casesWithFinance} selected={selected} select={setSelectedId} search={search} setSearch={setSearch} completeCaseStep={completeCaseStep} notify={notify} showFinance={showFinance} updateCase={updateCase} deleteCase={deleteCase} clientOptions={clientOptions} warehouseEntries={warehouseEntries} transports={transports} calendarEvents={calendarEvents} team={operationalTeam} providers={providers} vessels={vessels} saveEvent={saveCalendarEvent} csrfToken={auth.csrfToken} reloadOperational={loadOperational} currentUser={visibleUser}/>}
-        {tab==='almacen'&&<Almacen items={warehouseEntries} cases={casesWithFinance} openCase={openCase} registerEntry={registerWarehouseEntry} updateEntry={updateWarehouseEntry} showFinance={showFinance} storageTotal={finance.warehouseStorageTotal} csrfToken={auth.csrfToken}/>}
+        {tab==='almacen'&&<Almacen items={warehouseEntries} cases={casesWithFinance} openCase={openCase} registerEntry={registerWarehouseEntry} updateEntry={updateWarehouseEntry} deleteEntry={deleteWarehouseEntry} showFinance={showFinance} storageTotal={finance.warehouseStorageTotal} csrfToken={auth.csrfToken}/>}
         {tab==='buques'&&<Buques vessels={vessels} cases={casesWithFinance} warehouseEntries={warehouseEntries} saveVessel={saveVessel} deleteVessel={deleteVessel} openCase={openCase}/>}
         {tab==='transportes'&&<Transportes items={transports} update={updateTransport} openCase={openCase} team={operationalTeam} providers={providers} saveProvider={saveProvider}/>}
         {tab==='aduanas'&&<Aduanas items={customs} update={updateCustom} openCase={openCase} notify={notify}/>}
@@ -1602,7 +1615,7 @@ function ReceptionRecords({records}){
   return <section className="reception-records"><div className="reception-title"><Camera/><div><h3>Recepciones de mercancía</h3><p>Evidencias fotográficas identificadas y documentos de llegada.</p></div></div>{records.map(record=><article className="reception-record" key={record.ref}><header><div><b>{formatReceptionDate(record.fecha)}</b><small>{record.ref} · ZONA {record.zona}</small></div><Badge>{(record.fotos||[]).length} FOTOS · {(record.documentos||[]).length} DOCS</Badge></header>{Boolean((record.fotos||[]).length)&&<div className="reception-photos">{record.fotos.map((file,index)=><figure key={file.id}><a href={file.url} target="_blank" rel="noreferrer" title={file.name}><img src={file.url} alt={`${file.tipo||'Vista general'} · ${file.mercancia||'Recepción completa'}`}/><span>FOTO {String(index+1).padStart(2,'0')}</span></a><figcaption><b>{file.tipo||'VISTA GENERAL'}</b><strong>{file.mercancia||'RECEPCIÓN COMPLETA'}</strong>{file.nota&&<small>{file.nota}</small>}</figcaption></figure>)}</div>}{Boolean((record.documentos||[]).length)&&<div className="reception-documents">{record.documentos.map(file=><a href={file.url} target="_blank" rel="noreferrer" key={file.id}><FileText/><span><b>{documentLabel(file.name)}</b><small>{file.name}</small></span><ExternalLink/></a>)}</div>}</article>)}</section>;
 }
 
-function Almacen({items,cases,openCase,registerEntry,updateEntry,showFinance,storageTotal,csrfToken}){
+function Almacen({items,cases,openCase,registerEntry,updateEntry,deleteEntry,showFinance,storageTotal,csrfToken}){
   const [entryOpen,setEntryOpen]=useState(false);
   const [editing,setEditing]=useState(null);
   const [view,setView]=useState('Activos');
@@ -1636,7 +1649,7 @@ function Almacen({items,cases,openCase,registerEntry,updateEntry,showFinance,sto
       </div>
     </section>
     {entryOpen&&<WarehouseEntryModal cases={cases} csrfToken={csrfToken} close={()=>setEntryOpen(false)} submit={submit}/>}
-    {editing&&<WarehouseEditModal item={editing} cases={cases} close={()=>setEditing(null)} submit={item=>{updateEntry(item);setEditing(null)}}/>}
+    {editing&&<WarehouseEditModal item={editing} cases={cases} close={()=>setEditing(null)} submit={item=>{updateEntry(item);setEditing(null)}} deleteItem={item=>{deleteEntry(item);setEditing(null)}}/>}
   </>;
 }
 function Summary({icon:Icon,label,value}){return <article><span><Icon/></span><div><small>{label}</small><b>{value}</b></div></article>}
@@ -1994,10 +2007,10 @@ function WarehouseEntryModal({cases,close,submit,csrfToken}){
   </div>;
 }
 
-function WarehouseEditModal({item,cases,close,submit}){
+function WarehouseEditModal({item,cases,close,submit,deleteItem}){
   const [form,setForm]=useState({...item});const update=event=>setForm({...form,[event.target.name]:event.target.value});
   const save=event=>{event.preventDefault();const related=cases.find(entry=>entry.id===form.expediente);submit({...form,buque:related?.buque||form.buque,bultos:Number(form.bultos)||0,dias:Number(form.dias)||0})};
-  return <div className="modal-backdrop" onMouseDown={event=>{if(event.target===event.currentTarget)close()}}><section className="modal" role="dialog" aria-modal="true"><div className="modal-head"><div><span className="overline">{item.ref}</span><h2>{item.expediente?'Editar entrada de almacén':'Vincular mercancía recibida'}</h2><p>{item.expediente?'Los cambios se reflejarán en el stock.':'Selecciona el expediente cuando sepas a qué buque pertenece.'}</p></div><button className="icon-button" onClick={close}><X/></button></div><form onSubmit={save}><label className="field wide"><span>Expediente</span><select name="expediente" value={form.expediente||''} onChange={update}><option value="">SIN EXPEDIENTE</option>{cases.map(entry=><option key={entry.id} value={entry.id}>{entry.id} · {entry.buque}</option>)}</select></label>{!form.expediente&&<label className="field wide"><span>Buque / referencia</span><input name="buque" value={form.buque||''} onChange={update} required/></label>}<label className="field"><span>Ubicación</span><input name="zona" value={form.zona} onChange={update} required/></label><label className="field"><span>Fecha de entrada</span><input name="entrada" value={form.entrada} onChange={update} required/></label><label className="field"><span>Bultos</span><input name="bultos" type="number" min="0" value={form.bultos} onChange={update}/></label><label className="field"><span>Peso</span><input name="peso" value={form.peso} onChange={update}/></label><label className="field"><span>Días de storage</span><input name="dias" type="number" min="0" value={form.dias} onChange={update}/></label><label className="field"><span>Estado</span><select name="estado" value={form.estado} onChange={update}>{['En stock','Retenido','Preparado','Expedido'].map(value=><option key={value}>{value}</option>)}</select></label>{Boolean((item.fotos||[]).length)&&<div className="warehouse-photo-gallery wide"><b>Fotos recibidas</b><div>{(item.fotos||[]).map((photo,index)=><a key={photo.id||photo.url||index} href={photo.url} target="_blank" rel="noreferrer"><img src={photo.url} alt={photo.mercancia||`Foto ${index+1}`}/><span>{photo.mercancia||photo.tipo||`Foto ${index+1}`}</span></a>)}</div></div>}{Boolean((item.documentosRecepcion||[]).length)&&<div className="warehouse-doc-list wide"><b>Documentos de llegada</b>{(item.documentosRecepcion||[]).map((file,index)=><a key={file.id||file.url||index} href={file.url} target="_blank" rel="noreferrer"><FileText/>{file.name||`Documento ${index+1}`}</a>)}</div>}<div className="modal-actions wide"><button type="button" className="button tertiary" onClick={close}>Cancelar</button><button className="button primary"><Save/> {form.expediente?'Guardar y vincular':'Guardar entrada'}</button></div></form></section></div>;
+  return <div className="modal-backdrop" onMouseDown={event=>{if(event.target===event.currentTarget)close()}}><section className="modal" role="dialog" aria-modal="true"><div className="modal-head"><div><span className="overline">{item.ref}</span><h2>{item.expediente?'Editar entrada de almacén':'Vincular mercancía recibida'}</h2><p>{item.expediente?'Los cambios se reflejarán en el stock.':'Selecciona el expediente cuando sepas a qué buque pertenece.'}</p></div><button className="icon-button" onClick={close}><X/></button></div><form onSubmit={save}><label className="field wide"><span>Expediente</span><select name="expediente" value={form.expediente||''} onChange={update}><option value="">SIN EXPEDIENTE</option>{cases.map(entry=><option key={entry.id} value={entry.id}>{entry.id} · {entry.buque}</option>)}</select></label>{!form.expediente&&<label className="field wide"><span>Buque / referencia</span><input name="buque" value={form.buque||''} onChange={update} required/></label>}<label className="field"><span>Ubicación</span><input name="zona" value={form.zona} onChange={update} required/></label><label className="field"><span>Fecha de entrada</span><input name="entrada" value={form.entrada} onChange={update} required/></label><label className="field"><span>Bultos</span><input name="bultos" type="number" min="0" value={form.bultos} onChange={update}/></label><label className="field"><span>Peso</span><input name="peso" value={form.peso} onChange={update}/></label><label className="field"><span>Días de storage</span><input name="dias" type="number" min="0" value={form.dias} onChange={update}/></label><label className="field"><span>Estado</span><select name="estado" value={form.estado} onChange={update}>{['En stock','Retenido','Preparado','Expedido'].map(value=><option key={value}>{value}</option>)}</select></label>{Boolean((item.fotos||[]).length)&&<div className="warehouse-photo-gallery wide"><b>Fotos recibidas</b><div>{(item.fotos||[]).map((photo,index)=><a key={photo.id||photo.url||index} href={photo.url} target="_blank" rel="noreferrer"><img src={photo.url} alt={photo.mercancia||`Foto ${index+1}`}/><span>{photo.mercancia||photo.tipo||`Foto ${index+1}`}</span></a>)}</div></div>}{Boolean((item.documentosRecepcion||[]).length)&&<div className="warehouse-doc-list wide"><b>Documentos de llegada</b>{(item.documentosRecepcion||[]).map((file,index)=><a key={file.id||file.url||index} href={file.url} target="_blank" rel="noreferrer"><FileText/>{file.name||`Documento ${index+1}`}</a>)}</div>}<div className="modal-actions wide"><button type="button" className="button danger" onClick={()=>deleteItem(item)}><Trash2/> Eliminar entrada</button><button type="button" className="button tertiary" onClick={close}>Cancelar</button><button className="button primary"><Save/> {form.expediente?'Guardar y vincular':'Guardar entrada'}</button></div></form></section></div>;
 }
 
 if('serviceWorker' in navigator)window.addEventListener('load',()=>navigator.serviceWorker.register('/sw.js').catch(()=>{}));
