@@ -1530,7 +1530,7 @@ function apply_thread_update_to_state(
 
     $case = $state['cases'][$caseIndex];
     $subjectVessel = subject_target_vessel($subject);
-    if ($subjectVessel !== '') {
+    if ($subjectVessel !== '' && empty($case['manualVesselName'])) {
         $case['buque'] = $subjectVessel;
     }
     if (strlen((string) ($data['imo'] ?? '')) === 7) {
@@ -2015,7 +2015,8 @@ function reconcile_existing_mail_threads(PDO $pdo): array
             $beforeCanonical = json_encode($canonical);
             $duplicateRefs = array_values(array_diff($existingRefs, [$canonicalRef]));
             $subjectVessel = subject_target_vessel((string) $threadRows[0]['subject']);
-            if ($subjectVessel !== '') $canonical['buque'] = $subjectVessel;
+            $manualVesselName = !empty($canonical['manualVesselName']);
+            if ($subjectVessel !== '' && !$manualVesselName) $canonical['buque'] = $subjectVessel;
             $subjectPort = subject_target_port((string) $threadRows[0]['subject']);
             if ($subjectPort !== '') $canonical['puerto'] = $subjectPort;
             $isBargeThread = preg_match('/\b(?:GABARRA|BARGE)\b/u', normalized_mail_subject((string) $threadRows[0]['subject'])) === 1;
@@ -2052,7 +2053,7 @@ function reconcile_existing_mail_threads(PDO $pdo): array
                     ]);
                     $summary['correctedCases']++;
                 }
-                if (trim((string) ($data['vessel'] ?? '')) !== '') {
+                if (!$manualVesselName && trim((string) ($data['vessel'] ?? '')) !== '') {
                     $canonical['buque'] = safe_vessel_name((string) $data['vessel']);
                 }
                 $canonical['servicios'] = is_array($canonical['servicios'] ?? null) ? $canonical['servicios'] : [];
@@ -2676,7 +2677,7 @@ function ensure_operational_schedule_coherence(PDO $pdo): array
             $caseRef = (string) ($case['id'] ?? '');
             if ($caseRef === '') continue;
             $mailHistory = $mailByCase[$caseRef] ?? [];
-            $canonicalVessel = best_case_vessel_name($case, $mailHistory);
+            $canonicalVessel = empty($case['manualVesselName']) ? best_case_vessel_name($case, $mailHistory) : '';
             if ($canonicalVessel !== '' && $canonicalVessel !== (string) ($case['buque'] ?? '')) {
                 $state['cases'][$caseIndex]['buque'] = $canonicalVessel;
                 $case['buque'] = $canonicalVessel;

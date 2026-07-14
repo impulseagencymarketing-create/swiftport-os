@@ -684,7 +684,8 @@ function App({auth,finance,onFinanceChange,onLogout}){
     const {importe,...rawCase}=updated;
     const previousCase=cases.find(item=>item.id===rawCase.id)||{};
     const known=findKnownVessel(vessels,rawCase.buque)||{};
-    const operationalCase=normalizeMerchandise({...rawCase,buque:String(rawCase.buque||'').trim().toUpperCase(),imo:cleanImo(rawCase.imo)||known.imo||'',mmsi:cleanMmsi(rawCase.mmsi)||known.mmsi||''});
+    const manualVesselName=!sameVessel(previousCase.buque,rawCase.buque)||String(previousCase.buque||'').trim().toUpperCase()!==String(rawCase.buque||'').trim().toUpperCase();
+    const operationalCase=normalizeMerchandise({...rawCase,buque:String(rawCase.buque||'').trim().toUpperCase(),imo:cleanImo(rawCase.imo)||known.imo||'',mmsi:cleanMmsi(rawCase.mmsi)||known.mmsi||'',manualVesselName:manualVesselName?true:rawCase.manualVesselName,manualEditedAt:manualVesselName?new Date().toISOString():rawCase.manualEditedAt});
     const next=cases.map(item=>item.id===operationalCase.id?operationalCase:item);
     const nextVessels=upsertVesselFromCase(vessels,operationalCase);
     const activeEntries=warehouseEntries.filter(entry=>entry.expediente===operationalCase.id&&!entry.archivado);
