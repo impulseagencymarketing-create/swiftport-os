@@ -1073,6 +1073,7 @@ function Calendario({events,team,cases,transports,providers,warehouseEntries,sav
   const [mineOnly,setMineOnly]=useState(false);
   const [draggingId,setDraggingId]=useState('');
   const [dropTarget,setDropTarget]=useState('');
+  const [movingEvent,setMovingEvent]=useState(null);
   const pointerDrag=useRef(null);
   const suppressCalendarClick=useRef(false);
   if(isDriverOnly(currentUser))return <DriverCalendarV2 events={events} cases={cases} transports={transports} warehouseEntries={warehouseEntries} currentUser={currentUser} saveEvent={saveEvent} completeCaseStep={completeCaseStep} undoCaseStep={undoCaseStep} csrfToken={csrfToken} reloadOperational={reloadOperational} notify={notify}/>;
@@ -1084,9 +1085,35 @@ function Calendario({events,team,cases,transports,providers,warehouseEntries,sav
   const timedEvents=baseEvents.filter(event=>!calendarNeedsTime(event));
   const missingTimeEvents=baseEvents.filter(calendarNeedsTime);
   const canDeleteEvent=hasRole(currentUser,'operations')||hasRole(currentUser,'admin');
+  const saveMovedEvent=(event,target,point,withTime=true)=>{
+    if(!event||!target)return;
+    const fecha=target.dataset.calendarDay||target.dataset.missingDay;
+    if(!fecha)return;
+    const clean=withoutCalendarLayout(event);
+    if(withTime&&target.dataset.calendarDay){
+      const inicio=calendarDropTime(point,target);
+      const fin=minutesToClock(Math.min(1320,calendarMinutes(inicio)+eventDurationMinutes(clean)));
+      saveEvent({...clean,fecha,inicio,fin,scheduleStatus:'confirmed',scheduleNote:''});
+      notify?.(`Transporte movido al ${new Date(fecha+'T12:00:00').toLocaleDateString('es-ES')} a las ${inicio}`);
+    }else{
+      saveEvent({...clean,fecha,inicio:'',fin:'',scheduleStatus:'missing_time',scheduleNote:'Falta hora ETB; pendiente de confirmar horario'});
+      notify?.(`Transporte movido al ${new Date(fecha+'T12:00:00').toLocaleDateString('es-ES')}`);
+    }
+  };
+  const clickMoveTarget=event=>{
+    if(!movingEvent)return;
+    const target=event.currentTarget;
+    saveMovedEvent(movingEvent,target,event,Boolean(target.dataset.calendarDay));
+    setMovingEvent(null);
+  };
+  const startMoveMode=(event,click)=>{
+    click?.stopPropagation?.();
+    setMovingEvent(withoutCalendarLayout(event));
+    notify?.('Modo mover activado: pulsa el día/hora destino en el calendario.');
+  };
   const startPointerDrag=(pointer,event)=>{
     if(pointer.button!==undefined&&pointer.button!==0)return;
-    if(pointer.target?.closest?.('.calendar-event-delete'))return;
+    if(pointer.target?.closest?.('.calendar-event-delete,.calendar-event-move'))return;
     pointerDrag.current={event,x:pointer.clientX,y:pointer.clientY,moved:false};
     setDraggingId(event.id);
     pointer.stopPropagation();
@@ -1114,15 +1141,9 @@ function Calendario({events,team,cases,transports,providers,warehouseEntries,sav
       window.setTimeout(()=>{suppressCalendarClick.current=false},250);
       const target=targetAt(pointer);
       if(target?.dataset?.calendarDay){
-        const fecha=target.dataset.calendarDay;
-        const inicio=calendarDropTime(pointer,target);
-        const fin=minutesToClock(Math.min(1320,calendarMinutes(inicio)+eventDurationMinutes(drag.event)));
-        saveEvent({...withoutCalendarLayout(drag.event),fecha,inicio,fin,scheduleStatus:'confirmed',scheduleNote:''});
-        notify?.(`Transporte movido al ${new Date(fecha+'T12:00:00').toLocaleDateString('es-ES')} a las ${inicio}`);
+        saveMovedEvent(drag.event,target,pointer,true);
       }else if(target?.dataset?.missingDay){
-        const fecha=target.dataset.missingDay;
-        saveEvent({...withoutCalendarLayout(drag.event),fecha,inicio:'',fin:'',scheduleStatus:'missing_time',scheduleNote:'Falta hora ETB; pendiente de confirmar horario'});
-        notify?.(`Transporte movido al ${new Date(fecha+'T12:00:00').toLocaleDateString('es-ES')}`);
+        saveMovedEvent(drag.event,target,pointer,false);
       }
     };
     const cancel=()=>{pointerDrag.current=null;setDraggingId('');setDropTarget('')};
@@ -1138,21 +1159,23 @@ function Calendario({events,team,cases,transports,providers,warehouseEntries,sav
     </section>
     <section className="calendar-shell panel">
       <div className="calendar-help"><span><CalendarDays/> Solo transportes a ETB/ETA</span><small>Las recepciones quedan en expediente/almacén. Si falta hora ETB/ETA, el transporte queda arriba del día como “Falta horario”.</small></div>
+      {movingEvent&&<div className="calendar-move-mode"><b>Moviendo: {cases.find(item=>item.id===movingEvent.expediente)?.buque||movingEvent.titulo}</b><span>Pulsa una franja horaria para fijar día/hora, o pulsa “Falta horario” para dejarlo pendiente.</span><button className="button tertiary" onClick={()=>setMovingEvent(null)}>Cancelar</button></div>}
       <div className="calendar-scroll">
         <div className="calendar-head"><span className="calendar-zone">GMT+2</span>{days.map(day=><div key={isoDate(day)} className={isoDate(day)===isoDate(new Date())?'today':''}><b>{dayLabel.format(day).replace('.','')}</b></div>)}</div>
-        <div className="calendar-unscheduled-row"><span>Falta horario</span>{days.map(day=><div key={isoDate(day)} data-missing-day={isoDate(day)} className={dropTarget===`missing-${isoDate(day)}`?'drop-target':''}>{missingTimeEvents.filter(event=>event.fecha===isoDate(day)).map(event=><article key={event.id} onPointerDown={pointer=>startPointerDrag(pointer,event)} className={`calendar-unscheduled-card ${event.color||'gray'} ${draggingId===event.id?'dragging':''}`}><button className="calendar-event-open" onClick={click=>{if(suppressCalendarClick.current){click.preventDefault();return}setEditing(event)}}><CalendarEventContent event={event} cases={cases}/></button>{canDeleteEvent&&deleteEvent&&<button type="button" className="calendar-event-delete" title="Eliminar servicio" onClick={click=>{click.stopPropagation();deleteEvent(event)}}><Trash2/></button>}</article>)}</div>)}</div>
-        <div className="calendar-body"><div className="calendar-hours">{hours.map(hour=><span key={hour}>{String(hour).padStart(2,'0')}:00</span>)}</div>{days.map(day=><div data-calendar-day={isoDate(day)} className={`calendar-day ${dropTarget===`time-${isoDate(day)}`?'drop-target':''}`} key={isoDate(day)}>{hours.map(hour=><i className="calendar-line" key={hour}/>)}
-          {layoutOverlappingEvents(timedEvents.filter(event=>event.fecha===isoDate(day))).map(event=><DraggableCalendarEvent key={event.id} event={event} cases={cases} setEditing={setEditing} canDeleteEvent={canDeleteEvent} deleteEvent={deleteEvent} startPointerDrag={startPointerDrag} draggingId={draggingId} suppressClick={()=>suppressCalendarClick.current}/>)}</div>)}</div>
+        <div className="calendar-unscheduled-row"><span>Falta horario</span>{days.map(day=><div key={isoDate(day)} data-missing-day={isoDate(day)} className={`${dropTarget===`missing-${isoDate(day)}`?'drop-target':''} ${movingEvent?'move-target':''}`} onClick={clickMoveTarget}>{missingTimeEvents.filter(event=>event.fecha===isoDate(day)).map(event=><article key={event.id} onPointerDown={pointer=>startPointerDrag(pointer,event)} className={`calendar-unscheduled-card ${event.color||'gray'} ${draggingId===event.id?'dragging':''}`}><button className="calendar-event-open" onClick={click=>{if(suppressCalendarClick.current||movingEvent){click.preventDefault();return}setEditing(event)}}><CalendarEventContent event={event} cases={cases}/></button><button type="button" className="calendar-event-move" title="Mover servicio" onClick={click=>startMoveMode(event,click)}><Navigation/></button>{canDeleteEvent&&deleteEvent&&<button type="button" className="calendar-event-delete" title="Eliminar servicio" onClick={click=>{click.stopPropagation();deleteEvent(event)}}><Trash2/></button>}</article>)}</div>)}</div>
+        <div className="calendar-body"><div className="calendar-hours">{hours.map(hour=><span key={hour}>{String(hour).padStart(2,'0')}:00</span>)}</div>{days.map(day=><div data-calendar-day={isoDate(day)} className={`calendar-day ${dropTarget===`time-${isoDate(day)}`?'drop-target':''} ${movingEvent?'move-target':''}`} key={isoDate(day)} onClick={clickMoveTarget}>{hours.map(hour=><i className="calendar-line" key={hour}/>)}
+          {layoutOverlappingEvents(timedEvents.filter(event=>event.fecha===isoDate(day))).map(event=><DraggableCalendarEvent key={event.id} event={event} cases={cases} setEditing={setEditing} canDeleteEvent={canDeleteEvent} deleteEvent={deleteEvent} startPointerDrag={startPointerDrag} startMoveMode={startMoveMode} draggingId={draggingId} suppressClick={()=>suppressCalendarClick.current||Boolean(movingEvent)}/>)}</div>)}</div>
       </div>
     </section>
     {editing&&<CalendarEventModal item={editing} team={team} cases={cases} transports={transports} providers={providers} close={()=>setEditing(null)} submit={item=>{saveEvent(item);setEditing(null)}} openCase={openCase}/>}
   </>;
 }
 
-function DraggableCalendarEvent({event,cases,setEditing,canDeleteEvent,deleteEvent,startPointerDrag,draggingId,suppressClick}){
+function DraggableCalendarEvent({event,cases,setEditing,canDeleteEvent,deleteEvent,startPointerDrag,startMoveMode,draggingId,suppressClick}){
   const clean=withoutCalendarLayout(event);
   return <article onPointerDown={pointer=>startPointerDrag(pointer,clean)} className={`calendar-event ${event.color} ${event._columns>1?'is-overlap':''} ${draggingId===event.id?'dragging':''}`} style={calendarEventStyle(event)} title={`${event.inicio}–${event.fin} · ${event.titulo||event.id}`}>
     <button className="calendar-event-open" onClick={click=>{if(suppressClick?.()){click.preventDefault();return}setEditing(clean)}}><CalendarEventContent event={event} cases={cases}/></button>
+    <button type="button" className="calendar-event-move" title="Mover servicio" onClick={click=>startMoveMode(clean,click)}><Navigation/></button>
     {canDeleteEvent&&deleteEvent&&<button type="button" className="calendar-event-delete" title="Eliminar servicio" onClick={click=>{click.stopPropagation();deleteEvent(clean)}}><Trash2/></button>}
     {event._columns>1&&<span className="overlap-indicator">{event._lane+1}/{event._columns}</span>}
   </article>;
