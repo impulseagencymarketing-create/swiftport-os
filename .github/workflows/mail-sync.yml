@@ -1,8 +1,6 @@
-name: Revisar correos cada 30 minutos
+name: Correos automáticos desactivados
 
 on:
-  schedule:
-    - cron: "*/30 * * * *"
   workflow_dispatch:
 
 permissions:
@@ -14,21 +12,9 @@ concurrency:
 
 jobs:
   process-mail:
-    name: Interpretar buzones
+    name: Proceso detenido temporalmente
     runs-on: ubuntu-latest
-    timeout-minutes: 8
     steps:
-      - name: Procesar info y operations
-        env:
-          CRON_TOKEN: ${{ secrets.APP_SETUP_TOKEN }}
+      - name: No leer correos
         run: |
-          if [ -z "$CRON_TOKEN" ]; then
-            echo "::error::APP_SETUP_TOKEN no está configurado."
-            exit 1
-          fi
-          curl --fail --silent --show-error \
-            --request POST \
-            --header "X-Cron-Token: $CRON_TOKEN" \
-            --header "Content-Type: application/json" \
-            --data '{}' \
-            https://app.swiftportlogistic.com/api/mail/process.php
+          echo "La lectura automática de correos está desactivada temporalmente."

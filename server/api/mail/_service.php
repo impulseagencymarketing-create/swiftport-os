@@ -1712,6 +1712,10 @@ function apply_thread_update_to_state(
 
 function apply_service_email(int $mailId, array $data, ?int $userId = null): string
 {
+    if (!mail_case_creation_enabled()) {
+        throw new RuntimeException('Creación automática de expedientes desde correo desactivada temporalmente.');
+    }
+
     $pdo = db();
     $previewStatement = $pdo->prepare('SELECT subject FROM app_mail_items WHERE id = ?');
     $previewStatement->execute([$mailId]);
@@ -2262,7 +2266,12 @@ function reconcile_existing_mail_threads(PDO $pdo): array
 
 function automatic_mail_publish_enabled(PDO $pdo): bool
 {
-    return true;
+    return mail_case_creation_enabled();
+}
+
+function mail_case_creation_enabled(): bool
+{
+    return false;
 }
 
 function case_operational_year(array $case): int

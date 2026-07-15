@@ -18,6 +18,22 @@ if (!$isCron && !$isCli) {
     verify_csrf();
 }
 
+$disabledSummary = [
+    'processed' => 0,
+    'review' => 0,
+    'ignored' => 0,
+    'errors' => 0,
+    'disabled' => true,
+    'message' => 'Lectura automática de correos desactivada temporalmente. Los expedientes deben crearse manualmente.',
+];
+
+if ($isCli) {
+    echo json_encode(['ok' => true, 'summary' => $disabledSummary], JSON_UNESCAPED_UNICODE) . PHP_EOL;
+    exit(0);
+}
+
+respond(['ok' => true, 'summary' => $disabledSummary]);
+
 try {
     $summary = process_mailboxes(($isCron || $isCli) ? 'cron' : 'manual');
     if ($isCli) {

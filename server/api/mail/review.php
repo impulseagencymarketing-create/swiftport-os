@@ -14,6 +14,12 @@ if ($id < 1 || !in_array($action, ['approve', 'ignore', 'reprocess'], true)) {
     respond(['error' => 'Acción no válida.'], 422);
 }
 
+if (in_array($action, ['approve', 'reprocess'], true) && function_exists('mail_case_creation_enabled') && !mail_case_creation_enabled()) {
+    respond([
+        'error' => 'La creación de expedientes desde correos está desactivada temporalmente. Crea el expediente manualmente.',
+    ], 409);
+}
+
 if ($action === 'reprocess') {
     $statement = db()->prepare(
         'SELECT subject, body, sender_name, sender_email, received_at FROM app_mail_items WHERE id = ? AND status <> ?'
