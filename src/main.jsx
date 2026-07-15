@@ -149,7 +149,7 @@ const transportSlotFromCase=item=>{
   if(etaDate)return {date:etaDate,start:call.etaTime||'',source:'ETA'};
   return {date:'',start:'',source:''};
 };
-const driverScheduleSnapshot=(data,driverName)=>{
+const disabledDriverScheduleSnapshot=(data,driverName)=>{
   const result={};
   const cases=Array.isArray(data?.cases)?data.cases:[];
   const events=Array.isArray(data?.calendarEvents)?data.calendarEvents:[];
@@ -170,7 +170,7 @@ const driverScheduleSnapshot=(data,driverName)=>{
   });
   return result;
 };
-const changedDriverSchedules=(previous,current)=>{
+const disabledChangedDriverSchedules=(previous,current)=>{
   if(!previous)return[];
   return Object.entries(current).flatMap(([id,next])=>{
     const before=previous[id];
@@ -559,34 +559,19 @@ function App({auth,finance,onFinanceChange,onLogout}){
   const [clientOptions,setClientOptions]=useState(clientNames);
   const [operationalLoaded,setOperationalLoaded]=useState(false);
   const [toast,setToast]=useState('');
-  const scheduleAlertsKey=`swiftport-driver-alerts-${user.id}`;
-  const [scheduleAlerts,setScheduleAlerts]=useState(()=>{if(!hasRole(user,'driver'))return[];try{const stored=JSON.parse(localStorage.getItem(scheduleAlertsKey)||'[]');return Array.isArray(stored)?stored:[]}catch{return[]}});
-  const scheduleSnapshotRef=useRef(null);
   const aisAlertSnapshotRef=useRef(null);
   const casesWithFinance=useMemo(()=>cases.map(item=>({...item,importe:finance.caseAmounts[item.id]||0})),[cases,finance.caseAmounts]);
   const selected=casesWithFinance.find(item=>item.id===selectedId)||casesWithFinance[0];
   const notify=message=>{setToast(message);window.clearTimeout(window.__swiftportToast);window.__swiftportToast=window.setTimeout(()=>setToast(''),2600)};
   const navigate=id=>{setTab(canAccess(effectiveRoles,id)?id:(availableNav[0]?.[0]||'dashboard'));setMenuOpen(false);setSearch('')};
+  useEffect(()=>{try{localStorage.removeItem(`swiftport-driver-alerts-${user.id}`)}catch{}},[user.id]);
   const loadTeam=()=>api('/api/users/directory.php').then(result=>setTeam(result.users)).catch(reason=>notify(reason.message));
   const loadOperational=()=>api('/api/operational.php').then(result=>{
     if(result.data){
-      if(hasRole(user,'driver')){
-        const storageKey=`swiftport-driver-schedule-${user.id}`;
-        let stored=scheduleSnapshotRef.current;
-        if(!stored){try{stored=JSON.parse(localStorage.getItem(storageKey)||'null')}catch{stored=null}}
-        const current=driverScheduleSnapshot(result.data,user.fullName);
-        const changes=changedDriverSchedules(stored,current);
-        if(changes.length)setScheduleAlerts(existing=>{const next=[...changes,...existing].slice(0,20);try{localStorage.setItem(scheduleAlertsKey,JSON.stringify(next))}catch{}return next});
-        scheduleSnapshotRef.current=current;
-        try{localStorage.setItem(storageKey,JSON.stringify(current))}catch{}
-      }
       const loadedCases=result.data.cases.map(normalizeMerchandise);
       const hiddenVessels=Array.isArray(result.data.deletedVesselKeys)?result.data.deletedVesselKeys.filter(Boolean):[];
       const loadedVessels=mergeVesselCatalog(Array.isArray(result.data.vessels)?result.data.vessels:[],loadedCases).filter(vessel=>!hiddenVessels.includes(vesselKey(vessel.name)));
       setDeletedVesselKeys(hiddenVessels);setCases(loadedCases.map(item=>hydrateCaseWithVessel(item,loadedVessels)));setVessels(loadedVessels);setTransports(result.data.transports);setWarehouseEntries(result.data.warehouseEntries);if(result.data.customs)setCustoms(result.data.customs);if(result.data.calendarEvents)setCalendarEvents(result.data.calendarEvents.filter(isTransportCalendarEvent));if(Array.isArray(result.data.providers))setProviders(result.data.providers)
-      const coherence=result.scheduleCoherence||{};
-      const synced=Number(coherence.createdTransportEvents||0)+Number(coherence.createdTransports||0)+Number(coherence.updatedTransportEvents||0)+Number(coherence.updatedTransports||0);
-      if(synced)notify(`${synced} transportes sincronizados con calendario`);
     }
     setOperationalLoaded(true)
   }).catch(reason=>{setOperationalLoaded(true);notify(reason.message)});
@@ -951,8 +936,7 @@ function App({auth,finance,onFinanceChange,onLogout}){
   const assignedAlerts=(hasRole(effectiveRoles,'operations')||hasRole(effectiveRoles,'driver'))
     ? calendarEvents.filter(event=>samePerson(event.asignado,visibleUser.fullName)&&cases.find(item=>item.id===event.expediente)?.estado!=='Completado')
     : calendarEvents.filter(event=>!event.asignado||event.asignado==='Sin asignar');
-  const notificationCount=assignedAlerts.length+(hasRole(effectiveRoles,'driver')?scheduleAlerts.length:0);
-  const scheduleAlert=scheduleAlerts[0];
+  const notificationCount=assignedAlerts.length;
   return <div className="shell">
     <Sidebar tab={tab} open={menuOpen} navigate={navigate} close={()=>setMenuOpen(false)} nav={availableNav} user={visibleUser} onLogout={onLogout}/>
     {menuOpen&&<button className="scrim" aria-label="Cerrar menú" onClick={()=>setMenuOpen(false)}/>} 
@@ -963,14 +947,13 @@ function App({auth,finance,onFinanceChange,onLogout}){
           <div><div className="eyebrow">Operaciones · {new Date().toLocaleDateString('es-ES',{day:'numeric',month:'long',year:'numeric'})}</div><h1>{title}</h1><p>{subtitle}</p></div>
         </div>
         <div className="topbar-actions">
-          <button className="icon-button notification" aria-label="Notificaciones" onClick={()=>{navigate('calendario');notify(scheduleAlerts.length?`Tienes ${scheduleAlerts.length} cambios de horario sin leer`:assignedAlerts.length?`Tienes ${assignedAlerts.length} servicios que requieren atención`:'No tienes avisos operativos')}}><Bell/>{notificationCount>0&&<i>{notificationCount}</i>}</button>
+          <button className="icon-button notification" aria-label="Notificaciones" onClick={()=>{navigate('calendario');notify(assignedAlerts.length?`Tienes ${assignedAlerts.length} servicios que requieren atención`:'No tienes avisos operativos')}}><Bell/>{notificationCount>0&&<i>{notificationCount}</i>}</button>
           {!driverOnly&&<button className="button primary" aria-label="Nuevo expediente" onClick={()=>setNewOpen(true)}><Plus/> <span>Nuevo expediente</span></button>}
           <div className="avatar" title={visibleUser.fullName+' · '+roleLabel(visibleUser)}>{initials(visibleUser.fullName)}</div>
         </div>
       </header>
       <div className="content">
         {previewUser&&<div className="preview-banner"><Eye/><span>Estás viendo la aplicación como <b>{previewUser.fullName}</b> ({roleLabel(previewUser)}). Tu cuenta sigue siendo administrador.</span><button onClick={()=>setPreviewUser(null)}>Salir de la vista previa</button></div>}
-        {hasRole(effectiveRoles,'driver')&&scheduleAlert&&<section className="schedule-change-alert" role="alert"><Clock3/><div><small>HORARIO ACTUALIZADO · {scheduleAlert.service}</small><b>{scheduleAlert.title}</b>{scheduleAlert.oldEta!==scheduleAlert.newEta&&<p>ETA: <s>{scheduleAlert.oldEta}</s> → <strong>{scheduleAlert.newEta}</strong></p>}{scheduleAlert.oldTask!==scheduleAlert.newTask&&<p>Servicio: <s>{scheduleAlert.oldTask}</s> → <strong>{scheduleAlert.newTask}</strong></p>}</div><button className="button secondary" onClick={()=>setScheduleAlerts(alerts=>{const next=alerts.slice(1);try{localStorage.setItem(scheduleAlertsKey,JSON.stringify(next))}catch{}return next})}>Entendido</button></section>}
         {tab==='dashboard'&&<Dashboard cases={casesWithFinance} warehouseEntries={warehouseEntries} calendarEvents={calendarEvents} openCase={openCase} navigate={navigate} showFinance={showFinance} user={visibleUser}/>}
         {tab==='calendario'&&<>{!driverOnly&&<DriverLegend team={operationalTeam}/>}<Calendario events={calendarEvents} team={operationalTeam} cases={cases} transports={transports} providers={providers} warehouseEntries={warehouseEntries} saveEvent={saveCalendarEvent} deleteEvent={deleteCalendarService} completeCaseStep={completeCaseStep} undoCaseStep={undoCaseStep} openCase={openCase} currentUser={visibleUser} csrfToken={auth.csrfToken} reloadOperational={loadOperational} notify={notify}/></>}
         {tab==='expedientes'&&<Expedientes cases={casesWithFinance} selected={selected} select={setSelectedId} search={search} setSearch={setSearch} completeCaseStep={completeCaseStep} notify={notify} showFinance={showFinance} updateCase={updateCase} deleteCase={deleteCase} clientOptions={clientOptions} warehouseEntries={warehouseEntries} transports={transports} calendarEvents={calendarEvents} team={operationalTeam} providers={providers} vessels={vessels} saveEvent={saveCalendarEvent} csrfToken={auth.csrfToken} reloadOperational={loadOperational} currentUser={visibleUser}/>}
@@ -1766,7 +1749,7 @@ function Correos({csrfToken,notify,openCase,reloadOperational,canRebuild}){
       const removedOld=Number(summary.removedOldCases||0);
       const removedInvalid=Number(summary.removedInvalidCases||0);
       const coherence=summary.scheduleCoherence||{};
-      const synced=Number(coherence.createdReceptionEvents||0)+Number(coherence.createdTransportEvents||0)+Number(coherence.createdTransports||0);
+      const synced=0;
       notify(`${summary.scanned} correos nuevos · ${summary.processed} trabajos creados · ${summary.review} para revisar${synced?` · ${synced} trabajos al calendario`:''}${removedInvalid?` · ${removedInvalid} inválidos retirados`:''}${removedOld?` · ${removedOld} antiguos retirados`:''}${repaired?` · ${repaired} duplicados corregidos`:''}`);
       await Promise.all([load(filter),reloadOperational()]);
     }catch(reason){setError(reason.message)}

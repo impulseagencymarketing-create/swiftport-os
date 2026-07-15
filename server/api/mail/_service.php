@@ -2592,7 +2592,10 @@ function ensure_operational_schedule_coherence(PDO $pdo): array
         'updatedTransportEvents' => 0,
         'updatedTransports' => 0,
         'updatedVessels' => 0,
+        'disabled' => true,
     ];
+    return $summary;
+
     $pdo->beginTransaction();
     try {
         $row = $pdo->query('SELECT data FROM app_operational_state WHERE id = 1 FOR UPDATE')->fetch();

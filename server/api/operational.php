@@ -7,7 +7,7 @@ ensure_schema();
 $user = require_auth();
 
 if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'GET') {
-    $scheduleCoherence = ensure_operational_schedule_coherence(db());
+    $scheduleCoherence = ['disabled' => true];
     $statement = db()->query('SELECT data, updated_at FROM app_operational_state WHERE id = 1');
     $row = $statement->fetch();
     $data = $row ? json_decode($row['data'], true, 512, JSON_THROW_ON_ERROR) : null;
