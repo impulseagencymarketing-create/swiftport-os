@@ -232,3 +232,5 @@
 /* Calendario operativo 24 horas: los servicios portuarios no terminan a las 21:00 */
 .calendar-day{height:1536px}
 .driver-week .calendar-body{min-height:1536px}
+.calendar-driver-quick{display:grid;gap:2px;margin-top:5px;position:relative;z-index:3}.calendar-driver-quick span{font-size:7px;text-transform:uppercase;letter-spacing:.08em;color:#6d7f94;font-weight:800}.calendar-driver-quick select{width:100%;height:24px;border:1px solid #cbd8e5;border-radius:6px;background:#fff;color:#12365f;font-size:10px;font-weight:800;padding:0 6px}.calendar-event.is-overlap .calendar-driver-quick span{display:none}.calendar-event.is-overlap .calendar-driver-quick select{height:22px;font-size:9px;padding:0 4px}.calendar-unscheduled-card .calendar-driver-quick{padding:0 8px 7px}.calendar-event .calendar-driver-quick{padding:0 6px 5px}.calendar-event-delete{z-index:4}.calendar-event-open{min-height:0}
+@media (max-width:900px){.calendar-driver-quick select{height:28px;font-size:11px}.calendar-event .calendar-driver-quick,.calendar-unscheduled-card .calendar-driver-quick{padding-left:8px;padding-right:8px}}
