@@ -145,9 +145,14 @@ function ensure_schema(): void
             storage_rate VARCHAR(120) NOT NULL,
             transport_rate VARCHAR(120) NOT NULL,
             surcharge_rate VARCHAR(120) NOT NULL,
+            client_profile JSON NULL,
             active TINYINT(1) NOT NULL DEFAULT 1
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
     );
+    $clientProfileColumn = $pdo->query("SHOW COLUMNS FROM app_clients LIKE 'client_profile'")->fetch();
+    if (!$clientProfileColumn) {
+        $pdo->exec("ALTER TABLE app_clients ADD client_profile JSON NULL AFTER surcharge_rate");
+    }
     $pdo->exec(
         "CREATE TABLE IF NOT EXISTS app_invoices (
             id VARCHAR(40) PRIMARY KEY,

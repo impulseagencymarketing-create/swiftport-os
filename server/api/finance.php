@@ -18,14 +18,24 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'PUT') {
     try {
         $clientStatement = $pdo->prepare(
             'INSERT INTO app_clients
-             (code, name, contact, active_cases, reception_rate, storage_rate, transport_rate, surcharge_rate, active)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)
+             (code, name, contact, active_cases, reception_rate, storage_rate, transport_rate, surcharge_rate, client_profile, active)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
              ON DUPLICATE KEY UPDATE name=VALUES(name), contact=VALUES(contact),
              active_cases=VALUES(active_cases), reception_rate=VALUES(reception_rate),
              storage_rate=VALUES(storage_rate), transport_rate=VALUES(transport_rate),
-             surcharge_rate=VALUES(surcharge_rate)'
+             surcharge_rate=VALUES(surcharge_rate), client_profile=VALUES(client_profile)'
         );
         foreach ($clients as $client) {
+            $profile = [
+                'telefono' => (string) ($client['telefono'] ?? ''),
+                'fiscalName' => (string) ($client['fiscalName'] ?? ''),
+                'taxId' => (string) ($client['taxId'] ?? ''),
+                'direccion' => (string) ($client['direccion'] ?? ''),
+                'condicionesPago' => (string) ($client['condicionesPago'] ?? ''),
+                'moneda' => (string) ($client['moneda'] ?? 'EUR'),
+                'tarifaActiva' => (string) ($client['tarifaActiva'] ?? ''),
+                'notas' => (string) ($client['notas'] ?? ''),
+            ];
             $clientStatement->execute([
                 substr((string) ($client['codigo'] ?? ''), 0, 40),
                 substr((string) ($client['nombre'] ?? ''), 0, 160),
@@ -35,6 +45,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'PUT') {
                 substr((string) ($client['storage'] ?? ''), 0, 120),
                 substr((string) ($client['transporte'] ?? ''), 0, 120),
                 substr((string) ($client['recargo'] ?? ''), 0, 120),
+                json_encode($profile, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
             ]);
         }
         $invoiceStatement = $pdo->prepare(
@@ -70,7 +81,7 @@ $caseRows = db()->query(
 )->fetchAll();
 $clientRows = db()->query(
     'SELECT code, name, contact, active_cases, reception_rate, storage_rate,
-            transport_rate, surcharge_rate, active
+            transport_rate, surcharge_rate, client_profile, active
      FROM app_clients WHERE active = 1 ORDER BY name'
 )->fetchAll();
 $invoiceRows = db()->query(
@@ -86,17 +97,31 @@ foreach ($caseRows as $row) {
 respond([
     'caseAmounts' => $caseAmounts,
     'warehouseStorageTotal' => 318,
-    'clients' => array_map(static fn(array $row): array => [
-        'codigo' => $row['code'],
-        'nombre' => $row['name'],
-        'contacto' => $row['contact'],
-        'expedientes' => (int) $row['active_cases'],
-        'recepcion' => $row['reception_rate'],
-        'storage' => $row['storage_rate'],
-        'transporte' => $row['transport_rate'],
-        'recargo' => $row['surcharge_rate'],
-        'activo' => (bool) $row['active'],
-    ], $clientRows),
+    'clients' => array_map(static function (array $row): array {
+        $profile = json_decode((string) ($row['client_profile'] ?? ''), true);
+        if (!is_array($profile)) {
+            $profile = [];
+        }
+        return [
+            'codigo' => $row['code'],
+            'nombre' => $row['name'],
+            'contacto' => $row['contact'],
+            'expedientes' => (int) $row['active_cases'],
+            'recepcion' => $row['reception_rate'],
+            'storage' => $row['storage_rate'],
+            'transporte' => $row['transport_rate'],
+            'recargo' => $row['surcharge_rate'],
+            'telefono' => (string) ($profile['telefono'] ?? ''),
+            'fiscalName' => (string) ($profile['fiscalName'] ?? ''),
+            'taxId' => (string) ($profile['taxId'] ?? ''),
+            'direccion' => (string) ($profile['direccion'] ?? ''),
+            'condicionesPago' => (string) ($profile['condicionesPago'] ?? ''),
+            'moneda' => (string) ($profile['moneda'] ?? 'EUR'),
+            'tarifaActiva' => (string) ($profile['tarifaActiva'] ?? ''),
+            'notas' => (string) ($profile['notas'] ?? ''),
+            'activo' => (bool) $row['active'],
+        ];
+    }, $clientRows),
     'invoices' => array_map(static fn(array $row): array => [
         'id' => $row['id'],
         'expediente' => $row['case_ref'],
