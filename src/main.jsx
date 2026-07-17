@@ -576,6 +576,16 @@ function App({auth,finance,onFinanceChange,onLogout}){
     setOperationalLoaded(true)
   }).catch(reason=>{setOperationalLoaded(true);notify(reason.message)});
   useEffect(()=>{loadTeam();api('/api/clients/directory.php').then(result=>setClientOptions(result.clients.map(item=>item.name))).catch(()=>{});loadOperational();const timer=window.setInterval(loadOperational,45000);window.addEventListener('focus',loadOperational);return()=>{window.clearInterval(timer);window.removeEventListener('focus',loadOperational)}},[]);
+  const ensureClientOption=async name=>{
+    const client=String(name||'').trim();
+    if(!client)return '';
+    const exists=clientOptions.some(item=>item.toLowerCase()===client.toLowerCase());
+    if(exists)return clientOptions.find(item=>item.toLowerCase()===client.toLowerCase())||client;
+    const result=await api('/api/clients/directory.php',{method:'POST',headers:{'X-CSRF-Token':auth.csrfToken},body:JSON.stringify({name:client})});
+    const saved=result.client?.name||client.toUpperCase();
+    setClientOptions(options=>options.some(item=>item.toLowerCase()===saved.toLowerCase())?options:[...options,saved].sort((a,b)=>a.localeCompare(b,'es')));
+    return saved;
+  };
   useEffect(()=>{
     if(!operationalLoaded)return;
     const storageKey=`swiftport-ais-alerts-${user.id}`;
@@ -648,12 +658,16 @@ function App({auth,finance,onFinanceChange,onLogout}){
   const createCase=async form=>{
     const vessel=String(form.buque||'').trim().toUpperCase();
     if(!vessel){notify('Indica el buque para crear el expediente');return}
+    let cliente='';
+    try{cliente=await ensureClientOption(form.cliente)}
+    catch(reason){notify('No se pudo crear el cliente: '+reason.message);return}
+    if(!cliente){notify('Indica el cliente para crear el expediente');return}
     const nextNumber=Math.max(0,...cases.map(entry=>Number(String(entry.id||'').match(/^SW-2026-(\d+)$/)?.[1]||0)))+1;
     const id='SW-2026-'+String(nextNumber).padStart(4,'0');
     const etaDate=String(form.eta||'').slice(0,10);
     const etaTime=String(form.eta||'').slice(11,16);
     const known=findKnownVessel(vessels,vessel)||{};
-    const item=normalizeMerchandise({id,buque:vessel,imo:cleanImo(form.imo)||known.imo||'',mmsi:cleanMmsi(form.mmsi)||known.mmsi||'',cliente:form.cliente,puerto:form.puerto,eta:etaDate||'Por confirmar',portCall:{etaDate,etaTime,etbDate:'',etbTime:'',etdDate:'',etdTime:'',updatedAt:new Date().toISOString()},estado:'Nuevo',prioridad:form.prioridad,conductor:'Sin asignar',servicios:[form.createReception&&'Recepción',form.createTransport&&'Transporte'].filter(Boolean),bultos:Number(form.bultos)||0,peso:'Por registrar',progreso:0,siguiente:'Revisar expediente y servicios programados',aduana:'Por revisar',autoTransportDisabled:false,manualVesselName:true,manualEditedAt:new Date().toISOString()});
+    const item=normalizeMerchandise({id,buque:vessel,imo:cleanImo(form.imo)||known.imo||'',mmsi:cleanMmsi(form.mmsi)||known.mmsi||'',cliente,puerto:form.puerto,eta:etaDate||'Por confirmar',portCall:{etaDate,etaTime,etbDate:'',etbTime:'',etdDate:'',etdTime:'',updatedAt:new Date().toISOString()},estado:'Nuevo',prioridad:form.prioridad,conductor:'Sin asignar',servicios:[form.createReception&&'Recepción',form.createTransport&&'Transporte'].filter(Boolean),bultos:Number(form.bultos)||0,peso:'Por registrar',progreso:0,siguiente:'Revisar expediente y servicios programados',aduana:'Por revisar',autoTransportDisabled:false,manualVesselName:true,manualEditedAt:new Date().toISOString()});
     const stamp=Date.now();
     const receptionEvent=form.createReception&&form.receptionDate?{id:`EV-${stamp}-R`,titulo:form.receptionLocation||'Recepción en almacén',tipoServicio:'Recepción',fecha:form.receptionDate,inicio:form.receptionStart,fin:form.receptionEnd,asignado:'Sin asignar',expediente:id,transporte:'',color:'gray'}:null;
     const transportDate=form.transportDate||etaDate;
@@ -708,7 +722,7 @@ function App({auth,finance,onFinanceChange,onLogout}){
   const deleteCase=id=>{const target=cases.find(item=>item.id===id);if(!target)return;const linkedWarehouse=warehouseEntries.filter(entry=>entry.expediente===id&&!entry.archivado);const warning=linkedWarehouse.length?`\n\nTiene ${linkedWarehouse.length} entrada(s) de almacén vinculada(s). No se borrará la mercancía: quedará sin expediente para no perder evidencias.`:'';if(!window.confirm(`¿Borrar el expediente ${target.id} - ${target.buque}?${warning}\n\nSe quitarán sus trabajos del calendario y transportes.`))return;const nextCases=cases.filter(item=>item.id!==id);const nextTransports=transports.filter(item=>item.expediente!==id);const nextCalendar=calendarEvents.filter(item=>item.expediente!==id);const nextCustoms=customs.filter(item=>item.expediente!==id);const nextWarehouse=warehouseEntries.map(entry=>entry.expediente===id?{...entry,expediente:''}:entry);setCases(nextCases);setTransports(nextTransports);setCalendarEvents(nextCalendar);setCustoms(nextCustoms);setWarehouseEntries(nextWarehouse);saveOperational(nextCases,nextTransports,nextWarehouse,nextCustoms,nextCalendar);setSelectedId(nextCases[0]?.id||'');notify('Expediente borrado y calendario limpiado')};
   const rebuildCalendarServices=async()=>{const activeCaseIds=new Set(cases.filter(item=>item.estado!=='Completado').map(item=>item.id));const affected=calendarEvents.filter(event=>activeCaseIds.has(event.expediente)).length;const affectedTransports=transports.filter(item=>activeCaseIds.has(item.expediente)).length;if(!affected&&!affectedTransports){notify('No hay servicios activos que limpiar');return}if(!window.confirm(`¿Limpiar y reconstruir el calendario?\n\nSe quitarán ${affected} tarjetas del calendario y ${affectedTransports} transportes planificados de expedientes activos. No se borran expedientes, mercancía ni documentos. Después se reconstruirá SOLO con transportes usando ETB/fecha del buque.`))return;const nextCalendar=calendarEvents.filter(event=>!activeCaseIds.has(event.expediente));const nextTransports=transports.filter(item=>!activeCaseIds.has(item.expediente));setCalendarEvents(nextCalendar);setTransports(nextTransports);await saveOperational(cases,nextTransports,warehouseEntries,customs,nextCalendar);notify('Calendario limpiado; reconstruyendo solo transportes');await loadOperational()};
   const updateClient=updated=>{const next={...finance,clients:finance.clients.map(item=>item.codigo===updated.codigo?updated:item)};onFinanceChange(next).then(()=>notify('Cliente y tarifas actualizados')).catch(reason=>notify(reason.message))};
-  const updateInvoice=updated=>{const next={...finance,invoices:finance.invoices.map(item=>item.id===updated.id?updated:item)};onFinanceChange(next).then(()=>notify('Documento actualizado')).catch(reason=>notify(reason.message))};
+  const updateInvoice=updated=>{const exists=finance.invoices.some(item=>item.id===updated.id);const next={...finance,invoices:exists?finance.invoices.map(item=>item.id===updated.id?updated:item):[updated,...finance.invoices]};onFinanceChange(next).then(()=>notify(exists?'Documento actualizado':'Borrador de factura creado')).catch(reason=>notify(reason.message))};
   const syncCaseWithWarehouseEntries=(item,nextWarehouse)=>{
     const linkedEntries=nextWarehouse.filter(entry=>entry.expediente===item.id&&!entry.archivado&&entry.estado!=='Expedido');
     const linkedRefs=new Set(linkedEntries.map(entry=>entry.ref));
@@ -1094,14 +1108,15 @@ const layoutOverlappingEvents=events=>{
   finishCluster();
   return result;
 };
+const CALENDAR_HOUR_HEIGHT=96;
 const calendarEventStyle=event=>{
   const start=calendarMinutes(event.inicio),end=Math.max(start+30,calendarMinutes(event.fin)||start+60);
   const visibleStart=Math.max(0,Math.min(1439,start));
   const visibleEnd=Math.max(visibleStart+30,Math.min(1440,end));
   const columns=event._columns||1,lane=event._lane||0;
   return {
-    top:visibleStart/60*64,
-    height:Math.max(56,(visibleEnd-visibleStart)/60*64),
+    top:visibleStart/60*CALENDAR_HOUR_HEIGHT,
+    height:Math.max(96,(visibleEnd-visibleStart)/60*CALENDAR_HOUR_HEIGHT),
     left:`calc(4px + (100% - 8px) * ${lane}/${columns})`,
     width:`calc((100% - 8px) / ${columns} - ${columns>1?2:0}px)`,
     right:'auto'
@@ -1119,7 +1134,7 @@ const eventDurationMinutes=event=>{
 const calendarDropTime=(mouseEvent,dayElement)=>{
   const rect=dayElement.getBoundingClientRect();
   const y=Math.max(0,Math.min(rect.height,mouseEvent.clientY-rect.top));
-  const minutes=Math.round(((y/64)*60)/15)*15;
+  const minutes=Math.round(((y/CALENDAR_HOUR_HEIGHT)*60)/15)*15;
   return minutesToClock(Math.max(0,Math.min(1410,minutes)));
 };
 function Calendario({events,team,cases,transports,providers,warehouseEntries,saveEvent,deleteEvent,completeCaseStep,undoCaseStep,openCase,currentUser,csrfToken,reloadOperational,notify}){
@@ -1714,9 +1729,19 @@ function Clientes({notify,clients,updateClient}){
 }
 function Facturacion({openCase,notify,invoices,cases,updateInvoice}){
   const [editing,setEditing]=useState(null);
-  const total=invoices.filter(item=>item.estado!=='Enviada').reduce((sum,item)=>sum+item.importe,0);
+  const activeInvoices=invoices.filter(item=>!['Facturado','Cobrado'].includes(item.estado));
+  const total=activeInvoices.reduce((sum,item)=>sum+Number(item.importe||0),0);
   const readyCases=cases.filter(item=>operationFlow(item).billingReady&&!invoices.some(invoice=>invoice.expediente===item.id));
-  return <>{readyCases.length>0&&<section className="billing-ready-panel panel"><SectionHeader title="Listos para facturar" subtitle="Operativa terminada y POD recibido"/><div className="billing-ready-list">{readyCases.map(item=><button key={item.id} onClick={()=>openCase(item.id)}><span className="invoice-icon"><CheckCircle2/></span><span><b>{caseLabel(item)}</b><small>{item.cliente} · POD verificado</small></span><ChevronRight/></button>)}</div></section>}<section className="billing-hero"><div><span>Importe pendiente de gestión</span><strong>{money(total)}</strong><small>{invoices.filter(item=>item.estado!=='Enviada').length} documentos · junio 2026</small></div><div><span className="holded-mark">H</span><div><b>Integración con Holded</b><small>Exportación manual en este MVP</small></div></div><button className="button primary" onClick={()=>notify('CSV generado con '+invoices.length+' documentos')}><Download/> Exportar selección</button></section><section className="panel"><SectionHeader title="Documentos de facturación" subtitle="Revisa conceptos antes de exportar"/><div className="responsive-table billing-table"><div className="table-head"><span>Documento / expediente</span><span>Cliente</span><span>Concepto</span><span>Importe</span><span>Estado</span><span/></div>{invoices.map(item=><div className="table-row" key={item.id}><span className="primary-cell"><span className="invoice-icon"><ReceiptText/></span><span><b>{item.id}</b><button onClick={()=>openCase(item.expediente)}>{item.expediente}</button></span></span><span data-label="Cliente">{item.cliente}</span><span data-label="Concepto">{item.concepto}</span><strong data-label="Importe">{money(item.importe)}</strong><span data-label="Estado"><Badge>{item.estado}</Badge></span><button className="icon-button" aria-label={'Editar '+item.id} onClick={()=>setEditing(item)}><PencilLine/></button></div>)}</div></section>{editing&&<InvoiceEditModal item={editing} close={()=>setEditing(null)} submit={item=>{updateInvoice(item);setEditing(null)}}/>}</>;
+  const draftFromCase=item=>({id:'BOR-'+item.id.replace('SW-',''),expediente:item.id,cliente:item.cliente,concepto:`Servicio logístico ${item.buque} · ${item.puerto}`,importe:Number(item.importe)||0,estado:'Borrador',vencimiento:new Date(Date.now()+30*86400000).toISOString().slice(0,10),buque:item.buque,puerto:item.puerto});
+  const createDraft=item=>setEditing(draftFromCase(item));
+  const groupedStatus=['Borrador','Revisar','Listo para enviar','Facturado','Cobrado'];
+  return <>
+    <section className="billing-flow-panel panel"><SectionHeader title="Flujo de facturación" subtitle="Control interno antes de enviar nada a Holded"/><div className="billing-flow-steps">{groupedStatus.map((status,index)=><span key={status}><b>{index+1}</b><small>{status}</small></span>)}</div><div className="billing-rules"><div><b>Se puede modificar aquí</b><small>Cliente, concepto, importe, estado y vencimiento.</small></div><div><b>No se modifica aquí</b><small>Buque, mercancía, POD y evidencias: se corrigen desde Expediente.</small></div></div></section>
+    {readyCases.length>0&&<section className="billing-ready-panel panel"><SectionHeader title="Listos para facturar" subtitle="Operativa terminada y POD recibido"/><div className="billing-ready-list">{readyCases.map(item=><article key={item.id} className="billing-ready-card"><span className="invoice-icon"><CheckCircle2/></span><div><b>{caseLabel(item)}</b><small>{item.cliente} · {item.puerto} · POD verificado</small><em>{item.bultos||0} bultos · {item.peso||'Peso por revisar'}</em></div><div className="billing-ready-actions"><button className="button tertiary" onClick={()=>openCase(item.id)}>Ver expediente</button><button className="button primary" onClick={()=>createDraft(item)}>Crear borrador</button></div></article>)}</div></section>}
+    <section className="billing-hero"><div><span>Importe pendiente de gestión</span><strong>{money(total)}</strong><small>{activeInvoices.length} borradores/documentos activos</small></div><div><span className="holded-mark">H</span><div><b>Holded queda para después</b><small>Ahora solo control interno: revisar, facturar y cobrar</small></div></div><button className="button primary" onClick={()=>notify('Exportación pendiente: primero validamos este flujo interno')}><Download/> Exportar más adelante</button></section>
+    <section className="panel"><SectionHeader title="Documentos de facturación" subtitle="Borradores internos editables"/><div className="responsive-table billing-table"><div className="table-head"><span>Documento / expediente</span><span>Cliente</span><span>Concepto</span><span>Importe</span><span>Estado</span><span/></div>{invoices.length?invoices.map(item=><div className="table-row" key={item.id}><span className="primary-cell"><span className="invoice-icon"><ReceiptText/></span><span><b>{item.id}</b><button onClick={()=>openCase(item.expediente)}>{item.expediente}</button></span></span><span data-label="Cliente">{item.cliente}</span><span data-label="Concepto">{item.concepto}</span><strong data-label="Importe">{money(item.importe)}</strong><span data-label="Estado"><Badge>{item.estado}</Badge></span><button className="icon-button" aria-label={'Editar '+item.id} onClick={()=>setEditing(item)}><PencilLine/></button></div>):<Empty text="Todavía no hay borradores. Crea uno desde 'Listos para facturar'."/>}</div></section>
+    {editing&&<InvoiceEditModal item={editing} close={()=>setEditing(null)} submit={item=>{updateInvoice(item);setEditing(null)}}/>}
+  </>;
 }
 
 const MAIL_STATUS={review:'Revisar',processed:'Creado',ignored:'Descartado',error:'Error'};
@@ -1917,7 +1942,7 @@ function ClientEditModal({item,close,submit}){
 
 function InvoiceEditModal({item,close,submit}){
   const [form,setForm]=useState({...item});const update=event=>setForm({...form,[event.target.name]:event.target.value});
-  return <div className="modal-backdrop" onMouseDown={event=>{if(event.target===event.currentTarget)close()}}><section className="modal" role="dialog" aria-modal="true"><div className="modal-head"><div><span className="overline">{item.id}</span><h2>Editar facturación</h2></div><button className="icon-button" onClick={close}><X/></button></div><form onSubmit={event=>{event.preventDefault();submit({...form,importe:Number(form.importe)||0})}}><label className="field"><span>Expediente</span><input name="expediente" value={form.expediente} onChange={update} required/></label><label className="field"><span>Cliente</span><input name="cliente" value={form.cliente} onChange={update} required/></label><label className="field wide"><span>Concepto</span><input name="concepto" value={form.concepto} onChange={update} required/></label><label className="field"><span>Importe (€)</span><input name="importe" type="number" min="0" step="0.01" value={form.importe} onChange={update}/></label><label className="field"><span>Estado</span><select name="estado" value={form.estado} onChange={update}>{['Borrador','Revisar','Lista','Enviada'].map(value=><option key={value}>{value}</option>)}</select></label><label className="field wide"><span>Vencimiento</span><input name="vencimiento" value={form.vencimiento} onChange={update}/></label><div className="modal-actions wide"><button type="button" className="button tertiary" onClick={close}>Cancelar</button><button className="button primary"><Save/> Guardar documento</button></div></form></section></div>;
+  return <div className="modal-backdrop" onMouseDown={event=>{if(event.target===event.currentTarget)close()}}><section className="modal invoice-modal" role="dialog" aria-modal="true"><div className="modal-head"><div><span className="overline">{item.id}</span><h2>{String(item.id||'').startsWith('BOR-')?'Crear borrador de factura':'Editar facturación'}</h2><p>Esto no envía nada a Holded. Solo prepara el control interno.</p></div><button className="icon-button" onClick={close}><X/></button></div><form onSubmit={event=>{event.preventDefault();submit({...form,importe:Number(form.importe)||0})}}><div className="invoice-locked wide"><ReceiptText/><span><small>DATOS BLOQUEADOS DEL EXPEDIENTE</small><b>{form.expediente}{form.buque?` · ${form.buque}`:''}{form.puerto?` · ${form.puerto}`:''}</b><em>Si buque, mercancía, POD o evidencias están mal, corrígelo en Expediente.</em></span></div><label className="field"><span>Expediente</span><input name="expediente" value={form.expediente} readOnly/></label><label className="field"><span>Cliente editable</span><input name="cliente" value={form.cliente} onChange={update} required/></label><label className="field wide"><span>Concepto editable</span><input name="concepto" value={form.concepto} onChange={update} required/></label><label className="field"><span>Importe editable (€)</span><input name="importe" type="number" min="0" step="0.01" value={form.importe} onChange={update}/></label><label className="field"><span>Estado interno</span><select name="estado" value={form.estado} onChange={update}>{['Borrador','Revisar','Listo para enviar','Facturado','Cobrado'].map(value=><option key={value}>{value}</option>)}</select></label><label className="field wide"><span>Vencimiento editable</span><input name="vencimiento" type="date" value={form.vencimiento} onChange={update}/></label><div className="billing-edit-note wide"><b>Editable ahora:</b> cliente, concepto, importe, estado y vencimiento. <b>No editable aquí:</b> POD, fotos, mercancía, buque y puerto operativo.</div><div className="modal-actions wide"><button type="button" className="button tertiary" onClick={close}>Cancelar</button><button className="button primary"><Save/> Guardar borrador</button></div></form></section></div>;
 }
 
 function CustomEditModal({item,close,submit}){
@@ -1956,6 +1981,11 @@ function NewCaseModal({clientOptions=[],vessels=[],team=[],close,submit}){
   const [form,setForm]=useState({buque:'',imo:'',mmsi:'',cliente:clientOptions[0]||'UME Shipping',puerto:'Barcelona',eta:'',prioridad:'Media',bultos:'1',createReception:false,receptionDate:'',receptionStart:'09:00',receptionEnd:'10:00',receptionLocation:warehouse,createTransport:false,transportDate:'',transportStart:'09:00',transportEnd:'10:00',transportPickup:warehouse,transportDelivery:'BUQUE POR CONFIRMAR · Barcelona',transportConductor:'Sin asignar'});
   const update=event=>{
     const {name,value,type,checked}=event.target;
+    if(name==='cliente'&&value==='__new_client__'){
+      const typed=window.prompt('Nombre del nuevo cliente');
+      if(typed&&typed.trim())setForm(current=>({...current,cliente:typed.trim()}));
+      return;
+    }
     if(name==='eta'){
       const date=value.slice(0,10);
       const time=value.slice(11,16)||'09:00';
@@ -1966,6 +1996,24 @@ function NewCaseModal({clientOptions=[],vessels=[],team=[],close,submit}){
     if(name==='puerto'){setForm(current=>({...current,puerto:value,transportDelivery:`BUQUE ${current.buque.toUpperCase()||'POR CONFIRMAR'} · ${value}`}));return}
     setForm(current=>({...current,[name]:type==='checkbox'?checked:value}));
   };
+  useEffect(()=>{
+    const select=document.querySelector('.new-case-modal select[name="cliente"]');
+    if(!select)return;
+    [...select.querySelectorAll('option[data-dynamic-client]')].forEach(option=>option.remove());
+    const existing=[...select.options].some(option=>option.value.toLowerCase()===String(form.cliente||'').toLowerCase());
+    if(form.cliente&&!existing){
+      const option=document.createElement('option');
+      option.value=form.cliente;
+      option.textContent=form.cliente;
+      option.setAttribute('data-dynamic-client','true');
+      select.appendChild(option);
+    }
+    const add=document.createElement('option');
+    add.value='__new_client__';
+    add.textContent='+ Añadir cliente nuevo';
+    add.setAttribute('data-dynamic-client','true');
+    select.appendChild(add);
+  },[form.cliente,clientOptions]);
   return <div className="modal-backdrop" role="presentation" onMouseDown={event=>{if(event.target===event.currentTarget)close()}}><section className="modal new-case-modal" role="dialog" aria-modal="true" aria-labelledby="new-case-title"><div className="modal-head"><div><span className="overline">Nuevo registro</span><h2 id="new-case-title">Crear expediente y trabajos</h2><p>El expediente quedará creado y el transporte irá al calendario. La recepción queda en almacén/expediente.</p></div><button className="icon-button" aria-label="Cerrar" onClick={close}><X/></button></div><form onSubmit={event=>{event.preventDefault();submit(form)}}>{vessels.length>0&&<label className="field wide vessel-picker-field"><span>Elegir buque guardado</span><select name="buque" value={findKnownVessel(vessels,form.buque)?.name||''} onChange={update}><option value="">Escribir buque nuevo o buscar abajo</option>{vessels.map(vessel=><option key={vessel.id||vessel.name} value={vessel.name}>{vessel.name} {[vessel.imo&&`· IMO ${vessel.imo}`,vessel.mmsi&&`· MMSI ${vessel.mmsi}`].filter(Boolean).join(' ')}</option>)}</select></label>}<label className="field wide"><span>Buque *</span><input name="buque" list="known-vessels-new" value={form.buque} onChange={update} placeholder="Ej. Baltic Horizon" required autoFocus/><datalist id="known-vessels-new">{vessels.map(vessel=><option key={vessel.id||vessel.name} value={vessel.name}>{[vessel.imo&&`IMO ${vessel.imo}`,vessel.mmsi&&`MMSI ${vessel.mmsi}`].filter(Boolean).join(' · ')}</option>)}</datalist></label><label className="field"><span>IMO</span><input name="imo" inputMode="numeric" maxLength="7" value={form.imo} onChange={update} placeholder="Se rellena si existe"/></label><label className="field"><span>MMSI</span><input name="mmsi" inputMode="numeric" maxLength="9" value={form.mmsi} onChange={update} placeholder="Seguimiento AIS"/></label><div className="vessel-memory-hint wide"><Ship/><span><b>Buques recordados</b><small>Si el buque ya existe, Swiftport recupera IMO/MMSI. Si los añades ahora, quedarán guardados para la próxima escala.</small></span></div><label className="field"><span>Cliente</span><select name="cliente" value={form.cliente} onChange={update}>{(clientOptions.length?clientOptions:clientNames).map(name=><option key={name}>{name}</option>)}</select></label><label className="field"><span>Puerto</span><select name="puerto" value={form.puerto} onChange={update}>{['Barcelona','Algeciras','Tarragona','Valencia','Bilbao'].map(value=><option key={value}>{value}</option>)}</select></label><label className="field"><span>ETA del buque</span><input name="eta" type="datetime-local" value={form.eta} onChange={update}/></label><label className="field"><span>Prioridad</span><select name="prioridad" value={form.prioridad} onChange={update}>{['Baja','Media','Alta','Urgente'].map(value=><option key={value}>{value}</option>)}</select></label><label className="field"><span>N.º de bultos</span><input name="bultos" type="number" min="0" value={form.bultos} onChange={update}/></label><fieldset className="case-service-fieldset wide"><label className="service-check"><input name="createReception" type="checkbox" checked={form.createReception} onChange={update}/><WarehouseIcon/><span><b>REGISTRAR RECEPCIÓN</b><small>La mercancía quedará asociada al buque/expediente</small></span></label>{form.createReception&&<div className="case-service-fields"><label className="field"><span>Fecha *</span><input name="receptionDate" type="date" value={form.receptionDate} onChange={update} required/></label><label className="field"><span>Inicio *</span><input name="receptionStart" type="time" value={form.receptionStart} onChange={update} required/></label><label className="field"><span>Fin *</span><input name="receptionEnd" type="time" value={form.receptionEnd} onChange={update} required/></label><label className="field wide"><span>Lugar de recepción / recogida</span><input name="receptionLocation" value={form.receptionLocation} onChange={update} required/></label></div>}</fieldset><fieldset className="case-service-fieldset wide"><label className="service-check"><input name="createTransport" type="checkbox" checked={form.createTransport} onChange={update}/><Truck/><span><b>CREAR TRANSPORTE EN CALENDARIO</b><small>Ruta, horario y responsable de la tarea</small></span></label>{form.createTransport&&<div className="case-service-fields"><label className="field"><span>Fecha *</span><input name="transportDate" type="date" value={form.transportDate} onChange={update} required/></label><label className="field"><span>Inicio *</span><input name="transportStart" type="time" value={form.transportStart} onChange={update} required/></label><label className="field"><span>Fin *</span><input name="transportEnd" type="time" value={form.transportEnd} onChange={update} required/></label><label className="field"><span>Conductor / responsable</span><select name="transportConductor" value={form.transportConductor} onChange={update}><option>Sin asignar</option>{team.map(member=><option key={member.id} value={member.fullName}>{member.fullName}</option>)}</select></label><label className="field"><span>Recogida</span><input name="transportPickup" value={form.transportPickup} onChange={update} required/></label><label className="field"><span>Entrega</span><input name="transportDelivery" value={form.transportDelivery} onChange={update} required/></label></div>}</fieldset><div className="modal-actions wide"><button type="button" className="button tertiary" onClick={close}>Cancelar</button><button className="button primary"><Save/> Crear expediente y calendario</button></div></form></section></div>;
 }
 
