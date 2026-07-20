@@ -283,3 +283,13 @@
 .calendar-event-delete svg{width:13px}
 .calendar-event:hover .calendar-event-delete,.calendar-unscheduled-card:hover .calendar-event-delete{opacity:1}
 @media(max-width:900px){.calendar-head,.calendar-body,.calendar-unscheduled-row{grid-template-columns:58px repeat(7,210px);min-width:1528px}.calendar-scroll{max-height:calc(100vh - 215px)}.calendar-event .calendar-vessel-name{font-size:13px!important}.calendar-driver-quick select{height:36px!important;font-size:12px!important}}
+.calendar-event{min-height:124px!important}
+.calendar-event .calendar-event-open{padding-bottom:52px!important}
+.calendar-event .calendar-driver-quick{position:absolute!important;left:0;right:0;bottom:0;margin:0!important;padding:6px 8px 8px!important;background:linear-gradient(180deg,rgba(255,255,255,.86),rgba(255,255,255,.98));border-top:1px solid rgba(70,91,115,.18)}
+.calendar-event .calendar-driver-quick span{display:block!important;font-size:7px!important;line-height:1!important;margin-bottom:3px;color:#415872!important}
+.calendar-event .calendar-driver-quick select{display:block!important;width:100%!important;height:30px!important;min-height:30px!important;border:1px solid #b7c7d8!important;border-radius:7px!important;background:#fff!important;color:#10233d!important;font-size:11px!important;font-weight:900!important}
+.calendar-event.is-overlap{min-height:118px!important}
+.calendar-event.is-overlap .calendar-event-open{padding-bottom:50px!important}
+.calendar-event.is-overlap .calendar-driver-quick{padding:6px!important}
+.calendar-event.is-overlap .calendar-driver-quick span{display:block!important}
+.calendar-event.is-overlap .calendar-driver-quick select{height:29px!important;font-size:10px!important}
