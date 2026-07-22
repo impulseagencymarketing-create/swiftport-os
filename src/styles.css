@@ -302,6 +302,57 @@
 .case-card.port-pink{border-left-color:#d85b9d!important}
 .case-card.port-green{border-left-color:#55a85c!important}
 .case-card.port-gray{border-left-color:#8b96a3!important}
+.calendar-event-open,
+.calendar-unscheduled-card{
+  position:relative!important;
+}
+.calendar-status-pill{
+  position:absolute;
+  top:6px;
+  right:34px;
+  z-index:4;
+  display:inline-flex!important;
+  align-items:center;
+  gap:3px;
+  max-width:92px;
+  padding:3px 6px;
+  border-radius:999px;
+  border:1px solid rgba(255,255,255,.72);
+  box-shadow:0 2px 6px rgba(20,40,65,.14);
+  font-size:7px!important;
+  line-height:1!important;
+  font-weight:950;
+  text-transform:uppercase;
+  letter-spacing:.035em;
+}
+.calendar-status-pill svg{
+  width:11px!important;
+  height:11px!important;
+  flex:0 0 auto;
+}
+.calendar-status-pill em{
+  font-style:normal;
+  white-space:nowrap;
+}
+.calendar-status-pill.done{
+  background:#dff5ea;
+  color:#167354;
+}
+.calendar-status-pill.pending{
+  background:#fff0c7;
+  color:#8a5b00;
+}
+.calendar-event.is-overlap .calendar-status-pill{
+  right:5px;
+  top:5px;
+  padding:3px;
+}
+.calendar-event.is-overlap .calendar-status-pill em{
+  display:none;
+}
+.calendar-unscheduled-card .calendar-status-pill{
+  right:8px;
+}
 .driver-week-event.completed,
 .calendar-unscheduled-card.completed{
   opacity:.78!important;
