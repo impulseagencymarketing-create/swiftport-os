@@ -323,7 +323,8 @@ const normalizeMerchandise=item=>{
   },operationalFlow:operationFlow(item)};
   const progress=operationProgress(normalized);
   const next=nextOperationStep(normalized);
-  return {...normalized,progreso:normalized.operationalFlow.billingReady?100:progress,siguiente:normalized.operationalFlow.billingReady?'Listo para facturar':next?.next||item.siguiente};
+  const completed=Boolean(normalized.operationalFlow.billingReady||progress>=100||normalized.estado==='Completado');
+  return {...normalized,estado:completed?'Completado':normalized.estado,progreso:completed?100:progress,siguiente:completed?'Listo para facturar':next?.next||item.siguiente};
 };
 const numericWeight=value=>{const raw=String(value||'').replace(/[^\d.,]/g,'');if(raw.includes(',')&&raw.includes('.'))return Number(raw.replace(/\./g,'').replace(',','.'))||0;if(raw.includes(','))return Number(raw.replace(',','.'))||0;return Number(raw)||0};
 const merchandiseWeight=lines=>(lines||[]).reduce((sum,line)=>sum+numericWeight(line.peso),0);
@@ -746,9 +747,11 @@ function App({auth,finance,onFinanceChange,onLogout}){
   const loadOperational=()=>api('/api/operational.php').then(result=>{
     if(result.data){
       const loadedCases=result.data.cases.map(normalizeMerchandise);
+      const completedCaseIds=new Set(loadedCases.filter(item=>operationFlow(item).billingReady||item.estado==='Completado').map(item=>item.id));
+      const loadedTransports=(result.data.transports||[]).map(item=>completedCaseIds.has(item.expediente)?{...item,estado:'Entregado'}:item);
       const hiddenVessels=Array.isArray(result.data.deletedVesselKeys)?result.data.deletedVesselKeys.filter(Boolean):[];
       const loadedVessels=mergeVesselCatalog(Array.isArray(result.data.vessels)?result.data.vessels:[],loadedCases).filter(vessel=>!hiddenVessels.includes(vesselKey(vessel.name)));
-      setDeletedVesselKeys(hiddenVessels);setCases(loadedCases.map(item=>hydrateCaseWithVessel(item,loadedVessels)));setVessels(loadedVessels);setTransports(result.data.transports);setWarehouseEntries(result.data.warehouseEntries);if(result.data.customs)setCustoms(result.data.customs);if(result.data.calendarEvents)setCalendarEvents(result.data.calendarEvents.filter(isTransportCalendarEvent));if(Array.isArray(result.data.providers))setProviders(result.data.providers)
+      setDeletedVesselKeys(hiddenVessels);setCases(loadedCases.map(item=>hydrateCaseWithVessel(item,loadedVessels)));setVessels(loadedVessels);setTransports(loadedTransports);setWarehouseEntries(result.data.warehouseEntries);if(result.data.customs)setCustoms(result.data.customs);if(result.data.calendarEvents)setCalendarEvents(result.data.calendarEvents.filter(isTransportCalendarEvent));if(Array.isArray(result.data.providers))setProviders(result.data.providers)
     }
     setOperationalLoaded(true)
   }).catch(reason=>{setOperationalLoaded(true);notify(reason.message)});
