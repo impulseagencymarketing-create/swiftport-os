@@ -302,3 +302,27 @@
 .case-card.port-pink{border-left-color:#d85b9d!important}
 .case-card.port-green{border-left-color:#55a85c!important}
 .case-card.port-gray{border-left-color:#8b96a3!important}
+.driver-week-event.completed,
+.calendar-unscheduled-card.completed{
+  opacity:.78!important;
+  filter:saturate(.78);
+  border-left-color:#22a06b!important;
+  background:#edf9f3!important;
+  color:#166548!important;
+}
+.driver-week-event.completed .calendar-event-open,
+.calendar-unscheduled-card.completed .calendar-event-open{
+  text-decoration:none!important;
+}
+.driver-week-done{
+  display:inline-flex!important;
+  width:max-content;
+  margin-top:5px;
+  padding:4px 7px;
+  border-radius:999px;
+  background:#dff5ea;
+  color:#167354;
+  font-size:8px!important;
+  font-weight:950;
+  letter-spacing:.04em;
+}
