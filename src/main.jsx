@@ -892,7 +892,7 @@ function App({auth,finance,onFinanceChange,onLogout}){
       const linkedTransport=nextTransports.find(item=>item.id===event.transporte);
       const syncedRoute=linkedTransport?transportRoute(linkedTransport):replaceLinkedVesselText(event.titulo,previousCase,operationalCase);
       const base={...event,titulo:syncedRoute,origen:linkedTransport?.origen||event.origen,destino:linkedTransport?.destino||event.destino};
-      return slot.date&&event.scheduleSource!=='manual'?{...base,fecha:slot.date,inicio:slot.start,fin:end,scheduleStatus,scheduleNote}:base;
+      return slot.date?{...base,fecha:slot.date,inicio:slot.start,fin:end,color:calendarTone(base,next),scheduleStatus,scheduleNote}:base;
     });
     setCases(next);setVessels(nextVessels);setWarehouseEntries(nextWarehouse);setTransports(nextTransports);setCalendarEvents(nextCalendar);
     saveOperational(next,nextTransports,nextWarehouse,customs,nextCalendar,providers,nextVessels);
