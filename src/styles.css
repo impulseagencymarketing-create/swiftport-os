@@ -293,3 +293,12 @@
 .calendar-event.is-overlap .calendar-driver-quick{padding:6px!important}
 .calendar-event.is-overlap .calendar-driver-quick span{display:block!important}
 .calendar-event.is-overlap .calendar-driver-quick select{height:29px!important;font-size:10px!important}
+.case-card[class*="port-"]{border-left-width:5px!important}
+.case-card.port-blue{border-left-color:#4285f4!important}
+.case-card.port-teal{border-left-color:#22a58f!important}
+.case-card.port-orange{border-left-color:#f39a2e!important}
+.case-card.port-purple{border-left-color:#8b65d6!important}
+.case-card.port-red{border-left-color:#dc4f65!important}
+.case-card.port-pink{border-left-color:#d85b9d!important}
+.case-card.port-green{border-left-color:#55a85c!important}
+.case-card.port-gray{border-left-color:#8b96a3!important}
