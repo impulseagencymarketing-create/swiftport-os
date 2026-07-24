@@ -164,6 +164,10 @@
 .warehouse-actions .button svg{width:16px}
 .warehouse-copy-status{display:inline-flex;align-items:center;gap:8px;margin:0 20px 14px;padding:9px 12px;border:1px solid #b7d3f6;border-radius:10px;background:#eef6ff;color:#155dab;font-size:10px;font-weight:800}
 .warehouse-copy-status svg{width:15px}
+.warehouse-selection-bar{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:0 20px 12px;padding:10px 12px;border:1px solid var(--line);border-radius:12px;background:#fbfcfe;color:#526378;font-size:10px;font-weight:800}
+.warehouse-selection-bar label,.warehouse-select{display:inline-flex;align-items:center;gap:8px}
+.warehouse-select input,.warehouse-selection-bar input{width:16px;height:16px;accent-color:var(--blue)}
+.warehouse-table .table-row.selected{background:#eef6ff;border-color:#9ec4f3;box-shadow:inset 3px 0 0 var(--blue)}
 @media(max-width:720px){.warehouse-actions{width:100%;justify-content:stretch}.warehouse-actions .button{flex:1;justify-content:center}.warehouse-copy-status{margin-inline:14px}}
 @media(max-width:720px){
   .new-case-modal{width:100%;max-height:92vh;border-radius:16px 16px 0 0}

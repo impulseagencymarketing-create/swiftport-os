@@ -164,16 +164,14 @@ const warehouseEntryCargoSummary=entry=>{
     const qty=Number(piece.cantidad)||1;
     const type=String(piece.tipo||'BULTO').toUpperCase();
     const weight=piece.peso?` ${String(piece.peso).toUpperCase()}`:'';
-    const tracking=piece.seguimiento?` · Tracking ${String(piece.seguimiento).toUpperCase()}`:'';
+    const tracking=piece.seguimiento?` \u00B7 Tracking ${String(piece.seguimiento).toUpperCase()}`:'';
     return `${qty} ${type}${qty===1?'':'S'}${weight}${tracking}`;
   }).join(' + ');
-  return `${Number(entry?.bultos)||0} BULTO${Number(entry?.bultos)===1?'':'S'}${entry?.peso?` · ${String(entry.peso).toUpperCase()}`:''}`;
+  return `${Number(entry?.bultos)||0} BULTO${Number(entry?.bultos)===1?'':'S'}${entry?.peso?` \u00B7 ${String(entry.peso).toUpperCase()}`:''}`;
 };
 const warehouseWhatsappSummary=(entries=[],cases=[])=>{
   const active=entries.filter(activeWarehouseEntry).sort((a,b)=>String(a.buque||'').localeCompare(String(b.buque||''),'es')||(Date.parse(a.fechaRecepcion||a.fecha||a.entrada||'')||0)-(Date.parse(b.fechaRecepcion||b.fecha||b.entrada||'')||0));
-  if(!active.length)return '*SWIFTPORT LOGISTICS - STOCK PENDIENTE*\n\nNo hay mercancía pendiente en almacén.';
-  const totalBultos=active.reduce((sum,entry)=>sum+(Number(entry.bultos)||merchandiseCount(entry.mercancias)),0);
-  const totalPeso=active.reduce((sum,entry)=>sum+(numericWeight(entry.peso)||merchandiseWeight(entry.mercancias)),0);
+  if(!active.length)return '';
   const groups=new Map();
   active.forEach(entry=>{
     const related=cases.find(item=>item.id===entry.expediente)||cases.find(item=>sameVessel(item.buque,entry.buque));
@@ -181,25 +179,17 @@ const warehouseWhatsappSummary=(entries=[],cases=[])=>{
     const vessel=String(entry.buque||related?.buque||'SIN BUQUE').toUpperCase();
     const key=`${client}||${vessel}`;
     if(!groups.has(key))groups.set(key,{client,vessel,items:[]});
-    groups.get(key).items.push({entry,related});
+    groups.get(key).items.push(entry);
   });
-  const blocks=[`*SWIFTPORT LOGISTICS - STOCK PENDIENTE*`,`Actualizado: ${formatReceptionDate(new Date().toISOString())}`,`Total: ${active.length} entrada${active.length===1?'':'s'} · ${totalBultos} bulto${totalBultos===1?'':'s'} · ${totalPeso.toLocaleString('es-ES',{maximumFractionDigits:2})} kg`,''];
+  const blocks=[];
   [...groups.values()].forEach(group=>{
     blocks.push(`*${group.vessel}*`);
     blocks.push(`Cliente: ${group.client}`);
-    group.items.forEach(({entry,related})=>{
-      const date=entry.entrada||formatReceptionDate(entry.fechaRecepcion||entry.fecha);
-      const expediente=entry.expediente||related?.id||'SIN EXPEDIENTE';
-      blocks.push(`• ${warehouseEntryCargoSummary(entry)}`);
-      blocks.push(`  Ref: ${entry.ref||'S/R'} · Expediente: ${expediente}`);
-      blocks.push(`  Ubicación: ${entry.zona||'PENDIENTE'} · Entrada: ${date}`);
-      if(entry.estado)blocks.push(`  Estado: ${entry.estado}`);
-    });
+    group.items.forEach(entry=>blocks.push(`\u2022 ${warehouseEntryCargoSummary(entry)}`));
     blocks.push('');
   });
   return blocks.join('\n').trim();
-};
-const warehouseEntriesForVessel=(entries,item)=>entries.filter(entry=>activeWarehouseEntry(entry)&&(entry.expediente===item.id||sameVessel(entry.buque,item.buque)));
+};const warehouseEntriesForVessel=(entries,item)=>entries.filter(entry=>activeWarehouseEntry(entry)&&(entry.expediente===item.id||sameVessel(entry.buque,item.buque)));
 const canAccess=(roles,id)=>{
   if(id==='correos')return false;
   if(['transportes','aduanas'].includes(id))return false;
@@ -1913,39 +1903,49 @@ function Almacen({items,cases,openCase,registerEntry,updateEntry,deleteEntry,sho
   const [editing,setEditing]=useState(null);
   const [view,setView]=useState('Activos');
   const [copyStatus,setCopyStatus]=useState('');
+  const [selectedRefs,setSelectedRefs]=useState([]);
   const visibleItems=items.filter(item=>view==='Archivados'?item.archivado||item.estado==='Expedido':!item.archivado&&item.estado!=='Expedido');
+  const activeVisibleItems=visibleItems.filter(activeWarehouseEntry);
+  const allVisibleSelected=activeVisibleItems.length>0&&activeVisibleItems.every(item=>selectedRefs.includes(item.ref));
+  useEffect(()=>{setSelectedRefs(current=>current.filter(ref=>items.some(item=>item.ref===ref&&activeWarehouseEntry(item))))},[items.map(item=>`${item.ref}:${item.estado}:${item.archivado}`).join('|')]);
   const totalPackages=items.filter(item=>item.estado!=='Expedido').reduce((sum,item)=>sum+(Number(item.bultos)||0),0);
   const totalWeight=items.filter(item=>item.estado!=='Expedido').reduce((sum,item)=>sum+(Number(String(item.peso).replace(/\./g,'').replace(',','.').replace(/[^\d.]/g,''))||0),0);
   const submit=form=>{registerEntry(form);setEntryOpen(false)};
+  const toggleWarehouseSelection=(ref,checked)=>setSelectedRefs(current=>checked?[...new Set([...current,ref])]:current.filter(item=>item!==ref));
+  const toggleVisibleSelection=()=>setSelectedRefs(current=>allVisibleSelected?current.filter(ref=>!activeVisibleItems.some(item=>item.ref===ref)):[...new Set([...current,...activeVisibleItems.map(item=>item.ref)])]);
   const copyWhatsappSummary=async()=>{
-    const text=warehouseWhatsappSummary(items,cases);
+    const selectedItems=items.filter(item=>selectedRefs.includes(item.ref)&&activeWarehouseEntry(item));
+    if(!selectedItems.length){const message='Selecciona primero la mercancia que quieres copiar';setCopyStatus(message);notify?.(message);setTimeout(()=>setCopyStatus(''),3000);return}
+    const text=warehouseWhatsappSummary(selectedItems,cases);
     let copied=false;
     try{if(navigator.clipboard?.writeText){await navigator.clipboard.writeText(text);copied=true}}catch(error){copied=false}
     if(!copied)window.prompt('Copia este resumen para WhatsApp',text);
-    const message=copied?'Resumen de almacén copiado para WhatsApp':'Resumen generado para copiar';
+    const message=copied?`${selectedItems.length} entrada${selectedItems.length===1?'':'s'} copiadas para WhatsApp`:'Resumen generado para copiar';
     setCopyStatus(message);notify?.(message);setTimeout(()=>setCopyStatus(''),3000);
   };
   return <>
     <section className={'summary-strip '+(!showFinance?'summary-strip-three':'')}>
       <Summary icon={Box} label="Bultos en stock" value={String(totalPackages)}/>
       <Summary icon={Scale} label="Peso total" value={totalWeight.toLocaleString('es-ES')+' kg'}/>
-      <Summary icon={Layers3} label="Ocupación" value={Math.min(95,Math.round(48+totalPackages*1.5))+'%'}/>
+      <Summary icon={Layers3} label="Ocupacion" value={Math.min(95,Math.round(48+totalPackages*1.5))+'%'}/>
       {showFinance&&<Summary icon={CircleDollarSign} label="Storage acumulado" value={money(storageTotal)}/>}
     </section>
     <section className="panel">
-      <SectionHeader title="Mercancía y ubicaciones" subtitle="Cada recepción queda en stock, tenga o no expediente" action={<div className="warehouse-actions"><button className="button secondary" onClick={copyWhatsappSummary}><ClipboardCheck/> Copiar resumen WhatsApp</button><button className="button secondary" onClick={()=>setEntryOpen(true)}><Plus/> Registrar entrada</button></div>}/>{copyStatus&&<p className="warehouse-copy-status"><ClipboardCheck/>{copyStatus}</p>}
+      <SectionHeader title="Mercancia y ubicaciones" subtitle="Selecciona las entradas que quieres copiar para avisar al cliente" action={<div className="warehouse-actions"><button className="button secondary" onClick={copyWhatsappSummary}><ClipboardCheck/> Copiar seleccion WhatsApp</button><button className="button secondary" onClick={()=>setEntryOpen(true)}><Plus/> Registrar entrada</button></div>}/>
+      {copyStatus&&<p className="warehouse-copy-status"><ClipboardCheck/>{copyStatus}</p>}
       <div className="warehouse-view-tabs">
-        <button className={view==='Activos'?'active':''} onClick={()=>setView('Activos')}>En almacén <span>{items.filter(item=>!item.archivado&&item.estado!=='Expedido').length}</span></button>
+        <button className={view==='Activos'?'active':''} onClick={()=>setView('Activos')}>En almacen <span>{items.filter(item=>!item.archivado&&item.estado!=='Expedido').length}</span></button>
         <button className={view==='Archivados'?'active':''} onClick={()=>setView('Archivados')}>Archivados <span>{items.filter(item=>item.archivado||item.estado==='Expedido').length}</span></button>
       </div>
+      {view==='Activos'&&<div className="warehouse-selection-bar"><label><input type="checkbox" checked={allVisibleSelected} onChange={toggleVisibleSelection}/> Seleccionar visibles</label><span>{selectedRefs.length} seleccionada{selectedRefs.length===1?'':'s'}</span></div>}
       <div className="responsive-table warehouse-table">
-        <div className="table-head"><span>Referencia / expediente</span><span>Ubicación</span><span>Entrada</span><span>Mercancía</span><span>Storage</span><span>Estado</span></div>
-        {visibleItems.map(item=><button className="table-row" key={item.ref} onClick={()=>setEditing(item)}>
-          <span className="primary-cell"><span className="box-icon"><Box/></span><span><b>{item.buque}</b><small>{item.ref}  -  {item.expediente||'SIN EXPEDIENTE'}  -  {(item.fotos||[]).length} fotos</small></span></span>
-          <span data-label="Ubicación"><b>{item.zona}</b></span>
+        <div className="table-head"><span>Referencia / expediente</span><span>Ubicacion</span><span>Entrada</span><span>Mercancia</span><span>Storage</span><span>Estado</span></div>
+        {visibleItems.map(item=><button className={'table-row '+(selectedRefs.includes(item.ref)?'selected':'')} key={item.ref} onClick={()=>setEditing(item)}>
+          <span className="primary-cell"><label className="warehouse-select" onClick={event=>event.stopPropagation()}><input type="checkbox" disabled={!activeWarehouseEntry(item)} checked={selectedRefs.includes(item.ref)} onChange={event=>toggleWarehouseSelection(item.ref,event.target.checked)}/></label><span className="box-icon"><Box/></span><span><b>{item.buque}</b><small>{item.ref}  -  {item.expediente||'SIN EXPEDIENTE'}  -  {(item.fotos||[]).length} fotos</small></span></span>
+          <span data-label="Ubicacion"><b>{item.zona}</b></span>
           <span data-label="Entrada">{item.entrada}</span>
-          <span data-label="Mercancía">{item.bultos} bultos<small>{item.peso}</small></span>
-          <span data-label="Storage">{item.dias} día{item.dias===1?'':'s'}</span>
+          <span data-label="Mercancia">{item.bultos} bultos<small>{item.peso}</small></span>
+          <span data-label="Storage">{item.dias} dia{item.dias===1?'':'s'}</span>
           <span data-label="Estado"><Badge>{item.expediente?item.estado:'Por vincular'}</Badge></span>
         </button>)}
       </div>
