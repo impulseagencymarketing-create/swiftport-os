@@ -326,6 +326,15 @@ const OPERATION_STEPS=[
   {key:'assignment',title:'Conductor asignado',next:'Asignar o confirmar el responsable del transporte',responsibility:'LIBRE PARA TODOS',roles:['admin','operations','driver','finance']},
   {key:'delivery',title:'Entrega confirmada con POD',next:'Entregar la mercancía y registrar fotos y POD firmado',responsibility:'LIBRE PARA TODOS',roles:['admin','operations','driver','finance']}
 ];
+const STORAGE_OPERATION_STEPS=[
+  {key:'review',title:'Expediente revisado',next:'Comprobar cliente, referencia y mercancía esperada',responsibility:'LIBRE PARA TODOS',roles:['admin','operations','driver','finance']},
+  {key:'cargo',title:'Mercancía recibida en almacén',next:'Registrar entrada, fotos, bultos, peso y ubicación',responsibility:'LIBRE PARA TODOS',roles:['admin','operations','driver','finance']},
+  {key:'documents',title:'Documentación / instrucciones revisadas',next:'Adjuntar documentos o instrucciones de retirada/entrega',responsibility:'LIBRE PARA TODOS',roles:['admin','operations','driver','finance']},
+  {key:'assignment',title:'Salida o recogida coordinada',next:'Confirmar quién recoge o dónde se entregará la mercancía',responsibility:'LIBRE PARA TODOS',roles:['admin','operations','driver','finance']},
+  {key:'delivery',title:'Salida de almacén confirmada',next:'Confirmar retirada/entrega con evidencia',responsibility:'LIBRE PARA TODOS',roles:['admin','operations','driver','finance']}
+];
+const isStorageOnly=item=>serviceTypeOf(item)==='storage_other';
+const operationStepsFor=item=>isStorageOnly(item)?STORAGE_OPERATION_STEPS:OPERATION_STEPS;
 const canCompleteOperationStep=()=>true;
 const operationFlow=item=>{
   if(item.operationalFlow){const stored=item.operationalFlow;const delivery=Boolean(stored.delivery||stored.pod);const assigned=Boolean(item.conductor&&item.conductor!=='Sin asignar');return {review:false,cargo:false,documents:false,assignment:false,delivery:false,billingReady:false,...stored,assignment:stored.assignment??Boolean(delivery||(stored.documents&&assigned)),delivery,billingReady:Boolean(stored.billingReady||delivery),review:stored.review??Boolean(stored.cargo||stored.documents||stored.delivered||stored.pod||stored.delivery)}};
@@ -335,9 +344,10 @@ const operationFlow=item=>{
 };
 const operationProgress=item=>{
   const flow=operationFlow(item);
-  return Math.round(OPERATION_STEPS.filter(step=>flow[step.key]).length/OPERATION_STEPS.length*100);
+  const steps=operationStepsFor(item);
+  return Math.round(steps.filter(step=>flow[step.key]).length/steps.length*100);
 };
-const nextOperationStep=item=>OPERATION_STEPS.find(step=>!operationFlow(item)[step.key])||null;
+const nextOperationStep=item=>operationStepsFor(item).find(step=>!operationFlow(item)[step.key])||null;
 const normalizeMerchandise=item=>{
   const count=Math.max(0,Number(item.bultos)||0);
   const existing=Array.isArray(item.mercancias)?item.mercancias:[];
@@ -1099,6 +1109,8 @@ function App({auth,finance,onFinanceChange,onLogout}){
     if(!target)return;
     const expected=nextOperationStep(target);
     if(!expected||expected.key!==stepKey){notify('Completa primero el paso anterior');return}
+    const steps=operationStepsFor(target);
+    const storageOnly=isStorageOnly(target);
     const evidencePayload=evidence&&typeof evidence==='object'&&!Array.isArray(evidence)&&Array.isArray(evidence.files)?evidence:null;
     const evidenceFiles=Array.isArray(evidence)?evidence.filter(Boolean):evidencePayload?evidencePayload.files.filter(Boolean):evidence?[evidence]:[];
     const selectedWarehouseRefs=Array.isArray(evidencePayload?.warehouseRefs)?evidencePayload.warehouseRefs:[];
@@ -1110,11 +1122,11 @@ function App({auth,finance,onFinanceChange,onLogout}){
     const podFiles=stepKey==='delivery'?evidenceFiles.filter(file=>file.evidenceType==='pod'||(!file.evidenceType&&file)):[];
     if(stepKey==='cargo'&&!cargoEvidence.length&&!cargoHasWarehouse){notify('Añade una foto o selecciona una mercancía existente en almacén');return}
     if(stepKey==='delivery'&&!deliveryPhotos.length){notify('Añade al menos una foto de la mercancía entregada');return}
-    if(stepKey==='delivery'&&!podFiles.length){notify('Escanea o adjunta el POD firmado');return}
+    if(stepKey==='delivery'&&!storageOnly&&!podFiles.length){notify('Escanea o adjunta el POD firmado');return}
     const flow={...operationFlow(target),[stepKey]:true};
     const ready=stepKey==='delivery';
     if(ready)flow.billingReady=true;
-    const nextStep=OPERATION_STEPS.find(step=>!flow[step.key]);
+    const nextStep=steps.find(step=>!flow[step.key]);
     const now=new Date();
     const deliveryWarehouseScope=ready?warehouseEntriesForVessel(warehouseEntries,target):[];
     const warehouseReviewNote=ready?` Almacén revisado: ${deliveryWarehouseScope.length} partida(s) activa(s) para ${target.buque}.`:'';
@@ -1126,26 +1138,27 @@ function App({auth,finance,onFinanceChange,onLogout}){
     const cargoPhotos=cargoEvidence.map((file,index)=>({...file,tipo:index===0?'VISTA GENERAL':'ESTADO DE EMBALAJE',mercancia:cargoMerchandise.map(line=>`${line.cantidad} ${line.tipo}${line.cantidad===1?'':'S'}  -  ${line.peso||'PESO PENDIENTE'}`).join('  -  '),nota:`Registrado por ${visibleUser.fullName}`}));
     const cargoReference=`ALM-${Date.now()}`;
     const cargoReceptions=stepKey==='cargo'?(cargoHasWarehouse?selectedWarehouseEntries.map(entry=>({ref:entry.ref,source:'warehouse-linked',fecha:entry.fechaRecepcion||entry.entrada||now.toISOString(),zona:entry.zona||'ALMACÉN',peso:entry.peso||merchandiseWeightLabel(entry.mercancias||[]),mercancias:entry.mercancias||[],fotos:entry.fotos||[],documentos:entry.documentosRecepcion||[]})):[{ref:cargoReference,source:'driver-flow',fecha:now.toISOString(),zona:linkedTransport?.origen||'PENDIENTE DE UBICAR',peso:merchandiseWeightLabel(cargoMerchandise),mercancias:cargoMerchandise,fotos:cargoPhotos,documentos:[]}]):[];
-    const nextCases=cases.map(item=>item.id===id?normalizeMerchandise({...item,mercancias:stepKey==='cargo'?cargoMerchandise:item.mercancias,operationalFlow:flow,progreso:ready?100:Math.round(OPERATION_STEPS.filter(step=>flow[step.key]).length/OPERATION_STEPS.length*100),siguiente:ready?'Listo para facturar':nextStep?.next||'',estado:ready?'Completado':'En curso',recepciones:cargoReceptions.length?[...cargoReceptions,...(item.recepciones||[])]:item.recepciones,documentacionMercancia:stepKey==='documents'?{...item.documentacionMercancia,archivosEnvio:[...(item.documentacionMercancia?.archivosEnvio||[]),...documentEvidence],revisada:true}:ready?{...item.documentacionMercancia,podDisponible:true,podArchivo:podFiles[0]||item.documentacionMercancia?.podArchivo||null,podArchivos:podFiles,fotosEntrega:deliveryPhotos}:item.documentacionMercancia,timelineCustom:[timelineEntry,...(item.timelineCustom||[])]}):item);
+    const nextCases=cases.map(item=>item.id===id?normalizeMerchandise({...item,mercancias:stepKey==='cargo'?cargoMerchandise:item.mercancias,operationalFlow:flow,progreso:ready?100:Math.round(steps.filter(step=>flow[step.key]).length/steps.length*100),siguiente:ready?'Listo para facturar':nextStep?.next||'',estado:ready?'Completado':'En curso',recepciones:cargoReceptions.length?[...cargoReceptions,...(item.recepciones||[])]:item.recepciones,documentacionMercancia:stepKey==='documents'?{...item.documentacionMercancia,archivosEnvio:[...(item.documentacionMercancia?.archivosEnvio||[]),...documentEvidence],revisada:true}:ready?{...item.documentacionMercancia,podDisponible:storageOnly?Boolean(podFiles.length):true,podArchivo:podFiles[0]||item.documentacionMercancia?.podArchivo||null,podArchivos:podFiles,fotosEntrega:deliveryPhotos}:item.documentacionMercancia,timelineCustom:[timelineEntry,...(item.timelineCustom||[])]}):item);
     const nextTransports=ready?transports.map(item=>item.expediente===id?{...item,estado:'Entregado'}:item):transports;
     const alreadyInWarehouse=warehouseEntries.some(item=>item.expediente===id&&!item.archivado&&item.estado!=='Expedido');
     const automaticWarehouseEntry=stepKey==='cargo'&&!alreadyInWarehouse?{ref:cargoReference,source:'driver-flow',expediente:id,buque:target.buque,zona:'PENDIENTE',entrada:formatReceptionDate(now.toISOString()),fechaRecepcion:now.toISOString(),bultos:merchandiseCount(cargoMerchandise),peso:merchandiseWeightLabel(cargoMerchandise),mercancias:cargoMerchandise,fotos:cargoPhotos,documentosRecepcion:[],dias:0,estado:'En stock',archivado:false}:null;
     const nextWarehouse=ready?warehouseEntries.map(item=>deliveryWarehouseScope.includes(item)?{...item,expediente:item.expediente||id,estado:'Expedido',archivado:true,salida:new Date().toISOString()}:item):cargoHasWarehouse?warehouseEntries.map(entry=>selectedWarehouseRefs.includes(entry.ref)?{...entry,expediente:id,buque:target.buque,estado:entry.estado||'En stock',archivado:false}:entry):automaticWarehouseEntry?[automaticWarehouseEntry,...warehouseEntries]:warehouseEntries;
     setCases(nextCases);setTransports(nextTransports);setWarehouseEntries(nextWarehouse);
     saveOperational(nextCases,nextTransports,nextWarehouse);
-    notify(ready?'POD registrado: expediente listo para facturar':expected.title+' registrado');
+    notify(ready?(storageOnly?'Salida confirmada: expediente listo para facturar':'POD registrado: expediente listo para facturar'):expected.title+' registrado');
   };
   const undoCaseStep=(id,stepKey)=>{
     const target=cases.find(item=>item.id===id);
     if(!target)return;
     const currentFlow=operationFlow(target);
-    const completedSteps=OPERATION_STEPS.filter(step=>currentFlow[step.key]);
+    const steps=operationStepsFor(target);
+    const completedSteps=steps.filter(step=>currentFlow[step.key]);
     const lastCompleted=completedSteps[completedSteps.length-1];
     if(!lastCompleted||lastCompleted.key!==stepKey){notify('Solo puedes deshacer el último paso completado');return}
     const flow={...currentFlow,[stepKey]:false};
     if(stepKey==='delivery'){flow.delivery=false;flow.pod=false;flow.billingReady=false}
-    const reopened=OPERATION_STEPS.find(step=>step.key===stepKey);
-    const progress=Math.round(OPERATION_STEPS.filter(step=>flow[step.key]).length/OPERATION_STEPS.length*100);
+    const reopened=steps.find(step=>step.key===stepKey);
+    const progress=Math.round(steps.filter(step=>flow[step.key]).length/steps.length*100);
     const now=new Date();
     const timelineEntry={id:`UNDO-${id}-${stepKey}-${Date.now()}`,fecha:now.toLocaleDateString('es-ES'),hora:now.toLocaleTimeString('es-ES',{hour:'2-digit',minute:'2-digit'}),titulo:`Paso reabierto: ${reopened.title}`,detalle:'El conductor deshizo la confirmación para corregir o repetir este paso',actor:visibleUser.fullName,estado:'done'};
     const nextCases=cases.map(item=>item.id===id?normalizeMerchandise({...item,operationalFlow:flow,progreso:progress,siguiente:reopened.next,estado:'En curso',recepciones:stepKey==='cargo'?(item.recepciones||[]).filter(reception=>reception.source!=='driver-flow'):item.recepciones,documentacionMercancia:stepKey==='delivery'?{...item.documentacionMercancia,podDisponible:false,podArchivo:null,podArchivos:[],fotosEntrega:[]}:item.documentacionMercancia,timelineCustom:[timelineEntry,...(item.timelineCustom||[])]}):item);
@@ -1158,22 +1171,23 @@ function App({auth,finance,onFinanceChange,onLogout}){
   const reopenCaseStep=(id,stepKey)=>{
     const target=cases.find(item=>item.id===id);
     if(!target)return;
-    const stepIndex=OPERATION_STEPS.findIndex(step=>step.key===stepKey);
-    const reopened=OPERATION_STEPS[stepIndex];
+    const steps=operationStepsFor(target);
+    const stepIndex=steps.findIndex(step=>step.key===stepKey);
+    const reopened=steps[stepIndex];
     if(stepIndex<0||!operationFlow(target)[stepKey]){notify('Ese paso todavía no está completado');return}
     if(!window.confirm(`¿Reabrir el paso "${reopened.title}"?
 
 No se borrarán documentos ni fotos. El expediente volverá a este punto para corregir o añadir información.`))return;
     const currentFlow=operationFlow(target);
     const flow={...currentFlow};
-    OPERATION_STEPS.slice(stepIndex).forEach(step=>{flow[step.key]=false});
+    steps.slice(stepIndex).forEach(step=>{flow[step.key]=false});
     flow.billingReady=false;flow.pod=false;flow.delivered=false;
-    const progress=Math.round(OPERATION_STEPS.filter(step=>flow[step.key]).length/OPERATION_STEPS.length*100);
+    const progress=Math.round(steps.filter(step=>flow[step.key]).length/steps.length*100);
     const now=new Date();
     const timelineEntry={id:`REOPEN-${id}-${stepKey}-${Date.now()}`,fecha:now.toLocaleDateString('es-ES'),hora:now.toLocaleTimeString('es-ES',{hour:'2-digit',minute:'2-digit'}),titulo:`Paso reabierto: ${reopened.title}`,detalle:'Reabierto desde el expediente para corregir, eliminar o añadir información sin perder evidencias existentes',actor:visibleUser.fullName,estado:'done'};
     const nextCases=cases.map(item=>item.id===id?normalizeMerchandise({...item,operationalFlow:flow,progreso:progress,siguiente:reopened.next,estado:'En curso',timelineCustom:[timelineEntry,...(item.timelineCustom||[])]}):item);
-    const nextTransports=stepIndex<=OPERATION_STEPS.findIndex(step=>step.key==='delivery')?transports.map(item=>item.expediente===id&&item.estado==='Entregado'?{...item,estado:item.conductor&&item.conductor!=='Sin asignar'?'Asignado':'Sin asignar'}:item):transports;
-    const nextWarehouse=stepIndex<=OPERATION_STEPS.findIndex(step=>step.key==='delivery')?warehouseEntries.map(item=>item.expediente===id&&item.archivado?{...item,estado:'En stock',archivado:false,salida:null}:item):warehouseEntries;
+    const nextTransports=stepIndex<=steps.findIndex(step=>step.key==='delivery')?transports.map(item=>item.expediente===id&&item.estado==='Entregado'?{...item,estado:item.conductor&&item.conductor!=='Sin asignar'?'Asignado':'Sin asignar'}:item):transports;
+    const nextWarehouse=stepIndex<=steps.findIndex(step=>step.key==='delivery')?warehouseEntries.map(item=>item.expediente===id&&item.archivado?{...item,estado:'En stock',archivado:false,salida:null}:item):warehouseEntries;
     setCases(nextCases);setTransports(nextTransports);setWarehouseEntries(nextWarehouse);
     saveOperational(nextCases,nextTransports,nextWarehouse);
     notify(`${reopened.title} reabierto`);
@@ -1692,7 +1706,9 @@ function DriverTaskModal({event,item,transport,warehouseEntries,currentUser,csrf
   useEffect(()=>{setNote('');setEvidenceFiles([]);setError('');setWarehouseReviewed(false)},[step?.key,item?.id]);
   if(!item)return null;
   const flow=operationFlow(item);
-  const lastCompleted=[...OPERATION_STEPS].reverse().find(entry=>flow[entry.key]);
+  const steps=operationStepsFor(item);
+  const storageOnly=isStorageOnly(item);
+  const lastCompleted=[...steps].reverse().find(entry=>flow[entry.key]);
   const mine=true;
   const inWarehouse=warehouseEntries.some(entry=>entry.expediente===item.id&&!entry.archivado&&entry.estado!=='Expedido');
   const instructions={
@@ -1702,6 +1718,7 @@ function DriverTaskModal({event,item,transport,warehouseEntries,currentUser,csrf
     assignment:'El transporte debe quedar asignado. Puedes asignártelo desde esta misma pantalla si está libre.',
     delivery:'Antes de entregar, revisa todo lo que hay en almacén para este buque. Luego fotografía la entrega y escanea el POD firmado.'
   };
+  if(storageOnly)instructions.delivery='Confirma la salida del almacén o la recogida por tercero con una foto/evidencia clara.';
   const uploadEvidence=async(files,evidenceType)=>{
     const selected=[...files].filter(Boolean);
     if(!selected.length)return;
@@ -1721,7 +1738,7 @@ function DriverTaskModal({event,item,transport,warehouseEntries,currentUser,csrf
   const deliveryPhotos=evidenceFiles.filter(file=>file.evidenceType==='delivery-photo');
   const podFiles=evidenceFiles.filter(file=>file.evidenceType==='pod');
   const vesselWarehouseEntries=warehouseEntriesForVessel(warehouseEntries,item);
-  const evidenceReady=step?.key==='cargo'?cargoPhotos.length>0:step?.key==='delivery'?warehouseReviewed&&deliveryPhotos.length>0&&podFiles.length>0:true;
+  const evidenceReady=step?.key==='cargo'?cargoPhotos.length>0:step?.key==='delivery'?warehouseReviewed&&deliveryPhotos.length>0&&(storageOnly||podFiles.length>0):true;
   const needsEvidence=['cargo','delivery'].includes(step?.key);
   const evidenceLabel=file=>file.evidenceType==='pod'?'POD escaneado':file.evidenceType==='delivery-photo'?'Foto de entrega':'Foto de recepción';
   return <div className="modal-backdrop driver-task-backdrop" onMouseDown={mouse=>{if(mouse.target===mouse.currentTarget)close()}}>
@@ -1734,22 +1751,22 @@ function DriverTaskModal({event,item,transport,warehouseEntries,currentUser,csrf
         <CargoManifest item={item} transport={transport||event}/>
         {flow.cargo&&<ShipmentDocuments item={item}/>}
         {step?<>
-          <div className="driver-next-action"><span>{OPERATION_STEPS.findIndex(entry=>entry.key===step.key)+1}</span><div><small>AHORA TOCA</small><b>{step.title}</b><p>{instructions[step.key]}</p></div></div>
+          <div className="driver-next-action"><span>{steps.findIndex(entry=>entry.key===step.key)+1}</span><div><small>AHORA TOCA</small><b>{step.title}</b><p>{instructions[step.key]}</p></div></div>
           {step.key==='delivery'&&<WarehouseTransportReview entries={vesselWarehouseEntries} item={item} checked={warehouseReviewed} setChecked={setWarehouseReviewed}/>}
           {needsEvidence&&<div className="pod-scanner evidence-capture">
-            <div><Camera/><span><b>{step.key==='cargo'?'Fotos de la mercancía recibida':'Evidencias de la entrega'}</b><small>{step.key==='cargo'?'Se requiere al menos una foto; puedes añadir todas las necesarias.':'Se requiere foto de la entrega y POD firmado.'}</small></span></div>
+            <div><Camera/><span><b>{step.key==='cargo'?'Fotos de la mercancía recibida':storageOnly?'Evidencias de salida / recogida':'Evidencias de la entrega'}</b><small>{step.key==='cargo'?'Se requiere al menos una foto; puedes añadir todas las necesarias.':storageOnly?'Se requiere foto o evidencia clara de que la mercancía salió del almacén.':'Se requiere foto de la entrega y POD firmado.'}</small></span></div>
             {false&&<div className="evidence-assignment-lock"><LockKeyhole/><span><b>Activa el registro de este trabajo</b><small>{event.asignado&&event.asignado!=='Sin asignar'?`Ahora figura asignado a ${event.asignado}. Asígnatelo para activar la cámara y el POD.`:'El servicio todavía no tiene conductor. Asígnatelo para activar la cámara y el POD.'}</small></span><button className="button secondary" onClick={claim}>Asignarme y activar</button></div>}
             <div className="pod-scanner-actions">
               <label className={`button primary${!mine?' disabled':''}`}><Camera/> {uploading?'Procesando…':step.key==='cargo'?'Añadir fotos de recepción':'Añadir fotos de entrega'}<input type="file" accept="image/*" capture="environment" multiple disabled={uploading||!mine} onChange={change=>{uploadEvidence(change.target.files,step.key==='cargo'?'cargo-photo':'delivery-photo');change.target.value=''}}/></label>
-              {step.key==='delivery'&&<><label className={`button secondary${!mine?' disabled':''}`}><ScanLine/> Escanear POD<input type="file" accept="image/*" capture="environment" multiple disabled={uploading||!mine} onChange={change=>{uploadEvidence(change.target.files,'pod');change.target.value=''}}/></label><label className={`button tertiary${!mine?' disabled':''}`}><FileText/> Añadir PDFs de POD<input type="file" accept="application/pdf" multiple disabled={uploading||!mine} onChange={change=>{uploadEvidence(change.target.files,'pod');change.target.value=''}}/></label></>}
+              {step.key==='delivery'&&!storageOnly&&<><label className={`button secondary${!mine?' disabled':''}`}><ScanLine/> Escanear POD<input type="file" accept="image/*" capture="environment" multiple disabled={uploading||!mine} onChange={change=>{uploadEvidence(change.target.files,'pod');change.target.value=''}}/></label><label className={`button tertiary${!mine?' disabled':''}`}><FileText/> Añadir PDFs de POD<input type="file" accept="application/pdf" multiple disabled={uploading||!mine} onChange={change=>{uploadEvidence(change.target.files,'pod');change.target.value=''}}/></label></>}
             </div>
-            {step.key==='delivery'&&<div className="evidence-requirements"><span className={deliveryPhotos.length?'done':''}><CheckCircle2/> Foto de entrega {deliveryPhotos.length?`(${deliveryPhotos.length})`:'pendiente'}</span><span className={podFiles.length?'done':''}><CheckCircle2/> POD firmado {podFiles.length?`(${podFiles.length})`:'pendiente'}</span></div>}
+            {step.key==='delivery'&&<div className="evidence-requirements"><span className={deliveryPhotos.length?'done':''}><CheckCircle2/> {storageOnly?'Evidencia de salida':'Foto de entrega'} {deliveryPhotos.length?`(${deliveryPhotos.length})`:'pendiente'}</span>{!storageOnly&&<span className={podFiles.length?'done':''}><CheckCircle2/> POD firmado {podFiles.length?`(${podFiles.length})`:'pendiente'}</span>}</div>}
             {evidenceFiles.length>0&&<div className="evidence-file-list">{evidenceFiles.map((file,index)=><a className="pod-uploaded" href={file.url} target="_blank" rel="noreferrer" key={`${file.id}-${index}`}><CheckCircle2/><span><b>{evidenceLabel(file)} {file.evidenceType==='pod'?'':index+1}</b><small>{file.name}</small></span><ExternalLink/></a>)}</div>}
             {error&&<p className="form-error"><CircleAlert/>{error}</p>}
           </div>}
           <label className="field"><span>Observación del trabajo (opcional)</span><input value={note} onChange={change=>setNote(change.target.value)} placeholder="Persona que recibe, incidencia, referencia…"/></label>
-          <button className="button primary full driver-confirm" disabled={uploading||!evidenceReady} onClick={()=>submit(step.key,note,evidenceFiles)}><CheckCircle2/> {!evidenceReady?(step.key==='cargo'?'Añade una foto para confirmar':'Revisa almacén, foto de entrega y POD'):`Confirmar: ${step.title}`}</button>
-        </>:<div className="driver-finished"><CheckCircle2/><span><b>Trabajo terminado</b><small>POD recibido y expediente listo para facturación.</small></span></div>}
+          <button className="button primary full driver-confirm" disabled={uploading||!evidenceReady} onClick={()=>submit(step.key,note,evidenceFiles)}><CheckCircle2/> {!evidenceReady?(step.key==='cargo'?'Añade una foto para confirmar':storageOnly?'Revisa almacén y añade evidencia de salida':'Revisa almacén, foto de entrega y POD'):`Confirmar: ${step.title}`}</button>
+        </>:<div className="driver-finished"><CheckCircle2/><span><b>Trabajo terminado</b><small>{storageOnly?'Salida confirmada y expediente listo para facturación.':'POD recibido y expediente listo para facturación.'}</small></span></div>}
         {mine&&lastCompleted&&<button className="button tertiary full driver-undo-step" onClick={()=>undo(lastCompleted.key)}><Undo2/> Deshacer: {lastCompleted.title}</button>}
         <button className="button tertiary full" onClick={close}>{flow.billingReady?'Cerrar':'Volver al calendario'}</button>
       </div>
@@ -1766,7 +1783,9 @@ function DriverTaskModalLegacy({event,item,transport,warehouseEntries,currentUse
   useEffect(()=>{setNote('');setEvidenceFiles([]);setError('')},[step?.key]);
   if(!item)return null;
   const flow=operationFlow(item);
-  const lastCompleted=[...OPERATION_STEPS].reverse().find(entry=>flow[entry.key]);
+  const steps=operationStepsFor(item);
+  const storageOnly=isStorageOnly(item);
+  const lastCompleted=[...steps].reverse().find(entry=>flow[entry.key]);
   const mine=samePerson(event.asignado,currentUser.fullName);
   const inWarehouse=warehouseEntries.some(entry=>entry.expediente===item.id&&!entry.archivado&&entry.estado!=='Expedido');
   const instructions={
@@ -1777,7 +1796,7 @@ function DriverTaskModalLegacy({event,item,transport,warehouseEntries,currentUse
   };
   const uploadEvidence=async file=>{if(!file)return;setUploading(true);setError('');try{const prepared=step.key==='delivery'&&file.type.startsWith('image/')?await scannedPodPdf(file,item.id):file;const uploaded=await uploadAttachment(prepared,prepared.type==='application/pdf'?'document':'photo',csrfToken);setEvidenceFiles(current=>step.key==='cargo'?[...current,uploaded]:[uploaded]);if(step.key==='delivery'&&file.type.startsWith('image/'))notify?.('POD escaneado y guardado como PDF')}catch(reason){setError(reason.message)}finally{setUploading(false)}};
   const needsEvidence=['cargo','delivery'].includes(step?.key);
-  const evidenceTitle=step?.key==='cargo'?'Fotografiar mercancía recibida':'Escanear POD firmado';
+  const evidenceTitle=step?.key==='cargo'?'Fotografiar mercancía recibida':storageOnly?'Confirmar salida de almacén':'Escanear POD firmado';
   return <div className="modal-backdrop driver-task-backdrop" onMouseDown={mouse=>{if(mouse.target===mouse.currentTarget)close()}}><section className="modal driver-task-modal"><div className="modal-head"><div><span className="overline">{event.inicio}–{event.fin}  -  {event.tipoServicio}</span><h2>{item.buque}</h2><p>{caseLabel(item)}</p></div><button className="icon-button" onClick={close}><X/></button></div><div className="driver-task-body"><div className="driver-route"><MapPin/><span><small>PUERTO / RUTA</small><b>{transport?.ruta||item.puerto}</b></span></div>{!mine&&<div className="driver-owner-alert"><UserRound/><span><b>{event.asignado&&event.asignado!=='Sin asignar'?`Asignado a ${event.asignado}`:'Trabajo sin conductor'}</b><small>Asígnatelo antes de registrar avances.</small></span><button className="button secondary" onClick={claim}>Asignarme</button></div>}<OperationChecklist item={item} csrfToken={csrfToken} reloadOperational={reloadOperational} notify={notify}/><CargoManifest item={item} transport={transport||event}/>{step?<><div className="driver-next-action"><span>{OPERATION_STEPS.findIndex(entry=>entry.key===step.key)+1}</span><div><small>AHORA TOCA</small><b>{step.title}</b><p>{instructions[step.key]}</p></div></div>{needsEvidence&&<div className="pod-scanner"><div><Camera/><span><b>{evidenceTitle}</b><small>{step.key==='cargo'?'Haz al menos una foto clara. Puedes añadir varias.':'La cámara se abrirá directamente en el móvil.'}</small></span></div><div className="pod-scanner-actions"><label className="button primary"><Camera/> {uploading?'Subiendo…':step.key==='cargo'?'Hacer foto':'Abrir cámara'}<input type="file" accept="image/*" capture="environment" disabled={uploading||!mine} onChange={change=>uploadEvidence(change.target.files?.[0])}/></label>{step.key==='delivery'&&<label className="button tertiary"><FileText/> Adjuntar PDF<input type="file" accept="application/pdf" disabled={uploading||!mine} onChange={change=>uploadEvidence(change.target.files?.[0])}/></label>}</div>{evidenceFiles.length>0&&<div className="evidence-file-list">{evidenceFiles.map((file,index)=><a className="pod-uploaded" href={file.url} target="_blank" rel="noreferrer" key={file.id}><CheckCircle2/><span><b>{step.key==='cargo'?`Foto ${index+1}`:'POD adjuntado'}</b><small>{file.name}</small></span><ExternalLink/></a>)}</div>}{error&&<p className="form-error"><CircleAlert/>{error}</p>}</div>}<label className="field"><span>Observación del trabajo (opcional)</span><input value={note} disabled={!mine} onChange={change=>setNote(change.target.value)} placeholder="Persona que recibe, incidencia, referencia…"/></label><button className="button primary full driver-confirm" disabled={!mine||uploading||(needsEvidence&&!evidenceFiles.length)} onClick={()=>submit(step.key,note,step.key==='cargo'?evidenceFiles:evidenceFiles[0]||null)}><CheckCircle2/> {needsEvidence&&!evidenceFiles.length?(step.key==='cargo'?'Haz una foto para confirmar':'Escanea el POD para confirmar'):`Confirmar: ${step.title}`}</button></>:<div className="driver-finished"><CheckCircle2/><span><b>Trabajo terminado</b><small>POD recibido y expediente listo para facturación.</small></span></div>}{mine&&lastCompleted&&<button className="button tertiary full driver-undo-step" onClick={()=>undo(lastCompleted.key)}><Undo2/> Deshacer: {lastCompleted.title}</button>}<button className="button tertiary full" onClick={close}>{flow.billingReady?'Cerrar':'Volver al calendario'}</button></div></section></div>;
 }
 
@@ -1856,14 +1875,15 @@ function ActualTimeline({item}){
 }
 function CaseStepReopenPanel({item,reopen}){
   const flow=operationFlow(item);
-  const completed=OPERATION_STEPS.filter(step=>flow[step.key]);
+  const completed=operationStepsFor(item).filter(step=>flow[step.key]);
   if(!completed.length)return null;
   return <section className="case-reopen-panel"><div><Undo2/><span><b>Corregir pasos completados</b><small>Reabre un paso para añadir o modificar documentos, fotos, mercancía o POD sin borrar lo ya subido.</small></span></div><div>{completed.map(step=><button type="button" key={step.key} onClick={()=>reopen(step.key)}><Undo2/><span>Reabrir {step.title}</span></button>)}</div></section>;
 }
 function OperationChecklist({item,csrfToken,reloadOperational,notify,currentRoles}){
   const flow=operationFlow(item);
   const current=nextOperationStep(item);
-  return <><AisTrackingPanel item={item} csrfToken={csrfToken} reloadOperational={reloadOperational} notify={notify}/><section className="operation-checklist"><div><b>FLUJO OPERATIVO</b><small>Pasos libres para todo el equipo</small></div><ol>{OPERATION_STEPS.map((step,index)=><li key={step.key} className={`${flow[step.key]?'done':current?.key===step.key?'current':''}`}><span>{flow[step.key]?<CheckCircle2/>:index+1}</span><span><b>{step.title}</b><small>{step.responsibility}</small></span></li>)}<li className={flow.billingReady?'done':''}><span>{flow.billingReady?<CheckCircle2/>:OPERATION_STEPS.length+1}</span><span><b>Listo para facturar</b><small>LIBRE PARA TODOS</small></span></li></ol></section></>;
+  const steps=operationStepsFor(item);
+  return <><AisTrackingPanel item={item} csrfToken={csrfToken} reloadOperational={reloadOperational} notify={notify}/><section className="operation-checklist"><div><b>FLUJO OPERATIVO</b><small>{serviceTypeMeta(item).label}  -  pasos libres para todo el equipo</small></div><ol>{steps.map((step,index)=><li key={step.key} className={`${flow[step.key]?'done':current?.key===step.key?'current':''}`}><span>{flow[step.key]?<CheckCircle2/>:index+1}</span><span><b>{step.title}</b><small>{step.responsibility}</small></span></li>)}<li className={flow.billingReady?'done':''}><span>{flow.billingReady?<CheckCircle2/>:steps.length+1}</span><span><b>Listo para facturar</b><small>LIBRE PARA TODOS</small></span></li></ol></section></>;
 }
 
 function OperationStepModal({item,warehouseEntries,transports,csrfToken,currentUser,close,submit}){
@@ -1875,6 +1895,7 @@ function OperationStepModal({item,warehouseEntries,transports,csrfToken,currentU
   const [warehouseReviewed,setWarehouseReviewed]=useState(false);
   const [selectedWarehouseRefs,setSelectedWarehouseRefs]=useState(()=>warehouseEntriesForVessel(warehouseEntries,item).map(entry=>entry.ref));
   if(!step)return null;
+  const storageOnly=isStorageOnly(item);
   const inWarehouse=warehouseEntries.some(entry=>entry.expediente===item.id&&!entry.archivado&&entry.estado!=='Expedido');
   const transport=transports.find(entry=>entry.expediente===item.id);
   const guidance={
@@ -1882,7 +1903,7 @@ function OperationStepModal({item,warehouseEntries,transports,csrfToken,currentU
     cargo:inWarehouse?'Confirma que la mercancía recibida coincide con fotos, cantidades y peso.':'Confirma la recogida en el punto indicado y comprueba cantidades y estado.',
     documents:'Comprueba packing list, CMR, delivery note y documento aduanero. Puedes adjuntar aquí los archivos recibidos por correo.',
     assignment:'Selecciona el conductor en el transporte o calendario. Este paso se completará automáticamente.',
-    delivery:'Revisa todo el almacén de este buque, adjunta fotografías de la mercancía entregada y el POD firmado.'
+    delivery:storageOnly?'Confirma la salida de almacén o recogida por tercero con foto/evidencia clara. No hace falta POD.':'Revisa todo el almacén de este buque, adjunta fotografías de la mercancía entregada y el POD firmado.'
   };
   const uploadEvidence=async(files,evidenceType)=>{
     const selected=[...files].filter(Boolean);
@@ -1905,7 +1926,7 @@ function OperationStepModal({item,warehouseEntries,transports,csrfToken,currentU
   const vesselWarehouseEntries=warehouseEntriesForVessel(warehouseEntries,item);
   const selectedWarehouseEntries=vesselWarehouseEntries.filter(entry=>selectedWarehouseRefs.includes(entry.ref));
   const needsEvidence=['cargo','delivery'].includes(step.key);
-  const evidenceReady=step.key==='cargo'?cargoPhotos.length>0||selectedWarehouseEntries.length>0:step.key==='delivery'?warehouseReviewed&&deliveryPhotos.length>0&&podFiles.length>0:true;
+  const evidenceReady=step.key==='cargo'?cargoPhotos.length>0||selectedWarehouseEntries.length>0:step.key==='delivery'?warehouseReviewed&&deliveryPhotos.length>0&&(storageOnly||podFiles.length>0):true;
   const toggleWarehouseEntry=ref=>setSelectedWarehouseRefs(current=>current.includes(ref)?current.filter(item=>item!==ref):[...current,ref]);
   return <div className="modal-backdrop" onMouseDown={event=>{if(event.target===event.currentTarget)close()}}>
     <section className="modal operation-modal">
@@ -1922,17 +1943,17 @@ function OperationStepModal({item,warehouseEntries,transports,csrfToken,currentU
           {shipmentFiles.length>0&&<div className="evidence-file-list">{shipmentFiles.map((file,index)=><a className="pod-uploaded" href={file.url} target="_blank" rel="noreferrer" key={`${file.id}-${index}`}><CheckCircle2/><span><b>{documentLabel(file.name)}</b><small>{file.name}</small></span><ExternalLink/></a>)}</div>}
         </div>}
         {needsEvidence&&<div className="pod-scanner evidence-capture">
-          <div><Camera/><span><b>{step.key==='cargo'?'Fotos de la mercancía recibida':'Evidencias de la entrega'}</b><small>{step.key==='cargo'?'Puedes tomar varias fotografías.':'Se exige al menos una foto de entrega y un POD.'}</small></span></div>
+          <div><Camera/><span><b>{step.key==='cargo'?'Fotos de la mercancía recibida':storageOnly?'Evidencias de salida / recogida':'Evidencias de la entrega'}</b><small>{step.key==='cargo'?'Puedes tomar varias fotografías.':storageOnly?'Se exige al menos una foto o evidencia de salida.':'Se exige al menos una foto de entrega y un POD.'}</small></span></div>
           <div className="pod-scanner-actions">
             <label className="button primary"><Camera/> {uploading?'Procesando…':step.key==='cargo'?'Añadir fotos de recepción':'Añadir fotos de entrega'}<input type="file" accept="image/*" capture="environment" multiple disabled={uploading} onChange={event=>{uploadEvidence(event.target.files,step.key==='cargo'?'cargo-photo':'delivery-photo');event.target.value=''}}/></label>
-            {step.key==='delivery'&&<><label className="button secondary"><ScanLine/> Escanear POD<input type="file" accept="image/*" capture="environment" multiple disabled={uploading} onChange={event=>{uploadEvidence(event.target.files,'pod');event.target.value=''}}/></label><label className="button tertiary"><FileText/> Añadir PDFs de POD<input type="file" accept="application/pdf" multiple disabled={uploading} onChange={event=>{uploadEvidence(event.target.files,'pod');event.target.value=''}}/></label></>}
+            {step.key==='delivery'&&!storageOnly&&<><label className="button secondary"><ScanLine/> Escanear POD<input type="file" accept="image/*" capture="environment" multiple disabled={uploading} onChange={event=>{uploadEvidence(event.target.files,'pod');event.target.value=''}}/></label><label className="button tertiary"><FileText/> Añadir PDFs de POD<input type="file" accept="application/pdf" multiple disabled={uploading} onChange={event=>{uploadEvidence(event.target.files,'pod');event.target.value=''}}/></label></>}
           </div>
-          {step.key==='delivery'&&<div className="evidence-requirements"><span className={deliveryPhotos.length?'done':''}><CheckCircle2/> Foto de entrega {deliveryPhotos.length?`(${deliveryPhotos.length})`:'pendiente'}</span><span className={podFiles.length?'done':''}><CheckCircle2/> POD firmado {podFiles.length?`(${podFiles.length})`:'pendiente'}</span></div>}
+          {step.key==='delivery'&&<div className="evidence-requirements"><span className={deliveryPhotos.length?'done':''}><CheckCircle2/> {storageOnly?'Evidencia de salida':'Foto de entrega'} {deliveryPhotos.length?`(${deliveryPhotos.length})`:'pendiente'}</span>{!storageOnly&&<span className={podFiles.length?'done':''}><CheckCircle2/> POD firmado {podFiles.length?`(${podFiles.length})`:'pendiente'}</span>}</div>}
           {evidenceFiles.length>0&&<div className="evidence-file-list">{evidenceFiles.map((file,index)=><a className="pod-uploaded" href={file.url} target="_blank" rel="noreferrer" key={`${file.id}-${index}`}><CheckCircle2/><span><b>{file.evidenceType==='pod'?'POD escaneado':file.evidenceType==='delivery-photo'?'Foto de entrega':'Foto de recepción'}</b><small>{file.name}</small></span><ExternalLink/></a>)}</div>}
           {error&&<p className="form-error"><CircleAlert/>{error}</p>}
         </div>}
         <label className="field"><span>Observación (opcional)</span><input value={note} onChange={event=>setNote(event.target.value)} placeholder="Incidencias, persona que recibe, referencia…"/></label>
-        <div className="modal-actions"><button className="button tertiary" onClick={close}>Cancelar</button><button className="button primary" disabled={uploading||!evidenceReady} onClick={()=>submit(step.key,note,step.key==='cargo'?{files:evidenceFiles,warehouseRefs:selectedWarehouseRefs}:evidenceFiles)}><CheckCircle2/> {!evidenceReady?(step.key==='cargo'?'Añade una foto o selecciona almacén':'Revisa almacén, foto de entrega y POD'):'Confirmar paso'}</button></div>
+        <div className="modal-actions"><button className="button tertiary" onClick={close}>Cancelar</button><button className="button primary" disabled={uploading||!evidenceReady} onClick={()=>submit(step.key,note,step.key==='cargo'?{files:evidenceFiles,warehouseRefs:selectedWarehouseRefs}:evidenceFiles)}><CheckCircle2/> {!evidenceReady?(step.key==='cargo'?'Añade una foto o selecciona almacén':storageOnly?'Revisa almacén y añade evidencia de salida':'Revisa almacén, foto de entrega y POD'):'Confirmar paso'}</button></div>
       </div>
     </section>
   </div>;
