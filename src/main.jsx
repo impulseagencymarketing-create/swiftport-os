@@ -184,7 +184,6 @@ const warehouseWhatsappSummary=(entries=[],cases=[])=>{
   const blocks=[];
   [...groups.values()].forEach(group=>{
     blocks.push(`*${group.vessel}*`);
-    blocks.push(`Cliente: ${group.client}`);
     group.items.forEach(entry=>blocks.push(`\u2022 ${warehouseEntryCargoSummary(entry)}`));
     blocks.push('');
   });
