@@ -158,6 +158,47 @@ const hydrateCaseWithVessel=(item,vessels)=>{
 };
 const upsertVesselFromCase=(vessels,item)=>mergeVesselCatalog(vessels,[item]);
 const activeWarehouseEntry=entry=>!entry?.archivado&&entry?.estado!=='Expedido';
+const warehouseEntryCargoSummary=entry=>{
+  const lines=Array.isArray(entry?.mercancias)?entry.mercancias.filter(Boolean):[];
+  if(lines.length)return lines.map(piece=>{
+    const qty=Number(piece.cantidad)||1;
+    const type=String(piece.tipo||'BULTO').toUpperCase();
+    const weight=piece.peso?` ${String(piece.peso).toUpperCase()}`:'';
+    const tracking=piece.seguimiento?` · Tracking ${String(piece.seguimiento).toUpperCase()}`:'';
+    return `${qty} ${type}${qty===1?'':'S'}${weight}${tracking}`;
+  }).join(' + ');
+  return `${Number(entry?.bultos)||0} BULTO${Number(entry?.bultos)===1?'':'S'}${entry?.peso?` · ${String(entry.peso).toUpperCase()}`:''}`;
+};
+const warehouseWhatsappSummary=(entries=[],cases=[])=>{
+  const active=entries.filter(activeWarehouseEntry).sort((a,b)=>String(a.buque||'').localeCompare(String(b.buque||''),'es')||(Date.parse(a.fechaRecepcion||a.fecha||a.entrada||'')||0)-(Date.parse(b.fechaRecepcion||b.fecha||b.entrada||'')||0));
+  if(!active.length)return '*SWIFTPORT LOGISTICS - STOCK PENDIENTE*\n\nNo hay mercancía pendiente en almacén.';
+  const totalBultos=active.reduce((sum,entry)=>sum+(Number(entry.bultos)||merchandiseCount(entry.mercancias)),0);
+  const totalPeso=active.reduce((sum,entry)=>sum+(numericWeight(entry.peso)||merchandiseWeight(entry.mercancias)),0);
+  const groups=new Map();
+  active.forEach(entry=>{
+    const related=cases.find(item=>item.id===entry.expediente)||cases.find(item=>sameVessel(item.buque,entry.buque));
+    const client=related?.cliente||'CLIENTE POR CONFIRMAR';
+    const vessel=String(entry.buque||related?.buque||'SIN BUQUE').toUpperCase();
+    const key=`${client}||${vessel}`;
+    if(!groups.has(key))groups.set(key,{client,vessel,items:[]});
+    groups.get(key).items.push({entry,related});
+  });
+  const blocks=[`*SWIFTPORT LOGISTICS - STOCK PENDIENTE*`,`Actualizado: ${formatReceptionDate(new Date().toISOString())}`,`Total: ${active.length} entrada${active.length===1?'':'s'} · ${totalBultos} bulto${totalBultos===1?'':'s'} · ${totalPeso.toLocaleString('es-ES',{maximumFractionDigits:2})} kg`,''];
+  [...groups.values()].forEach(group=>{
+    blocks.push(`*${group.vessel}*`);
+    blocks.push(`Cliente: ${group.client}`);
+    group.items.forEach(({entry,related})=>{
+      const date=entry.entrada||formatReceptionDate(entry.fechaRecepcion||entry.fecha);
+      const expediente=entry.expediente||related?.id||'SIN EXPEDIENTE';
+      blocks.push(`• ${warehouseEntryCargoSummary(entry)}`);
+      blocks.push(`  Ref: ${entry.ref||'S/R'} · Expediente: ${expediente}`);
+      blocks.push(`  Ubicación: ${entry.zona||'PENDIENTE'} · Entrada: ${date}`);
+      if(entry.estado)blocks.push(`  Estado: ${entry.estado}`);
+    });
+    blocks.push('');
+  });
+  return blocks.join('\n').trim();
+};
 const warehouseEntriesForVessel=(entries,item)=>entries.filter(entry=>activeWarehouseEntry(entry)&&(entry.expediente===item.id||sameVessel(entry.buque,item.buque)));
 const canAccess=(roles,id)=>{
   if(id==='correos')return false;
@@ -1163,7 +1204,7 @@ function App({auth,finance,onFinanceChange,onLogout}){
         {tab==='dashboard'&&<Dashboard cases={casesWithFinance} warehouseEntries={warehouseEntries} calendarEvents={calendarEvents} openCase={openCase} navigate={navigate} showFinance={showFinance} user={visibleUser}/>}
         {tab==='calendario'&&<>{!driverOnly&&<DriverLegend events={calendarEvents} cases={cases}/>}<Calendario events={calendarEvents} team={operationalTeam} cases={cases} transports={transports} providers={providers} warehouseEntries={warehouseEntries} saveEvent={saveCalendarEvent} deleteEvent={deleteCalendarService} completeCaseStep={completeCaseStep} undoCaseStep={undoCaseStep} openCase={openCase} currentUser={visibleUser} csrfToken={auth.csrfToken} reloadOperational={loadOperational} notify={notify}/></>}
         {tab==='expedientes'&&<Expedientes cases={casesWithFinance} selected={selected} select={setSelectedId} search={search} setSearch={setSearch} completeCaseStep={completeCaseStep} notify={notify} showFinance={showFinance} updateCase={updateCase} deleteCase={deleteCase} clientOptions={clientOptions} warehouseEntries={warehouseEntries} transports={transports} calendarEvents={calendarEvents} team={operationalTeam} providers={providers} vessels={vessels} saveEvent={saveCalendarEvent} csrfToken={auth.csrfToken} reloadOperational={loadOperational} currentUser={visibleUser}/>}
-        {tab==='almacen'&&<Almacen items={warehouseEntries} cases={casesWithFinance} openCase={openCase} registerEntry={registerWarehouseEntry} updateEntry={updateWarehouseEntry} deleteEntry={deleteWarehouseEntry} showFinance={showFinance} storageTotal={finance.warehouseStorageTotal} csrfToken={auth.csrfToken}/>}
+        {tab==='almacen'&&<Almacen items={warehouseEntries} cases={casesWithFinance} openCase={openCase} registerEntry={registerWarehouseEntry} updateEntry={updateWarehouseEntry} deleteEntry={deleteWarehouseEntry} showFinance={showFinance} storageTotal={finance.warehouseStorageTotal} csrfToken={auth.csrfToken} notify={notify}/>}
         {tab==='buques'&&<Buques vessels={vessels} cases={casesWithFinance} warehouseEntries={warehouseEntries} saveVessel={saveVessel} deleteVessel={deleteVessel} openCase={openCase}/>}
         {tab==='transportes'&&<Transportes items={transports} update={updateTransport} openCase={openCase} team={operationalTeam} providers={providers} saveProvider={saveProvider}/>}
         {tab==='aduanas'&&<Aduanas items={customs} update={updateCustom} openCase={openCase} notify={notify}/>}
@@ -1867,14 +1908,23 @@ function ReceptionRecords({records}){
   return <section className="reception-records"><div className="reception-title"><Camera/><div><h3>Recepciones de mercancía</h3><p>Evidencias fotográficas identificadas y documentos de llegada.</p></div></div>{records.map(record=><article className="reception-record" key={record.ref}><header><div><b>{formatReceptionDate(record.fecha)}</b><small>{record.ref}  -  ZONA {record.zona}</small></div><Badge>{(record.fotos||[]).length} FOTOS  -  {(record.documentos||[]).length} DOCS</Badge></header>{Boolean((record.fotos||[]).length)&&<div className="reception-photos">{record.fotos.map((file,index)=><figure key={file.id}><a href={file.url} target="_blank" rel="noreferrer" title={file.name}><img src={file.url} alt={`${file.tipo||'Vista general'}  -  ${file.mercancia||'Recepción completa'}`}/><span>FOTO {String(index+1).padStart(2,'0')}</span></a><figcaption><b>{file.tipo||'VISTA GENERAL'}</b><strong>{file.mercancia||'RECEPCIÓN COMPLETA'}</strong>{file.nota&&<small>{file.nota}</small>}</figcaption></figure>)}</div>}{Boolean((record.documentos||[]).length)&&<div className="reception-documents">{record.documentos.map(file=><a href={file.url} target="_blank" rel="noreferrer" key={file.id}><FileText/><span><b>{documentLabel(file.name)}</b><small>{file.name}</small></span><ExternalLink/></a>)}</div>}</article>)}</section>;
 }
 
-function Almacen({items,cases,openCase,registerEntry,updateEntry,deleteEntry,showFinance,storageTotal,csrfToken}){
+function Almacen({items,cases,openCase,registerEntry,updateEntry,deleteEntry,showFinance,storageTotal,csrfToken,notify}){
   const [entryOpen,setEntryOpen]=useState(false);
   const [editing,setEditing]=useState(null);
   const [view,setView]=useState('Activos');
+  const [copyStatus,setCopyStatus]=useState('');
   const visibleItems=items.filter(item=>view==='Archivados'?item.archivado||item.estado==='Expedido':!item.archivado&&item.estado!=='Expedido');
   const totalPackages=items.filter(item=>item.estado!=='Expedido').reduce((sum,item)=>sum+(Number(item.bultos)||0),0);
   const totalWeight=items.filter(item=>item.estado!=='Expedido').reduce((sum,item)=>sum+(Number(String(item.peso).replace(/\./g,'').replace(',','.').replace(/[^\d.]/g,''))||0),0);
   const submit=form=>{registerEntry(form);setEntryOpen(false)};
+  const copyWhatsappSummary=async()=>{
+    const text=warehouseWhatsappSummary(items,cases);
+    let copied=false;
+    try{if(navigator.clipboard?.writeText){await navigator.clipboard.writeText(text);copied=true}}catch(error){copied=false}
+    if(!copied)window.prompt('Copia este resumen para WhatsApp',text);
+    const message=copied?'Resumen de almacén copiado para WhatsApp':'Resumen generado para copiar';
+    setCopyStatus(message);notify?.(message);setTimeout(()=>setCopyStatus(''),3000);
+  };
   return <>
     <section className={'summary-strip '+(!showFinance?'summary-strip-three':'')}>
       <Summary icon={Box} label="Bultos en stock" value={String(totalPackages)}/>
@@ -1883,7 +1933,7 @@ function Almacen({items,cases,openCase,registerEntry,updateEntry,deleteEntry,sho
       {showFinance&&<Summary icon={CircleDollarSign} label="Storage acumulado" value={money(storageTotal)}/>}
     </section>
     <section className="panel">
-      <SectionHeader title="Mercancía y ubicaciones" subtitle="Cada recepción queda en stock, tenga o no expediente" action={<button className="button secondary" onClick={()=>setEntryOpen(true)}><Plus/> Registrar entrada</button>}/>
+      <SectionHeader title="Mercancía y ubicaciones" subtitle="Cada recepción queda en stock, tenga o no expediente" action={<div className="warehouse-actions"><button className="button secondary" onClick={copyWhatsappSummary}><ClipboardCheck/> Copiar resumen WhatsApp</button><button className="button secondary" onClick={()=>setEntryOpen(true)}><Plus/> Registrar entrada</button></div>}/>{copyStatus&&<p className="warehouse-copy-status"><ClipboardCheck/>{copyStatus}</p>}
       <div className="warehouse-view-tabs">
         <button className={view==='Activos'?'active':''} onClick={()=>setView('Activos')}>En almacén <span>{items.filter(item=>!item.archivado&&item.estado!=='Expedido').length}</span></button>
         <button className={view==='Archivados'?'active':''} onClick={()=>setView('Archivados')}>Archivados <span>{items.filter(item=>item.archivado||item.estado==='Expedido').length}</span></button>
