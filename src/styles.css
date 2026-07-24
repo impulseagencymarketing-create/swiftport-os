@@ -169,6 +169,11 @@
 .warehouse-select input,.warehouse-selection-bar input{width:16px;height:16px;accent-color:var(--blue)}
 .warehouse-table .table-row.selected{background:#eef6ff;border-color:#9ec4f3;box-shadow:inset 3px 0 0 var(--blue)}
 @media(max-width:720px){.warehouse-actions{width:100%;justify-content:stretch}.warehouse-actions .button{flex:1;justify-content:center}.warehouse-copy-status{margin-inline:14px}}
+
+.driver-job-route{display:grid;grid-template-columns:auto minmax(0,1fr) auto minmax(0,1fr);gap:4px 8px;align-items:center;margin-top:7px;padding:7px 9px;border-radius:8px;background:#f8fbff;border:1px solid #e3edf8}
+.driver-job-route small{margin:0!important;font-size:7px!important;color:#6f8399!important;font-weight:900;letter-spacing:.05em}
+.driver-job-route b{font:800 9px 'DM Sans',sans-serif!important;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#10233d!important}
+@media(max-width:720px){.driver-job-route{grid-template-columns:1fr}.driver-job-route small{margin-top:3px!important}.driver-job-route b{white-space:normal}}
 @media(max-width:720px){
   .new-case-modal{width:100%;max-height:92vh;border-radius:16px 16px 0 0}
   .new-case-modal form{grid-template-columns:1fr;padding-inline:18px;max-height:calc(92vh - 112px)}
