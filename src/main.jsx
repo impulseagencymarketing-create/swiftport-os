@@ -854,11 +854,13 @@ function App({auth,finance,onFinanceChange,onLogout}){
   const [operationalLoaded,setOperationalLoaded]=useState(false);
   const [toast,setToast]=useState('');
   const aisAlertSnapshotRef=useRef(null);
+  const [alertTick,setAlertTick]=useState(Date.now());
   const casesWithFinance=useMemo(()=>cases.map(item=>({...item,importe:finance.caseAmounts[item.id]||0})),[cases,finance.caseAmounts]);
   const selected=casesWithFinance.find(item=>item.id===selectedId)||casesWithFinance[0];
   const notify=message=>{setToast(message);window.clearTimeout(window.__swiftportToast);window.__swiftportToast=window.setTimeout(()=>setToast(''),2600)};
   const navigate=id=>{setTab(canAccess(effectiveRoles,id)?id:(availableNav[0]?.[0]||'dashboard'));setMenuOpen(false);setSearch('')};
   useEffect(()=>{try{localStorage.removeItem(`swiftport-driver-alerts-${user.id}`)}catch{}},[user.id]);
+  useEffect(()=>{const timer=window.setInterval(()=>setAlertTick(Date.now()),300000);return()=>window.clearInterval(timer)},[]);
   const loadTeam=()=>api('/api/users/directory.php').then(result=>setTeam(result.users)).catch(reason=>notify(reason.message));
   const loadOperational=()=>api('/api/operational.php').then(result=>{
     if(result.data){
@@ -906,6 +908,21 @@ function App({auth,finance,onFinanceChange,onLogout}){
     notify(message);
     if(localStorage.getItem('swiftport-device-alerts')==='1')showDeviceNotification(`Swiftport  -  ${item.buque}`,message,tracking.alertKey).catch(()=>{});
   },[cases,calendarEvents,operationalLoaded]);
+  const deliveryAlerts=useMemo(()=>deliveryAlertsForSchedule(calendarEvents,cases,visibleUser,new Date(alertTick)),[calendarEvents,cases,visibleUser,alertTick]);
+  useEffect(()=>{
+    if(!operationalLoaded||!deliveryAlerts.length)return;
+    const storageKey=`swiftport-delivery-alerts-${user.id}`;
+    let sent={};
+    try{sent=JSON.parse(localStorage.getItem(storageKey)||'{}')||{}}catch{sent={}}
+    const fresh=deliveryAlerts.filter(alert=>!sent[alert.key]).slice(0,4);
+    if(!fresh.length)return;
+    fresh.forEach(alert=>{sent[alert.key]=new Date().toISOString()});
+    try{localStorage.setItem(storageKey,JSON.stringify(sent))}catch{}
+    notify(fresh.length===1?fresh[0].message:`${fresh.length} avisos de entrega activos. Revisa el calendario.`);
+    if(localStorage.getItem('swiftport-device-alerts')==='1'){
+      fresh.forEach(alert=>showDeviceNotification('Swiftport entrega',alert.message,alert.key).catch(()=>{}));
+    }
+  },[deliveryAlerts,operationalLoaded,user.id]);
   const persistOperational=(nextCases=cases,nextTransports=transports,nextWarehouse=warehouseEntries,nextCustoms=customs,nextCalendar=calendarEvents,nextProviders=providers,nextVessels=vessels,nextDeletedVesselKeys=deletedVesselKeys)=>auth.demo?Promise.resolve({ok:true}):api('/api/operational.php',{method:'PUT',headers:{'X-CSRF-Token':auth.csrfToken},body:JSON.stringify({data:{cases:nextCases,transports:nextTransports,warehouseEntries:nextWarehouse,customs:nextCustoms,calendarEvents:nextCalendar,providers:nextProviders,vessels:nextVessels,deletedVesselKeys:nextDeletedVesselKeys}})});
   const saveOperational=(...args)=>persistOperational(...args).catch(reason=>notify(reason.message));
   const operationalTeam=useMemo(()=>team.filter(member=>hasRole(member,'operations')||hasRole(member,'driver')),[team]);
@@ -1322,7 +1339,7 @@ No se borrarán documentos ni fotos. El expediente volverá a este punto para co
   const assignedAlerts=(hasRole(effectiveRoles,'operations')||hasRole(effectiveRoles,'driver'))
     ? calendarEvents.filter(event=>samePerson(event.asignado,visibleUser.fullName)&&cases.find(item=>item.id===event.expediente)?.estado!=='Completado')
     : calendarEvents.filter(event=>!event.asignado||event.asignado==='Sin asignar');
-  const notificationCount=assignedAlerts.length;
+  const notificationCount=assignedAlerts.length+deliveryAlerts.length;
   return <div className="shell">
     <Sidebar tab={tab} open={menuOpen} navigate={navigate} close={()=>setMenuOpen(false)} nav={availableNav} user={visibleUser} onLogout={onLogout}/>
     {menuOpen&&<button className="scrim" aria-label="Cerrar menú" onClick={()=>setMenuOpen(false)}/>} 
@@ -1333,7 +1350,7 @@ No se borrarán documentos ni fotos. El expediente volverá a este punto para co
           <div><div className="eyebrow">Operaciones  -  {new Date().toLocaleDateString('es-ES',{day:'numeric',month:'long',year:'numeric'})}</div><h1>{title}</h1><p>{subtitle}</p></div>
         </div>
         <div className="topbar-actions">
-          <button className="icon-button notification" aria-label="Notificaciones" onClick={()=>{navigate('calendario');notify(assignedAlerts.length?`Tienes ${assignedAlerts.length} servicios que requieren atención`:'No tienes avisos operativos')}}><Bell/>{notificationCount>0&&<i>{notificationCount}</i>}</button>
+          <button className="icon-button notification" aria-label="Notificaciones" onClick={()=>{navigate('calendario');notify(deliveryAlerts.length?deliveryAlerts[0].message:(assignedAlerts.length?`Tienes ${assignedAlerts.length} servicios que requieren atención`:'No tienes avisos operativos'))}}><Bell/>{notificationCount>0&&<i>{notificationCount}</i>}</button>
           {!driverOnly&&<button className="button primary" aria-label="Nuevo expediente" onClick={()=>setNewOpen(true)}><Plus/> <span>Nuevo expediente</span></button>}
           <div className="avatar" title={visibleUser.fullName+'  -  '+roleLabel(visibleUser)}>{initials(visibleUser.fullName)}</div>
         </div>
@@ -1445,6 +1462,49 @@ const calendarEventWithCaseSlot=(event,cases)=>{
   const hasStart=/^\d{2}:\d{2}$/.test(String(start||''));
   return {...event,color,fecha:slot.date,inicio:start,fin:hasStart?plusHourClient(start):(event?.fin||''),scheduleStatus:hasStart?'confirmed':'missing_time',scheduleNote:hasStart?`Programado por ${slot.source}`:`Falta hora ${slot.source||'ETB/ETA'}; pendiente de confirmar horario del buque`};
 };
+const DELIVERY_ALERT_RULES=[
+  {key:'2h',label:'seguimiento 2 horas antes',ms:2*60*60*1000,followUp:true},
+  {key:'8h',label:'faltan 8 horas',ms:8*60*60*1000},
+  {key:'1d',label:'falta 1 dia',ms:24*60*60*1000},
+  {key:'2d',label:'faltan 2 dias',ms:48*60*60*1000}
+];
+const deliveryEventMoment=event=>{
+  const date=String(event?.fecha||'').slice(0,10);
+  if(!date)return null;
+  const time=calendarHasValidStart(event)?event.inicio:'09:00';
+  const moment=new Date(`${date}T${time}:00`);
+  return Number.isFinite(moment.getTime())?moment:null;
+};
+const deliveryAlertVisibleToUser=(event,user)=>{
+  const roles=rolesOf(user);
+  if(hasRole(roles,'admin')||hasRole(roles,'operations'))return true;
+  if(!event?.asignado||event.asignado==='Sin asignar')return true;
+  return samePerson(event.asignado,user.fullName);
+};
+const deliveryAlertsForSchedule=(events=[],cases=[],user,now=new Date())=>(events||[])
+  .filter(isTransportCalendarEvent)
+  .map(event=>calendarEventWithCaseSlot(event,cases))
+  .filter(event=>deliveryAlertVisibleToUser(event,user))
+  .flatMap(event=>{
+    const related=(cases||[]).find(item=>item.id===event.expediente);
+    const flow=related?operationFlow(related):{};
+    if(event.estado==='Completado'||flow.delivery||flow.billingReady)return[];
+    const moment=deliveryEventMoment(event);
+    if(!moment)return[];
+    const diff=moment.getTime()-now.getTime();
+    if(diff<=0)return[];
+    const rule=DELIVERY_ALERT_RULES.find(item=>diff<=item.ms);
+    if(!rule)return[];
+    const vessel=String(related?.buque||event.titulo||'BUQUE').toUpperCase();
+    const port=String(related?.puerto||event.destino||event.puerto||'PUERTO POR CONFIRMAR').toUpperCase();
+    const driver=event.asignado&&event.asignado!=='Sin asignar'?event.asignado:'sin conductor asignado';
+    const when=moment.toLocaleString('es-ES',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
+    const timeNote=calendarHasValidStart(event)?when:`${when} aprox. (hora pendiente)`;
+    const message=rule.followUp
+      ? `Seguimiento: ${vessel} se entrega en 2 horas (${timeNote}). Revisa con ${driver}.`
+      : `${vessel}: ${rule.label} para la entrega (${timeNote}) en ${port}. Conductor: ${driver}.`;
+    return [{key:`${event.id||event.transporte||event.expediente}-${rule.key}-${moment.toISOString()}`,event,case:related,rule,message,moment}];
+  });
 const localDay=date=>{const value=new Date(date);value.setHours(0,0,0,0);return value};
 const driverTimeLabel=event=>calendarNeedsTime(event)?'Falta hora':event.inicio;
 const driverEventTimestamp=event=>{
