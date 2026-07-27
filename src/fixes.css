@@ -571,3 +571,6 @@
     justify-self: end;
   }
 }
+.billing-table .table-head,.billing-table .table-row{grid-template-columns:1.05fr .8fr 1.2fr .55fr .75fr 170px}
+.billing-row-actions{display:flex;align-items:center;justify-content:flex-end;gap:8px}
+.billing-row-actions .button.compact{padding:8px 10px;font-size:10px}
