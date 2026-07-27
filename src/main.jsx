@@ -2124,8 +2124,14 @@ function Dashboard({cases,warehouseEntries,calendarEvents,openCase,navigate,show
   const nextFive=upcomingEvents.slice(0,5);
   const agendaSubtitle=nextFive.length?'Próximos 5 trabajos por fecha y hora':'Sin trabajos próximos';
   const agendaMeta=event=>{
+    const related=cases.find(item=>item.id===event.expediente);
     const dateLabel=event.fecha?new Date(event.fecha+'T12:00:00').toLocaleDateString('es-ES',{weekday:'short',day:'2-digit',month:'short'}).replace('.',''):'Sin fecha';
-    return `${dateLabel} · ${event.tipoServicio||'Transporte'} · ${event.destino||event.puerto||'Destino por confirmar'} · ${event.asignado||'Sin asignar'}`;
+    const route=[event.origen,event.destino].filter(Boolean).join(' → ')||event.titulo||event.puerto||related?.puerto||'Ruta por confirmar';
+    return `${dateLabel} · ${event.tipoServicio||'Transporte'} · ${route} · ${event.asignado||'Sin asignar'}`;
+  };
+  const agendaTitle=event=>{
+    const related=cases.find(item=>item.id===event.expediente);
+    return String(related?.buque||event.buque||event.vessel||event.titulo||'BUQUE POR CONFIRMAR').replace(/^BUQUE\s+/i,'').toUpperCase();
   };
   const eta48=activeCases.filter(item=>{
     const moment=new Date(String(item.eta||'').slice(0,10)+'T12:00:00');
@@ -2146,7 +2152,7 @@ function Dashboard({cases,warehouseEntries,calendarEvents,openCase,navigate,show
         {attention.length?attention.map((item,index)=><ActionItem key={index} {...item}/>):<Empty text="No hay incidencias operativas ahora mismo."/>}
       </div></section>
       <section className="panel today-panel"><SectionHeader title="Agenda operativa" subtitle={agendaSubtitle}/><div className="schedule">
-        {nextFive.length?nextFive.map(event=><Schedule key={event.id} time={calendarNeedsTime(event)?'Falta hora':event.inicio} title={String(event.titulo||'SERVICIO').toUpperCase()} meta={agendaMeta(event)} active={!calendarNeedsTime(event)} alert={calendarNeedsTime(event)}/>):<Empty text="No hay transportes próximos programados."/>}
+        {nextFive.length?nextFive.map(event=><Schedule key={event.id} time={calendarNeedsTime(event)?'Falta hora':event.inicio} title={agendaTitle(event)} meta={agendaMeta(event)} active={!calendarNeedsTime(event)} alert={calendarNeedsTime(event)}/>):<Empty text="No hay transportes próximos programados."/>}
       </div></section>
     </div>
     <section className="panel operations"><SectionHeader title="Operaciones recientes" subtitle="Últimos expedientes creados o modificados" action={<button className="filter-button" onClick={()=>navigate('expedientes')}><Filter/> Filtrar</button>}/><div className="responsive-table"><div className="table-head"><span>Expediente</span><span>Destino</span><span>ETA</span><span>Progreso</span><span>Estado</span><span/></div>{recent.map(item=><button className="table-row" key={item.id} onClick={()=>openCase(item.id)}><span className="primary-cell"><span className="ship-icon"><Ship/></span><span><b>{caseLabel(item)}</b><small>{item.cliente}</small></span></span><span data-label="Destino"><MapPin/>{item.puerto}</span><span data-label="ETA">{item.eta}</span><span data-label="Progreso"><span className="mini-progress"><i style={{width:item.progreso+'%'}}/></span>{item.progreso}%</span><span data-label="Estado"><Badge>{item.estado}</Badge></span><ChevronRight/></button>)}</div></section>
