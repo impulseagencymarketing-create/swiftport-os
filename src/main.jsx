@@ -906,12 +906,14 @@ function App({auth,finance,onFinanceChange,onLogout}){
   const [notificationOpen,setNotificationOpen]=useState(false);
   const [notificationLog,setNotificationLog]=useState([]);
   const [deliveryPopup,setDeliveryPopup]=useState(null);
+  const [acknowledgedDeliveryAlerts,setAcknowledgedDeliveryAlerts]=useState({});
   const casesWithFinance=useMemo(()=>cases.map(item=>({...item,importe:finance.caseAmounts[item.id]||0})),[cases,finance.caseAmounts]);
   const selected=casesWithFinance.find(item=>item.id===selectedId)||casesWithFinance[0];
   const notify=message=>{setToast(message);window.clearTimeout(window.__swiftportToast);window.__swiftportToast=window.setTimeout(()=>setToast(''),2600)};
   const navigate=id=>{setTab(canAccess(effectiveRoles,id)?id:(availableNav[0]?.[0]||'dashboard'));setMenuOpen(false);setSearch('')};
   useEffect(()=>{try{localStorage.removeItem(`swiftport-driver-alerts-${user.id}`)}catch{}},[user.id]);
   useEffect(()=>{try{setNotificationLog(JSON.parse(localStorage.getItem(`swiftport-notification-log-${user.id}`)||'[]')||[])}catch{setNotificationLog([])}},[user.id]);
+  useEffect(()=>{try{setAcknowledgedDeliveryAlerts(JSON.parse(localStorage.getItem(`swiftport-delivery-alert-ack-${user.id}`)||'{}')||{})}catch{setAcknowledgedDeliveryAlerts({})}},[user.id]);
   useEffect(()=>{const timer=window.setInterval(()=>setAlertTick(Date.now()),300000);return()=>window.clearInterval(timer)},[]);
   const loadTeam=()=>api('/api/users/directory.php').then(result=>setTeam(result.users)).catch(reason=>notify(reason.message));
   const loadOperational=()=>api('/api/operational.php').then(result=>{
@@ -960,17 +962,32 @@ function App({auth,finance,onFinanceChange,onLogout}){
     notify(message);
     if(localStorage.getItem('swiftport-device-alerts')==='1')showDeviceNotification(`Swiftport  -  ${item.buque}`,message,tracking.alertKey).catch(()=>{});
   },[cases,calendarEvents,operationalLoaded]);
-  const deliveryAlerts=useMemo(()=>deliveryAlertsForSchedule(calendarEvents,cases,visibleUser,new Date(alertTick)),[calendarEvents,cases,visibleUser,alertTick]);
+  const rawDeliveryAlerts=useMemo(()=>deliveryAlertsForSchedule(calendarEvents,cases,visibleUser,new Date(alertTick)),[calendarEvents,cases,visibleUser,alertTick]);
+  const deliveryAlerts=useMemo(()=>rawDeliveryAlerts.filter(alert=>!acknowledgedDeliveryAlerts[alert.key]),[rawDeliveryAlerts,acknowledgedDeliveryAlerts]);
+  const acknowledgeDeliveryAlert=alert=>{
+    if(!alert?.key)return;
+    setAcknowledgedDeliveryAlerts(previous=>{
+      const next={...previous,[alert.key]:new Date().toISOString()};
+      try{localStorage.setItem(`swiftport-delivery-alert-ack-${user.id}`,JSON.stringify(next))}catch{}
+      return next;
+    });
+    setDeliveryPopup(current=>current?.key===alert.key?null:current);
+  };
   useEffect(()=>{
     if(!operationalLoaded||!deliveryAlerts.length)return;
     const storageKey=`swiftport-delivery-alerts-${user.id}`;
     let sent={};
     try{sent=JSON.parse(localStorage.getItem(storageKey)||'{}')||{}}catch{sent={}}
-    const fresh=deliveryAlerts.filter(alert=>!sent[alert.key]).slice(0,4);
+    const now=new Date();
+    const fresh=deliveryAlerts.filter(alert=>{
+      const previous=sent[alert.key]?new Date(sent[alert.key]).getTime():0;
+      return !previous||now.getTime()-previous>=deliveryAlertRepeatMs(alert);
+    }).slice(0,4);
     if(!fresh.length)return;
-    fresh.forEach(alert=>{sent[alert.key]=new Date().toISOString()});
+    const wasAlreadySent=Object.fromEntries(fresh.map(alert=>[alert.key,Boolean(sent[alert.key])]));
+    fresh.forEach(alert=>{sent[alert.key]=now.toISOString()});
     try{localStorage.setItem(storageKey,JSON.stringify(sent))}catch{}
-    const entries=fresh.map(alert=>({id:alert.key,type:'delivery',title:alert.rule?.followUp?'Seguimiento de entrega':'Aviso de entrega',message:alert.message,createdAt:new Date().toISOString(),caseId:alert.case?.id||alert.event?.expediente||'',vessel:alert.case?.buque||alert.event?.titulo||'',rule:alert.rule?.label||''}));
+    const entries=fresh.map(alert=>({id:`${alert.key}-${now.getTime()}`,alertKey:alert.key,type:'delivery',title:wasAlreadySent[alert.key]?'Recordatorio pendiente':'Aviso de entrega',message:alert.message,createdAt:now.toISOString(),caseId:alert.case?.id||alert.event?.expediente||'',vessel:alert.case?.buque||alert.event?.titulo||'',rule:alert.rule?.label||''}));
     setNotificationLog(previous=>{const next=[...entries,...previous].slice(0,100);try{localStorage.setItem(`swiftport-notification-log-${user.id}`,JSON.stringify(next))}catch{}return next});
     setDeliveryPopup(fresh[0]);
     if(localStorage.getItem('swiftport-alert-sound')!=='0')playAlertSound().catch(()=>{});
@@ -1429,14 +1446,14 @@ No se borrarán documentos ni fotos. El expediente volverá a este punto para co
     </main>
     <MobileNav tab={tab} navigate={navigate} more={()=>setMenuOpen(true)} nav={availableNav}/>
     {newOpen&&<NewCaseModal clientOptions={clientOptions} vessels={vessels} team={operationalTeam} close={()=>setNewOpen(false)} submit={createCase}/>}
-    {notificationOpen&&<NotificationDrawer alerts={deliveryAlerts} history={notificationLog} close={()=>setNotificationOpen(false)} clear={clearNotificationLog} openCalendar={()=>{setNotificationOpen(false);navigate('calendario')}}/>}
-    {deliveryPopup&&<DeliveryPopup alert={deliveryPopup} close={()=>setDeliveryPopup(null)} openHistory={()=>{setDeliveryPopup(null);setNotificationOpen(true)}}/>}
+    {notificationOpen&&<NotificationDrawer alerts={deliveryAlerts} history={notificationLog} acknowledge={acknowledgeDeliveryAlert} close={()=>setNotificationOpen(false)} clear={clearNotificationLog} openCalendar={()=>{setNotificationOpen(false);navigate('calendario')}}/>}
+    {deliveryPopup&&<DeliveryPopup alert={deliveryPopup} close={()=>acknowledgeDeliveryAlert(deliveryPopup)} openHistory={()=>{setDeliveryPopup(null);setNotificationOpen(true)}}/>}
     {toast&&<div className="toast" role="status"><CheckCircle2/>{toast}</div>}
   </div>;
 }
 
 const initials=name=>name.split(/\s+/).filter(Boolean).map(word=>word[0]).slice(0,2).join('').toUpperCase();
-function NotificationDrawer({alerts=[],history=[],close,clear,openCalendar}){
+function NotificationDrawer({alerts=[],history=[],acknowledge,close,clear,openCalendar}){
   const formatDate=value=>value?new Date(value).toLocaleString('es-ES',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}):'Ahora';
   return <>
     <button className="notification-backdrop" aria-label="Cerrar notificaciones" onClick={close}/>
@@ -1454,7 +1471,7 @@ function NotificationDrawer({alerts=[],history=[],close,clear,openCalendar}){
         <h3>Ahora requiere atención</h3>
         {alerts.length?alerts.map(alert=><article className="notification-card active" key={alert.key}>
           <span><Timer/></span>
-          <div><b>{alert.case?.buque||alert.event?.titulo||'Entrega'}</b><p>{alert.message}</p><small>{alert.rule?.label||'Aviso operativo'}</small></div>
+          <div><b>{alert.case?.buque||alert.event?.titulo||'Entrega'}</b><p>{alert.message}</p><small>{alert.rule?.label||'Aviso operativo'}  -  repetirá hasta confirmar</small><button className="button secondary notification-ack" onClick={()=>acknowledge?.(alert)}>Entendido</button></div>
         </article>):<p className="notification-empty">No hay avisos activos ahora mismo.</p>}
       </section>
       <section>
@@ -1575,6 +1592,12 @@ const DELIVERY_ALERT_RULES=[
   {key:'1d',label:'falta 1 dia',ms:24*60*60*1000},
   {key:'2d',label:'faltan 2 dias',ms:48*60*60*1000}
 ];
+const deliveryAlertRepeatMs=alert=>{
+  const key=alert?.rule?.key;
+  if(key==='2h')return 15*60*1000;
+  if(key==='8h')return 30*60*1000;
+  return 60*60*1000;
+};
 const deliveryEventMoment=event=>{
   const date=String(event?.fecha||'').slice(0,10);
   if(!date)return null;
