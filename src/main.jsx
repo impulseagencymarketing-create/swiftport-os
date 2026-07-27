@@ -2084,34 +2084,53 @@ function DriverTaskModalLegacy({event,item,transport,warehouseEntries,currentUse
 }
 
 function Dashboard({cases,warehouseEntries,calendarEvents,openCase,navigate,showFinance,user}){
-  const active=cases.filter(item=>item.estado!=='Completado').length;
-  const billing=cases.filter(item=>item.estado==='Completado').reduce((sum,item)=>sum+item.importe,0);
-  const stock=warehouseEntries.filter(item=>!item.archivado&&item.estado!=='Expedido').reduce((sum,item)=>sum+Number(item.bultos||0),0);
-  const alerts=hasRole(user,'operations')
-    ? calendarEvents.filter(event=>samePerson(event.asignado,user.fullName)&&cases.find(item=>item.id===event.expediente)?.estado!=='Completado').length
-    : cases.filter(item=>item.estado!=='Completado'&&(item.prioridad==='Urgente'||item.conductor==='Sin asignar')).length;
+  const today=isoDate(new Date());
+  const activeCases=cases.filter(item=>!['Completado','Cancelado'].includes(item.estado));
+  const stockEntries=warehouseEntries.filter(item=>!item.archivado&&item.estado!=='Expedido');
+  const stock=stockEntries.reduce((sum,item)=>sum+Number(item.bultos||0),0);
+  const realEvents=(calendarEvents||[]).map(event=>calendarEventWithCaseSlot(event,cases));
+  const pendingEvents=realEvents.filter(event=>{
+    const related=cases.find(item=>item.id===event.expediente);
+    return !related||!['Completado','Cancelado'].includes(related.estado);
+  });
+  const todayEvents=pendingEvents.filter(event=>event.fecha===today).sort(driverEventSort);
+  const urgentCases=activeCases.filter(item=>item.prioridad==='Urgente');
+  const missingDriver=pendingEvents.filter(event=>!event.asignado||event.asignado==='Sin asignar');
+  const missingTime=pendingEvents.filter(calendarNeedsTime);
+  const readyToBill=cases.filter(item=>operationFlow(item).billingReady||item.progreso>=100);
+  const attention=[
+    ...missingDriver.slice(0,3).map(event=>({tone:'warning',title:'Transporte sin conductor',meta:`${String(event.titulo||'BUQUE').toUpperCase()} · ${formatSchedule(event.fecha,event.inicio,event.fin)}`,action:()=>navigate('calendario')})),
+    ...missingTime.slice(0,3).map(event=>({tone:'warning',title:'Falta horario de servicio',meta:`${String(event.titulo||'BUQUE').toUpperCase()} · ${event.fecha||'Sin fecha'}`,action:()=>navigate('calendario')})),
+    ...urgentCases.slice(0,3).map(item=>({tone:'danger',title:'Expediente urgente',meta:`${caseLabel(item)} · ${item.puerto}`,action:()=>openCase(item.id)})),
+    ...readyToBill.filter(item=>item.estado!=='Completado').slice(0,3).map(item=>({tone:'info',title:'Listo para facturar',meta:`${caseLabel(item)} · revisar borrador`,action:()=>showFinance?navigate('facturacion'):openCase(item.id)}))
+  ].slice(0,5);
+  const alerts=attention.length;
+  const billing=readyToBill.reduce((sum,item)=>sum+Number(item.importe||0),0);
+  const recent=[...cases].sort(newestFirst).slice(0,6);
+  const todayLabel=new Date().toLocaleDateString('es-ES',{weekday:'long',day:'numeric',month:'long'}).replace(/^\w/,char=>char.toUpperCase());
+  const eta48=activeCases.filter(item=>{
+    const moment=new Date(String(item.eta||'').slice(0,10)+'T12:00:00');
+    if(!Number.isFinite(moment.getTime()))return false;
+    const diff=moment.getTime()-Date.now();
+    return diff>=0&&diff<=48*60*60*1000;
+  }).length;
   return <>
     <section className="welcome"><div><span className="overline"><Sparkles/> Resumen del turno</span><h2>Buenos días, {user.fullName.split(' ')[0]}</h2><p>Hay <b>{alerts} operaciones que necesitan atención</b>. El resto avanza según lo previsto.</p></div><button className="button ghost-light" onClick={()=>navigate('expedientes')}>Ver operativa <ChevronRight/></button></section>
     <section className={'kpi-grid '+(!showFinance?'kpi-grid-three':'')}>
-      <Kpi icon={Ship} label="Expedientes activos" value={active} note="2 con ETA en 48 h" tone="blue"/>
-      <Kpi icon={PackageCheck} label="Bultos en almacén" value={String(stock)} note={`${warehouseEntries.filter(item=>!item.archivado&&item.estado!=='Expedido').length} ubicaciones activas`} tone="teal"/>
-      <Kpi icon={CircleAlert} label="Requieren acción" value={alerts} note="1 de prioridad urgente" tone="orange"/>
-      {showFinance&&<Kpi icon={WalletCards} label="Listo para facturar" value={money(billing)} note="1 expediente completado" tone="green"/>}
+      <Kpi icon={Ship} label="Expedientes activos" value={activeCases.length} note={`${eta48} con ETA en 48 h`} tone="blue"/>
+      <Kpi icon={PackageCheck} label="Bultos en almacén" value={String(stock)} note={`${stockEntries.length} entradas activas`} tone="teal"/>
+      <Kpi icon={CircleAlert} label="Requieren acción" value={alerts} note={`${urgentCases.length} de prioridad urgente`} tone="orange"/>
+      {showFinance&&<Kpi icon={WalletCards} label="Listo para facturar" value={money(billing)} note={`${readyToBill.length} expedientes completados`} tone="green"/>}
     </section>
     <div className="dashboard-grid">
       <section className="panel attention-panel"><SectionHeader title="Requieren acción" subtitle="Ordenado por prioridad" action={<button className="text-button" onClick={()=>navigate('expedientes')}>Ver todos</button>}/><div className="attention-list">
-        <ActionItem tone="danger" title="Autorización aduanera pendiente" meta="POLARIS MILA  -  vence hoy 17:00" action={()=>openCase('SW-2026-0047')}/>
-        <ActionItem tone="warning" title="Transporte sin conductor" meta="TR-1044  -  Tarragona  -  mañana 15:30" action={()=>navigate('calendario')}/>
-        <ActionItem tone="info" title="Validar packing list" meta="ATLANTIC STAR  -  ETA 03 Jul 06:30" action={()=>openCase('SW-2026-0045')}/>
+        {attention.length?attention.map((item,index)=><ActionItem key={index} {...item}/>):<Empty text="No hay incidencias operativas ahora mismo."/>}
       </div></section>
-      <section className="panel today-panel"><SectionHeader title="Agenda operativa" subtitle="Hoy, 29 de junio"/><div className="schedule">
-        <Schedule time="09:15" title="Recogida aeropuerto BCN" meta="VIKING SEA  -  Javier S." active/>
-        <Schedule time="11:00" title="ETA Puerto de Barcelona" meta="Muelle Adossat"/>
-        <Schedule time="14:35" title="Entrada de mercancía" meta="POLARIS MILA  -  zona B-04"/>
-        <Schedule time="17:00" title="Límite autorización T1" meta="AD-882  -  prioridad urgente" alert/>
+      <section className="panel today-panel"><SectionHeader title="Agenda operativa" subtitle={todayLabel}/><div className="schedule">
+        {todayEvents.length?todayEvents.slice(0,6).map(event=><Schedule key={event.id} time={calendarNeedsTime(event)?'Falta hora':event.inicio} title={String(event.titulo||'SERVICIO').toUpperCase()} meta={`${event.tipoServicio||'Transporte'} · ${event.destino||event.puerto||'Destino por confirmar'} · ${event.asignado||'Sin asignar'}`} active={!calendarNeedsTime(event)} alert={calendarNeedsTime(event)}/>):<Empty text="No hay transportes programados para hoy."/>}
       </div></section>
     </div>
-    <section className="panel operations"><SectionHeader title="Operaciones recientes" subtitle="Última actividad de expedientes" action={<button className="filter-button" onClick={()=>navigate('expedientes')}><Filter/> Filtrar</button>}/><div className="responsive-table"><div className="table-head"><span>Expediente</span><span>Destino</span><span>ETA</span><span>Progreso</span><span>Estado</span><span/></div>{cases.slice(0,4).map(item=><button className="table-row" key={item.id} onClick={()=>openCase(item.id)}><span className="primary-cell"><span className="ship-icon"><Ship/></span><span><b>{caseLabel(item)}</b><small>{item.cliente}</small></span></span><span data-label="Destino"><MapPin/>{item.puerto}</span><span data-label="ETA">{item.eta}</span><span data-label="Progreso"><span className="mini-progress"><i style={{width:item.progreso+'%'}}/></span>{item.progreso}%</span><span data-label="Estado"><Badge>{item.estado}</Badge></span><ChevronRight/></button>)}</div></section>
+    <section className="panel operations"><SectionHeader title="Operaciones recientes" subtitle="Últimos expedientes creados o modificados" action={<button className="filter-button" onClick={()=>navigate('expedientes')}><Filter/> Filtrar</button>}/><div className="responsive-table"><div className="table-head"><span>Expediente</span><span>Destino</span><span>ETA</span><span>Progreso</span><span>Estado</span><span/></div>{recent.map(item=><button className="table-row" key={item.id} onClick={()=>openCase(item.id)}><span className="primary-cell"><span className="ship-icon"><Ship/></span><span><b>{caseLabel(item)}</b><small>{item.cliente}</small></span></span><span data-label="Destino"><MapPin/>{item.puerto}</span><span data-label="ETA">{item.eta}</span><span data-label="Progreso"><span className="mini-progress"><i style={{width:item.progreso+'%'}}/></span>{item.progreso}%</span><span data-label="Estado"><Badge>{item.estado}</Badge></span><ChevronRight/></button>)}</div></section>
   </>;
 }
 function Kpi({icon:Icon,label,value,note,tone}){return <article className="kpi-card"><div className={'kpi-icon '+tone}><Icon/></div><div><span>{label}</span><strong>{value}</strong><small>{note}</small></div></article>}
