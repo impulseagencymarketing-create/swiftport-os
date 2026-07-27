@@ -161,9 +161,14 @@ function ensure_schema(): void
             concept VARCHAR(220) NOT NULL,
             amount DECIMAL(12,2) NOT NULL DEFAULT 0,
             status VARCHAR(40) NOT NULL,
-            due_date VARCHAR(40) NOT NULL
+            due_date VARCHAR(40) NOT NULL,
+            invoice_data JSON NULL
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
     );
+    $invoiceDataColumn = $pdo->query("SHOW COLUMNS FROM app_invoices LIKE 'invoice_data'")->fetch();
+    if (!$invoiceDataColumn) {
+        $pdo->exec("ALTER TABLE app_invoices ADD invoice_data JSON NULL AFTER due_date");
+    }
     $roleColumn = $pdo->query("SHOW COLUMNS FROM app_users LIKE 'role'")->fetch();
     if ($roleColumn && !str_contains((string) $roleColumn['Type'], "'driver'")) {
         $pdo->exec(

@@ -49,12 +49,23 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'PUT') {
             ]);
         }
         $invoiceStatement = $pdo->prepare(
-            'INSERT INTO app_invoices (id, case_ref, client_name, concept, amount, status, due_date)
-             VALUES (?, ?, ?, ?, ?, ?, ?)
+            'INSERT INTO app_invoices (id, case_ref, client_name, concept, amount, status, due_date, invoice_data)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
              ON DUPLICATE KEY UPDATE case_ref=VALUES(case_ref), client_name=VALUES(client_name),
-             concept=VALUES(concept), amount=VALUES(amount), status=VALUES(status), due_date=VALUES(due_date)'
+             concept=VALUES(concept), amount=VALUES(amount), status=VALUES(status), due_date=VALUES(due_date),
+             invoice_data=VALUES(invoice_data)'
         );
         foreach ($invoices as $invoice) {
+            $invoiceData = $invoice;
+            unset(
+                $invoiceData['id'],
+                $invoiceData['expediente'],
+                $invoiceData['cliente'],
+                $invoiceData['concepto'],
+                $invoiceData['importe'],
+                $invoiceData['estado'],
+                $invoiceData['vencimiento']
+            );
             $invoiceStatement->execute([
                 substr((string) ($invoice['id'] ?? ''), 0, 40),
                 substr((string) ($invoice['expediente'] ?? ''), 0, 40),
@@ -63,6 +74,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'PUT') {
                 (float) ($invoice['importe'] ?? 0),
                 substr((string) ($invoice['estado'] ?? ''), 0, 40),
                 substr((string) ($invoice['vencimiento'] ?? ''), 0, 40),
+                json_encode($invoiceData, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
             ]);
         }
         $pdo->commit();
@@ -85,7 +97,7 @@ $clientRows = db()->query(
      FROM app_clients WHERE active = 1 ORDER BY name'
 )->fetchAll();
 $invoiceRows = db()->query(
-    'SELECT id, case_ref, client_name, concept, amount, status, due_date
+    'SELECT id, case_ref, client_name, concept, amount, status, due_date, invoice_data
      FROM app_invoices ORDER BY id DESC'
 )->fetchAll();
 
@@ -122,13 +134,19 @@ respond([
             'activo' => (bool) $row['active'],
         ];
     }, $clientRows),
-    'invoices' => array_map(static fn(array $row): array => [
-        'id' => $row['id'],
-        'expediente' => $row['case_ref'],
-        'cliente' => $row['client_name'],
-        'concepto' => $row['concept'],
-        'importe' => (float) $row['amount'],
-        'estado' => $row['status'],
-        'vencimiento' => $row['due_date'],
-    ], $invoiceRows),
+    'invoices' => array_map(static function (array $row): array {
+        $extra = json_decode((string) ($row['invoice_data'] ?? ''), true);
+        if (!is_array($extra)) {
+            $extra = [];
+        }
+        return array_merge($extra, [
+            'id' => $row['id'],
+            'expediente' => $row['case_ref'],
+            'cliente' => $row['client_name'],
+            'concepto' => $row['concept'],
+            'importe' => (float) $row['amount'],
+            'estado' => $row['status'],
+            'vencimiento' => $row['due_date'],
+        ]);
+    }, $invoiceRows),
 ]);
