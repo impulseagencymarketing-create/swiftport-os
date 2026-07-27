@@ -538,6 +538,29 @@ async function showDeviceNotification(title,body,tag){
   return true;
 }
 
+async function playAlertSound(){
+  const AudioContext=window.AudioContext||window.webkitAudioContext;
+  if(!AudioContext)return false;
+  const audio=window.__swiftportAudioContext||(window.__swiftportAudioContext=new AudioContext());
+  if(audio.state==='suspended')await audio.resume();
+  const now=audio.currentTime;
+  const sequence=[{frequency:880,start:0,duration:.14},{frequency:660,start:.18,duration:.18}];
+  sequence.forEach(({frequency,start,duration})=>{
+    const oscillator=audio.createOscillator();
+    const gain=audio.createGain();
+    oscillator.type='sine';
+    oscillator.frequency.setValueAtTime(frequency,now+start);
+    gain.gain.setValueAtTime(0.0001,now+start);
+    gain.gain.exponentialRampToValueAtTime(0.22,now+start+.02);
+    gain.gain.exponentialRampToValueAtTime(0.0001,now+start+duration);
+    oscillator.connect(gain);
+    gain.connect(audio.destination);
+    oscillator.start(now+start);
+    oscillator.stop(now+start+duration+.03);
+  });
+  return true;
+}
+
 async function uploadAttachment(file,category,csrfToken){
   const data=new FormData();
   data.append('file',file);
@@ -925,6 +948,7 @@ function App({auth,finance,onFinanceChange,onLogout}){
     const entries=fresh.map(alert=>({id:alert.key,type:'delivery',title:alert.rule?.followUp?'Seguimiento de entrega':'Aviso de entrega',message:alert.message,createdAt:new Date().toISOString(),caseId:alert.case?.id||alert.event?.expediente||'',vessel:alert.case?.buque||alert.event?.titulo||'',rule:alert.rule?.label||''}));
     setNotificationLog(previous=>{const next=[...entries,...previous].slice(0,100);try{localStorage.setItem(`swiftport-notification-log-${user.id}`,JSON.stringify(next))}catch{}return next});
     setDeliveryPopup(fresh[0]);
+    if(localStorage.getItem('swiftport-alert-sound')!=='0')playAlertSound().catch(()=>{});
     notify(fresh.length===1?fresh[0].message:`${fresh.length} avisos de entrega activos. Revisa el calendario.`);
     if(localStorage.getItem('swiftport-device-alerts')==='1'){
       fresh.forEach(alert=>showDeviceNotification('Swiftport entrega',alert.message,alert.key).catch(()=>{}));
@@ -1426,6 +1450,7 @@ function DeliveryPopup({alert,close,openHistory}){
       <b>{alert.case?.buque||alert.event?.titulo||'Entrega programada'}</b>
       <p>{alert.message}</p>
       <div className="delivery-popup-actions">
+        <button className="button tertiary" onClick={()=>{try{localStorage.setItem('swiftport-alert-sound','1')}catch{};playAlertSound().catch(()=>{})}}>Activar sonido</button>
         <button className="button secondary" onClick={openHistory}>Ver historial</button>
         <button className="button primary" onClick={close}>Entendido</button>
       </div>
