@@ -740,6 +740,35 @@ const documentLabel=name=>{
 
 const attachmentKey=file=>String(file?.id||file?.url||file?.name||'');
 const sameAttachment=(file,target)=>attachmentKey(file)&&attachmentKey(file)===attachmentKey(target);
+const HOLD_STATUS_ORDER={'Borrador':1,'Revisar':2,'Listo para enviar':3,'Enviado a Holded':4,'Facturado':5,'Cobrado':6};
+const hasHoldedProof=invoice=>Boolean(invoice?.holdedId||invoice?.holdedNumber||invoice?.holdedAt||invoice?.holdedStatus||['Enviado a Holded','Facturado','Cobrado'].includes(invoice?.estado));
+const normalizeHoldedStatus=invoice=>hasHoldedProof(invoice)&&(HOLD_STATUS_ORDER[invoice?.estado]||0)<HOLD_STATUS_ORDER['Enviado a Holded']?{...invoice,estado:'Enviado a Holded'}:invoice;
+const protectHoldedInvoice=(previous,next)=>{
+  next=normalizeHoldedStatus(next);
+  if(!previous)return next;
+  previous=normalizeHoldedStatus(previous);
+  if(!hasHoldedProof(previous))return next;
+  const previousRank=HOLD_STATUS_ORDER[previous.estado]||0;
+  const nextRank=HOLD_STATUS_ORDER[next?.estado]||0;
+  const protectedStatus=nextRank>=previousRank?next.estado:previous.estado;
+  return {
+    ...next,
+    estado:protectedStatus,
+    holdedStatus:next.holdedStatus||previous.holdedStatus,
+    holdedDocType:next.holdedDocType||previous.holdedDocType,
+    holdedId:next.holdedId||previous.holdedId,
+    holdedNumber:next.holdedNumber||previous.holdedNumber,
+    holdedAt:next.holdedAt||previous.holdedAt
+  };
+};
+const protectFinanceHoldedState=(previous,next)=>{
+  const previousInvoices=previous?.invoices||[];
+  const nextInvoices=(next?.invoices||[]).map(invoice=>{
+    const previousInvoice=previousInvoices.find(item=>item.id===invoice.id||item.expediente===invoice.expediente);
+    return protectHoldedInvoice(previousInvoice,invoice);
+  });
+  return {...next,invoices:nextInvoices};
+};
 
 function AuthRoot(){
   const [session,setSession]=useState(null);
@@ -747,6 +776,8 @@ function AuthRoot(){
   const [loading,setLoading]=useState(true);
   const [error,setError]=useState('');
   const [finance,setFinance]=useState({caseAmounts:{},warehouseStorageTotal:0,clients:[],invoices:[]});
+  const financeRef=useRef(finance);
+  useEffect(()=>{financeRef.current=finance},[finance]);
   const loadSession=async()=>{
     setLoading(true);setError('');
     if(LOCAL_DESIGN_MODE){
@@ -774,7 +805,7 @@ function AuthRoot(){
     try{await api('/api/auth/logout.php',{method:'POST',headers:{'X-CSRF-Token':session.csrfToken}})}
     finally{setSession(null);setFinance({caseAmounts:{},warehouseStorageTotal:0,clients:[],invoices:[]})}
   };
-  const updateFinance=async next=>{if(session?.demo){setFinance(next);return}await api('/api/finance.php',{method:'PUT',headers:{'X-CSRF-Token':session.csrfToken},body:JSON.stringify({clients:next.clients,invoices:next.invoices})});setFinance(next)};
+  const updateFinance=async next=>{const protectedNext=protectFinanceHoldedState(financeRef.current,next);financeRef.current=protectedNext;setFinance(protectedNext);if(session?.demo)return;await api('/api/finance.php',{method:'PUT',headers:{'X-CSRF-Token':session.csrfToken},body:JSON.stringify({clients:protectedNext.clients,invoices:protectedNext.invoices})})};
   if(loading) return <AuthShell><div className="auth-loading"><span className="auth-spinner"/><b>Preparando Swiftport OS…</b></div></AuthShell>;
   if(!session) return <AuthShell>{setupRequired?<SetupForm onSuccess={authenticated} globalError={error}/>:<LoginForm onSuccess={authenticated} globalError={error} localDesign={LOCAL_DESIGN_MODE} onDesignMode={enterDesignMode}/>}</AuthShell>;
   return <App auth={session} finance={finance} onFinanceChange={updateFinance} onLogout={logout}/>;
