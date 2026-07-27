@@ -2112,10 +2112,15 @@ function Facturacion({openCase,notify,invoices,cases,warehouseEntries=[],clients
   const draftFromCase=item=>draftInvoiceFromCase(item,warehouseEntries);
   const createDraft=item=>setEditing(draftFromCase(item));
   const groupedStatus=['Borrador','Revisar','Listo para enviar','Enviado a Holded','Facturado','Cobrado'];
+  const holdedClientProfiles=mergeClientProfiles(clients);
+  const holdedClientProfile=value=>{
+    const key=clientProfileKey({nombre:value});
+    return holdedClientProfiles.find(profile=>clientProfileKey(profile)===key)||holdedClientProfiles.find(profile=>String(profile.nombre||'').toLowerCase().includes(String(value||'').toLowerCase())&&String(value||'').trim().length>=3);
+  };
   const sendHolded=item=>{
     if(!csrfToken){notify('Inicia sesión en la web publicada para enviar a Holded.');return}
     const related=cases.find(entry=>entry.id===item.expediente);
-    const prepared={...item,importe:item.importe||invoiceTotal(item),lines:(item.lines&&item.lines.length?item.lines:(related?draftInvoiceFromCase(related,warehouseEntries).lines:[]))};
+    const prepared={...item,clientProfile:holdedClientProfile(item.cliente),importe:item.importe||invoiceTotal(item),lines:(item.lines&&item.lines.length?item.lines:(related?draftInvoiceFromCase(related,warehouseEntries).lines:[]))};
     setSendingHolded(item.id);
     api('/api/holded/create.php',{method:'POST',headers:{'X-CSRF-Token':csrfToken},body:JSON.stringify({invoice:prepared})})
       .then(result=>{

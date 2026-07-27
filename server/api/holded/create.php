@@ -19,6 +19,13 @@ if (!is_array($invoice)) {
 }
 
 $clientName = trim((string) ($invoice['cliente'] ?? ''));
+$clientProfile = $invoice['clientProfile'] ?? [];
+if (!is_array($clientProfile)) {
+    $clientProfile = [];
+}
+$clientFiscalName = trim((string) ($clientProfile['fiscalName'] ?? $clientProfile['razonSocial'] ?? $clientName));
+$clientTaxId = strtoupper(trim((string) ($clientProfile['taxId'] ?? $clientProfile['nif'] ?? '')));
+$clientAddress = trim((string) ($clientProfile['direccion'] ?? ''));
 $concept = trim((string) ($invoice['concepto'] ?? ''));
 $lines = $invoice['lines'] ?? [];
 if ($clientName === '' || $concept === '' || !is_array($lines) || count($lines) === 0) {
@@ -129,8 +136,18 @@ function holded_try_create_document(string $apiKey, string $docType, array $requ
     return $last;
 }
 
+function holded_line_tax(mixed $tax): string
+{
+    $tax = trim((string) $tax);
+    if ($tax === '21%') {
+        return 's_iva_21';
+    }
+    return 's_iva_0';
+}
+
 $total = (float) ($invoice['importe'] ?? 0);
 $detailLines = [];
+$holdedItems = [];
 foreach ($lines as $line) {
     if (!is_array($line)) {
         continue;
@@ -147,9 +164,20 @@ foreach ($lines as $line) {
     $detail = trim((string) ($line['detail'] ?? ''));
     $amount = $price > 0 ? ' - ' . number_format($price * max($units, 1), 2, ',', '.') . ' EUR' : '';
     $detailLines[] = trim($name . ($detail !== '' ? ' - ' . $detail : '') . $amount);
+    $item = [
+        'name' => $name,
+        'desc' => $detail,
+        'units' => $units > 0 ? $units : 1,
+        'subtotal' => $price,
+        'tax' => holded_line_tax($line['tax'] ?? '0%'),
+    ];
+    if ($detail === '') {
+        unset($item['desc']);
+    }
+    $holdedItems[] = $item;
 }
 
-if (!$detailLines) {
+if (!$detailLines || !$holdedItems) {
     respond(['error' => 'No hay concepto válido para enviar a Holded.'], 422);
 }
 
@@ -157,26 +185,28 @@ $docType = 'proform';
 $simpleDescription = trim(implode("\n", array_slice($detailLines, 0, 20)));
 $notes = trim((string) ($invoice['observaciones'] ?? ''));
 $request = [
-    'contactName' => $clientName,
+    'contactName' => $clientFiscalName ?: $clientName,
     'date' => holded_timestamp(date('Y-m-d')),
     'dueDate' => holded_timestamp((string) ($invoice['vencimiento'] ?? '')),
     'desc' => $concept,
     'notes' => trim($notes . "\n\nDetalle operativo Swiftport:\n" . $simpleDescription),
     'currency' => 'EUR',
-    'items' => [[
-        'name' => $concept,
-        'desc' => $simpleDescription,
-        'units' => 1,
-        'subtotal' => max(0.0, $total),
-        'tax' => 's_iva_0',
-    ]],
+    'items' => $holdedItems,
 ];
+if ($clientTaxId !== '') {
+    $request['contactCode'] = $clientTaxId;
+}
+if ($clientAddress !== '') {
+    $request['contactAddress'] = $clientAddress;
+}
 
 [$status, $response, $usedAuth, $usedVersion] = holded_try_create_document($apiKey, $docType, $request);
 
 if ($status >= 400 && $status < 500) {
     $fallbackRequest = $request;
-    unset($fallbackRequest['items'][0]['tax']);
+    foreach ($fallbackRequest['items'] as $index => $line) {
+        unset($fallbackRequest['items'][$index]['tax']);
+    }
     [$fallbackStatus, $fallbackResponse, $fallbackAuth, $fallbackVersion] = holded_try_create_document($apiKey, $docType, $fallbackRequest);
     if ($fallbackStatus >= 200 && $fallbackStatus < 300) {
         $status = $fallbackStatus;
