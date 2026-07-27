@@ -32,10 +32,44 @@ function holded_timestamp(?string $date): int
     return $timestamp ?: (strtotime('today') ?: time());
 }
 
-function holded_tax_value(mixed $value): int
+function holded_tax_value(mixed $value): string
 {
     $tax = strtoupper(trim((string) $value));
-    return str_contains($tax, '21') ? 21 : 0;
+    return str_contains($tax, '21') ? 's_iva_21' : 's_iva_0';
+}
+
+function holded_safe_error(mixed $decoded, string $raw): string
+{
+    $candidates = [];
+    if (is_array($decoded)) {
+        foreach (['error', 'message', 'msg', 'detail', 'description'] as $key) {
+            if (isset($decoded[$key]) && is_scalar($decoded[$key])) {
+                $candidates[] = (string) $decoded[$key];
+            }
+        }
+        if (isset($decoded['errors']) && is_array($decoded['errors'])) {
+            foreach ($decoded['errors'] as $error) {
+                if (is_scalar($error)) {
+                    $candidates[] = (string) $error;
+                } elseif (is_array($error)) {
+                    foreach (['message', 'msg', 'detail'] as $key) {
+                        if (isset($error[$key]) && is_scalar($error[$key])) {
+                            $candidates[] = (string) $error[$key];
+                        }
+                    }
+                }
+            }
+        }
+    }
+    if (!$candidates) {
+        $plain = trim(strip_tags($raw));
+        if ($plain !== '') {
+            $candidates[] = $plain;
+        }
+    }
+    $text = preg_replace('/\s+/', ' ', implode(' ', $candidates));
+    $text = preg_replace('/sk-[A-Za-z0-9_\-]+/', '[clave oculta]', (string) $text);
+    return mb_substr(trim((string) $text), 0, 220);
 }
 
 $items = [];
@@ -126,7 +160,11 @@ if ($status < 200 || $status >= 300) {
     } elseif ($status >= 500) {
         $safeMessage = 'Holded no está disponible ahora mismo.';
     }
-    respond(['error' => $safeMessage, 'holdedStatus' => 'HTTP ' . $status], 502);
+    respond([
+        'error' => $safeMessage,
+        'holdedStatus' => 'HTTP ' . $status,
+        'holdedReason' => holded_safe_error($decoded, (string) $response),
+    ], 502);
 }
 
 if (!is_array($decoded)) {

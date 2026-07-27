@@ -2122,7 +2122,7 @@ function Facturacion({openCase,notify,invoices,cases,warehouseEntries=[],clients
       updateInvoice({...prepared,estado:'Enviado a Holded',holdedStatus:result.holdedStatus||'Proforma creada',holdedDocType:result.docType||'proform',holdedId:result.holdedId||'',holdedNumber:result.holdedNumber||'',holdedAt:new Date().toISOString()});
       notify(result.holdedNumber?`Proforma creada en Holded: ${result.holdedNumber}`:'Proforma creada en Holded');
     })
-    .catch(reason=>notify([reason.message,reason.body?.holdedStatus].filter(Boolean).join(' · ')))
+    .catch(reason=>notify([reason.message,reason.body?.holdedStatus,reason.body?.holdedReason].filter(Boolean).join(' · ')))
     .finally(()=>setSendingHolded(''));
   };
   return <>
