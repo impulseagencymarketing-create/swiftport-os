@@ -1341,10 +1341,10 @@ function App({auth,finance,onFinanceChange,onLogout}){
     const reopened=steps.find(step=>step.key===stepKey);
     const progress=Math.round(steps.filter(step=>flow[step.key]).length/steps.length*100);
     const now=new Date();
-    const timelineEntry={id:`UNDO-${id}-${stepKey}-${Date.now()}`,fecha:now.toLocaleDateString('es-ES'),hora:now.toLocaleTimeString('es-ES',{hour:'2-digit',minute:'2-digit'}),titulo:`Paso reabierto: ${reopened.title}`,detalle:'El conductor deshizo la confirmación para corregir o repetir este paso',actor:visibleUser.fullName,estado:'done'};
-    const nextCases=cases.map(item=>item.id===id?normalizeMerchandise({...item,operationalFlow:flow,progreso:progress,siguiente:reopened.next,estado:'En curso',recepciones:stepKey==='cargo'?(item.recepciones||[]).filter(reception=>reception.source!=='driver-flow'):item.recepciones,documentacionMercancia:stepKey==='delivery'?{...item.documentacionMercancia,podDisponible:false,podArchivo:null,podArchivos:[],fotosEntrega:[]}:item.documentacionMercancia,timelineCustom:[timelineEntry,...(item.timelineCustom||[])]}):item);
+    const timelineEntry={id:`UNDO-${id}-${stepKey}-${Date.now()}`,fecha:now.toLocaleDateString('es-ES'),hora:now.toLocaleTimeString('es-ES',{hour:'2-digit',minute:'2-digit'}),titulo:`Paso reabierto: ${reopened.title}`,detalle:'El conductor deshizo la confirmación para corregir o repetir este paso. Las fotos, PODs y documentos existentes se conservan.',actor:visibleUser.fullName,estado:'done'};
+    const nextCases=cases.map(item=>item.id===id?normalizeMerchandise({...item,operationalFlow:flow,progreso:progress,siguiente:reopened.next,estado:'En curso',recepciones:item.recepciones,documentacionMercancia:item.documentacionMercancia,timelineCustom:[timelineEntry,...(item.timelineCustom||[])]}):item);
     const nextTransports=stepKey==='delivery'?transports.map(item=>item.expediente===id?{...item,estado:item.conductor&&item.conductor!=='Sin asignar'?'Asignado':'Sin asignar'}:item):transports;
-    const nextWarehouse=stepKey==='delivery'?warehouseEntries.map(item=>item.expediente===id?{...item,estado:'En stock',archivado:false,salida:null}:item):stepKey==='cargo'?warehouseEntries.filter(item=>!(item.expediente===id&&item.source==='driver-flow')):warehouseEntries;
+    const nextWarehouse=stepKey==='delivery'?warehouseEntries.map(item=>item.expediente===id?{...item,estado:'En stock',archivado:false,salida:null}:item):warehouseEntries;
     setCases(nextCases);setTransports(nextTransports);setWarehouseEntries(nextWarehouse);
     saveOperational(nextCases,nextTransports,nextWarehouse);
     notify(`${reopened.title} reabierto`);
