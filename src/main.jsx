@@ -927,6 +927,7 @@ function App({auth,finance,onFinanceChange,onLogout}){
   const [notificationLog,setNotificationLog]=useState([]);
   const [deliveryPopup,setDeliveryPopup]=useState(null);
   const [acknowledgedDeliveryAlerts,setAcknowledgedDeliveryAlerts]=useState({});
+  const [acknowledgedBillingAlerts,setAcknowledgedBillingAlerts]=useState({});
   const casesWithFinance=useMemo(()=>cases.map(item=>({...item,importe:finance.caseAmounts[item.id]||0})),[cases,finance.caseAmounts]);
   const selected=casesWithFinance.find(item=>item.id===selectedId)||casesWithFinance[0];
   const notify=message=>{setToast(message);window.clearTimeout(window.__swiftportToast);window.__swiftportToast=window.setTimeout(()=>setToast(''),2600)};
@@ -934,6 +935,7 @@ function App({auth,finance,onFinanceChange,onLogout}){
   useEffect(()=>{try{localStorage.removeItem(`swiftport-driver-alerts-${user.id}`)}catch{}},[user.id]);
   useEffect(()=>{try{setNotificationLog(JSON.parse(localStorage.getItem(`swiftport-notification-log-${user.id}`)||'[]')||[])}catch{setNotificationLog([])}},[user.id]);
   useEffect(()=>{try{setAcknowledgedDeliveryAlerts(JSON.parse(localStorage.getItem(`swiftport-delivery-alert-ack-${user.id}`)||'{}')||{})}catch{setAcknowledgedDeliveryAlerts({})}},[user.id]);
+  useEffect(()=>{try{setAcknowledgedBillingAlerts(JSON.parse(localStorage.getItem(`swiftport-billing-alert-ack-${user.id}`)||'{}')||{})}catch{setAcknowledgedBillingAlerts({})}},[user.id]);
   useEffect(()=>{const timer=window.setInterval(()=>setAlertTick(Date.now()),300000);return()=>window.clearInterval(timer)},[]);
   const loadTeam=()=>api('/api/users/directory.php').then(result=>setTeam(result.users)).catch(reason=>notify(reason.message));
   const loadOperational=()=>api('/api/operational.php').then(result=>{
@@ -984,6 +986,9 @@ function App({auth,finance,onFinanceChange,onLogout}){
   },[cases,calendarEvents,operationalLoaded]);
   const rawDeliveryAlerts=useMemo(()=>deliveryAlertsForSchedule(calendarEvents,cases,visibleUser,new Date(alertTick)),[calendarEvents,cases,visibleUser,alertTick]);
   const deliveryAlerts=useMemo(()=>rawDeliveryAlerts.filter(alert=>!acknowledgedDeliveryAlerts[alert.key]),[rawDeliveryAlerts,acknowledgedDeliveryAlerts]);
+  const rawBillingAlerts=useMemo(()=>billingAlertsForCases(casesWithFinance,finance.invoices,visibleUser,new Date(alertTick)),[casesWithFinance,finance.invoices,visibleUser,alertTick]);
+  const billingAlerts=useMemo(()=>rawBillingAlerts.filter(alert=>!acknowledgedBillingAlerts[alert.key]),[rawBillingAlerts,acknowledgedBillingAlerts]);
+  const activeNotifications=useMemo(()=>[...deliveryAlerts,...billingAlerts].sort((first,second)=>(first.moment?.getTime?.()||0)-(second.moment?.getTime?.()||0)),[deliveryAlerts,billingAlerts]);
   const acknowledgeDeliveryAlert=alert=>{
     if(!alert?.key)return;
     setAcknowledgedDeliveryAlerts(previous=>{
@@ -993,6 +998,16 @@ function App({auth,finance,onFinanceChange,onLogout}){
     });
     setDeliveryPopup(current=>current?.key===alert.key?null:current);
   };
+  const acknowledgeBillingAlert=alert=>{
+    if(!alert?.key)return;
+    setAcknowledgedBillingAlerts(previous=>{
+      const next={...previous,[alert.key]:new Date().toISOString()};
+      try{localStorage.setItem(`swiftport-billing-alert-ack-${user.id}`,JSON.stringify(next))}catch{}
+      return next;
+    });
+    setDeliveryPopup(current=>current?.key===alert.key?null:current);
+  };
+  const acknowledgeOperationalAlert=alert=>alert?.type==='billing'?acknowledgeBillingAlert(alert):acknowledgeDeliveryAlert(alert);
   useEffect(()=>{
     if(!operationalLoaded||!deliveryAlerts.length)return;
     const storageKey=`swiftport-delivery-alerts-${user.id}`;
@@ -1016,6 +1031,29 @@ function App({auth,finance,onFinanceChange,onLogout}){
       fresh.forEach(alert=>showDeviceNotification('Swiftport entrega',alert.message,alert.key).catch(()=>{}));
     }
   },[deliveryAlerts,operationalLoaded,user.id]);
+  useEffect(()=>{
+    if(!operationalLoaded||!billingAlerts.length)return;
+    const storageKey=`swiftport-billing-alerts-${user.id}`;
+    let sent={};
+    try{sent=JSON.parse(localStorage.getItem(storageKey)||'{}')||{}}catch{sent={}}
+    const now=new Date();
+    const fresh=billingAlerts.filter(alert=>{
+      const previous=sent[alert.key]?new Date(sent[alert.key]).getTime():0;
+      return !previous||now.getTime()-previous>=BILLING_ALERT_REPEAT_MS;
+    }).slice(0,4);
+    if(!fresh.length)return;
+    const wasAlreadySent=Object.fromEntries(fresh.map(alert=>[alert.key,Boolean(sent[alert.key])]));
+    fresh.forEach(alert=>{sent[alert.key]=now.toISOString()});
+    try{localStorage.setItem(storageKey,JSON.stringify(sent))}catch{}
+    const entries=fresh.map(alert=>({id:`${alert.key}-${now.getTime()}`,alertKey:alert.key,type:'billing',title:wasAlreadySent[alert.key]?'Recordatorio facturación':'Listo para facturar',message:alert.message,createdAt:now.toISOString(),caseId:alert.case?.id||'',vessel:alert.case?.buque||'',rule:alert.rule?.label||''}));
+    setNotificationLog(previous=>{const next=[...entries,...previous].slice(0,100);try{localStorage.setItem(`swiftport-notification-log-${user.id}`,JSON.stringify(next))}catch{}return next});
+    setDeliveryPopup(fresh[0]);
+    if(localStorage.getItem('swiftport-alert-sound')!=='0')playAlertSound().catch(()=>{});
+    notify(fresh.length===1?fresh[0].message:`${fresh.length} expedientes listos para facturar.`);
+    if(localStorage.getItem('swiftport-device-alerts')==='1'){
+      fresh.forEach(alert=>showDeviceNotification('Swiftport facturación',alert.message,alert.key).catch(()=>{}));
+    }
+  },[billingAlerts,operationalLoaded,user.id]);
   const persistOperational=(nextCases=cases,nextTransports=transports,nextWarehouse=warehouseEntries,nextCustoms=customs,nextCalendar=calendarEvents,nextProviders=providers,nextVessels=vessels,nextDeletedVesselKeys=deletedVesselKeys)=>auth.demo?Promise.resolve({ok:true}):api('/api/operational.php',{method:'PUT',headers:{'X-CSRF-Token':auth.csrfToken},body:JSON.stringify({data:{cases:nextCases,transports:nextTransports,warehouseEntries:nextWarehouse,customs:nextCustoms,calendarEvents:nextCalendar,providers:nextProviders,vessels:nextVessels,deletedVesselKeys:nextDeletedVesselKeys}})});
   const saveOperational=(...args)=>persistOperational(...args).catch(reason=>notify(reason.message));
   const operationalTeam=useMemo(()=>team.filter(member=>hasRole(member,'operations')||hasRole(member,'driver')),[team]);
@@ -1435,7 +1473,7 @@ No se borrarán documentos ni fotos. El expediente volverá a este punto para co
   const assignedAlerts=(hasRole(effectiveRoles,'operations')||hasRole(effectiveRoles,'driver'))
     ? calendarEvents.filter(event=>samePerson(event.asignado,visibleUser.fullName)&&cases.find(item=>item.id===event.expediente)?.estado!=='Completado')
     : calendarEvents.filter(event=>!event.asignado||event.asignado==='Sin asignar');
-  const notificationCount=assignedAlerts.length+deliveryAlerts.length;
+  const notificationCount=assignedAlerts.length+activeNotifications.length;
   const clearNotificationLog=()=>{setNotificationLog([]);try{localStorage.removeItem(`swiftport-notification-log-${user.id}`)}catch{}};
   return <div className="shell">
     <Sidebar tab={tab} open={menuOpen} navigate={navigate} close={()=>setMenuOpen(false)} nav={availableNav} user={visibleUser} onLogout={onLogout}/>
@@ -1469,14 +1507,14 @@ No se borrarán documentos ni fotos. El expediente volverá a este punto para co
     </main>
     <MobileNav tab={tab} navigate={navigate} more={()=>setMenuOpen(true)} nav={availableNav}/>
     {newOpen&&<NewCaseModal clientOptions={clientOptions} vessels={vessels} team={operationalTeam} close={()=>setNewOpen(false)} submit={createCase}/>}
-    {notificationOpen&&<NotificationDrawer alerts={deliveryAlerts} history={notificationLog} acknowledge={acknowledgeDeliveryAlert} close={()=>setNotificationOpen(false)} clear={clearNotificationLog} openCalendar={()=>{setNotificationOpen(false);navigate('calendario')}}/>}
-    {deliveryPopup&&<DeliveryPopup alert={deliveryPopup} close={()=>acknowledgeDeliveryAlert(deliveryPopup)} openHistory={()=>{setDeliveryPopup(null);setNotificationOpen(true)}}/>}
+    {notificationOpen&&<NotificationDrawer alerts={activeNotifications} history={notificationLog} acknowledge={acknowledgeOperationalAlert} close={()=>setNotificationOpen(false)} clear={clearNotificationLog} openCalendar={()=>{setNotificationOpen(false);navigate('calendario')}} openBilling={()=>{setNotificationOpen(false);navigate('facturacion')}}/>}
+    {deliveryPopup&&<DeliveryPopup alert={deliveryPopup} close={()=>acknowledgeOperationalAlert(deliveryPopup)} openHistory={()=>{setDeliveryPopup(null);setNotificationOpen(true)}}/>}
     {toast&&<div className="toast" role="status"><CheckCircle2/>{toast}</div>}
   </div>;
 }
 
 const initials=name=>name.split(/\s+/).filter(Boolean).map(word=>word[0]).slice(0,2).join('').toUpperCase();
-function NotificationDrawer({alerts=[],history=[],acknowledge,close,clear,openCalendar}){
+function NotificationDrawer({alerts=[],history=[],acknowledge,close,clear,openCalendar,openBilling}){
   const formatDate=value=>value?new Date(value).toLocaleString('es-ES',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}):'Ahora';
   return <>
     <button className="notification-backdrop" aria-label="Cerrar notificaciones" onClick={close}/>
@@ -1487,14 +1525,15 @@ function NotificationDrawer({alerts=[],history=[],acknowledge,close,clear,openCa
       </header>
       <section className="notification-drawer-actions">
         <button className="button secondary" onClick={openCalendar}><CalendarDays/> Abrir calendario</button>
+        <button className="button secondary" onClick={openBilling}><ReceiptText/> Abrir facturación</button>
         <button className="button secondary" onClick={()=>{try{localStorage.setItem('swiftport-alert-sound','1')}catch{};playAlertSound().catch(()=>{})}}><Bell/> Probar sonido</button>
         <button className="button tertiary" onClick={clear}>Limpiar historial</button>
       </section>
       <section>
         <h3>Ahora requiere atención</h3>
-        {alerts.length?alerts.map(alert=><article className="notification-card active" key={alert.key}>
-          <span><Timer/></span>
-          <div><b>{alert.case?.buque||alert.event?.titulo||'Entrega'}</b><p>{alert.message}</p><small>{alert.rule?.label||'Aviso operativo'}  -  repetirá hasta confirmar</small><button className="button secondary notification-ack" onClick={()=>acknowledge?.(alert)}>Entendido</button></div>
+        {alerts.length?alerts.map(alert=><article className={`notification-card active ${alert.type==='billing'?'billing':''}`} key={alert.key}>
+          <span>{alert.type==='billing'?<ReceiptText/>:<Timer/>}</span>
+          <div><b>{alert.type==='billing'?'Facturación':alert.case?.buque||alert.event?.titulo||'Entrega'}</b><p>{alert.message}</p><small>{alert.rule?.label||'Aviso operativo'}  -  repetirá hasta gestionar</small><button className="button secondary notification-ack" onClick={()=>acknowledge?.(alert)}>Entendido</button></div>
         </article>):<p className="notification-empty">No hay avisos activos ahora mismo.</p>}
       </section>
       <section>
@@ -1512,7 +1551,7 @@ function DeliveryPopup({alert,close,openHistory}){
   return <div className="delivery-popup" role="alertdialog" aria-label="Aviso de entrega">
     <div className="delivery-popup-icon"><Bell/></div>
     <div>
-      <small>{alert.rule?.followUp?'Seguimiento operativo':'Aviso de entrega'}</small>
+      <small>{alert.type==='billing'?'Facturación pendiente':alert.rule?.followUp?'Seguimiento operativo':'Aviso de entrega'}</small>
       <b>{alert.case?.buque||alert.event?.titulo||'Entrega programada'}</b>
       <p>{alert.message}</p>
       <div className="delivery-popup-actions">
@@ -1616,12 +1655,35 @@ const DELIVERY_ALERT_RULES=[
   {key:'2d',label:'faltan 2 dias',ms:48*60*60*1000}
 ];
 const TRANSPORT_FOLLOWUP_INTERVAL_MS=30*60*1000;
+const BILLING_ALERT_REPEAT_MS=60*60*1000;
 const deliveryAlertRepeatMs=alert=>{
   const key=alert?.rule?.key;
   if(key==='active30')return TRANSPORT_FOLLOWUP_INTERVAL_MS;
   if(key==='2h')return 15*60*1000;
   if(key==='8h')return 30*60*1000;
   return 60*60*1000;
+};
+const billingAlertVisibleToUser=user=>{
+  const roles=rolesOf(user);
+  return hasRole(roles,'admin')||hasRole(roles,'finance');
+};
+const billingInvoiceClosed=invoice=>invoice&&['Enviado a Holded','Facturado','Cobrado'].includes(invoice.estado);
+const billingAlertsForCases=(cases=[],invoices=[],user,now=new Date())=>{
+  if(!billingAlertVisibleToUser(user))return[];
+  const bucket=Math.floor(now.getTime()/BILLING_ALERT_REPEAT_MS);
+  return (cases||[]).flatMap(item=>{
+    const flow=operationFlow(item);
+    const ready=Boolean(flow.billingReady||item.progreso>=100||item.estado==='Completado');
+    if(!ready)return[];
+    const invoice=(invoices||[]).find(entry=>entry.expediente===item.id);
+    if(billingInvoiceClosed(invoice))return[];
+    const amount=Number(invoice?.importe||item.importe||0);
+    const status=invoice?.estado||'sin borrador';
+    const vessel=String(item.buque||'BUQUE').toUpperCase();
+    const port=String(item.puerto||'PUERTO POR CONFIRMAR').toUpperCase();
+    const message=`Facturación pendiente: ${vessel} (${item.id}) está listo para facturar en ${port}. Estado: ${status}${amount?` · Importe aprox. ${moneyExact(amount)}`:''}.`;
+    return [{key:`${item.id}-billing-${bucket}`,type:'billing',case:item,invoice,rule:{key:'billing60',label:'facturación pendiente cada 60 min'},message,moment:now}];
+  });
 };
 const deliveryEventMoment=event=>{
   const date=String(event?.fecha||'').slice(0,10);
