@@ -139,9 +139,11 @@
 .calendar-unscheduled-card .calendar-port-name{font-size:10px;line-height:1.1}
 .calendar-unscheduled-card .calendar-service,.calendar-unscheduled-card .calendar-provisional{font-size:7px}
 .calendar-unscheduled-card .calendar-port-call{display:none}
-.calendar-event-delete{position:absolute;right:4px;top:4px;z-index:5;display:grid;place-items:center;width:18px;height:18px;border:1px solid rgba(221,47,74,.25);border-radius:6px;background:rgba(255,255,255,.88);color:#dd2f4a;opacity:0;transition:opacity .15s}
-.calendar-event:hover .calendar-event-delete,.calendar-unscheduled-card:hover .calendar-event-delete{opacity:1}
-.calendar-event-delete svg{width:11px}
+.calendar-event-delete,.calendar-event-edit{position:absolute;top:4px;z-index:5;display:grid;place-items:center;width:18px;height:18px;border-radius:6px;background:rgba(255,255,255,.88);opacity:0;transition:opacity .15s}
+.calendar-event-delete{right:4px;border:1px solid rgba(221,47,74,.25);color:#dd2f4a}
+.calendar-event-edit{right:27px;border:1px solid rgba(18,104,220,.25);color:#1268dc}
+.calendar-event:hover .calendar-event-delete,.calendar-unscheduled-card:hover .calendar-event-delete,.calendar-event:hover .calendar-event-edit,.calendar-unscheduled-card:hover .calendar-event-edit{opacity:1}
+.calendar-event-delete svg,.calendar-event-edit svg{width:11px}
 .calendar-event{max-height:100%;contain:layout paint}
 .calendar-event,.calendar-unscheduled-card{cursor:grab;touch-action:none}
 .calendar-event.dragging,.calendar-unscheduled-card.dragging{opacity:.45;filter:saturate(.8);cursor:grabbing;pointer-events:none}
@@ -296,9 +298,10 @@
 .calendar-event.is-overlap .calendar-driver-quick select{height:31px!important;font-size:11px!important}
 .calendar-unscheduled-card{min-height:132px!important;border-radius:10px!important}
 .calendar-unscheduled-card .calendar-driver-quick{padding:7px 9px 9px!important}
-.calendar-event-delete{opacity:.75;width:24px;height:24px;border-radius:8px}
-.calendar-event-delete svg{width:13px}
-.calendar-event:hover .calendar-event-delete,.calendar-unscheduled-card:hover .calendar-event-delete{opacity:1}
+.calendar-event-delete,.calendar-event-edit{opacity:.75;width:24px;height:24px;border-radius:8px}
+.calendar-event-delete{right:4px}.calendar-event-edit{right:32px}
+.calendar-event-delete svg,.calendar-event-edit svg{width:13px}
+.calendar-event:hover .calendar-event-delete,.calendar-unscheduled-card:hover .calendar-event-delete,.calendar-event:hover .calendar-event-edit,.calendar-unscheduled-card:hover .calendar-event-edit{opacity:1}
 @media(max-width:900px){.calendar-head,.calendar-body,.calendar-unscheduled-row{grid-template-columns:58px repeat(7,210px);min-width:1528px}.calendar-scroll{max-height:calc(100vh - 215px)}.calendar-event .calendar-vessel-name{font-size:13px!important}.calendar-driver-quick select{height:36px!important;font-size:12px!important}}
 .calendar-event{min-height:124px!important}
 .calendar-event .calendar-event-open{padding-bottom:52px!important}
