@@ -1615,8 +1615,10 @@ const DELIVERY_ALERT_RULES=[
   {key:'1d',label:'falta 1 dia',ms:24*60*60*1000},
   {key:'2d',label:'faltan 2 dias',ms:48*60*60*1000}
 ];
+const TRANSPORT_FOLLOWUP_INTERVAL_MS=30*60*1000;
 const deliveryAlertRepeatMs=alert=>{
   const key=alert?.rule?.key;
+  if(key==='active30')return TRANSPORT_FOLLOWUP_INTERVAL_MS;
   if(key==='2h')return 15*60*1000;
   if(key==='8h')return 30*60*1000;
   return 60*60*1000;
@@ -1645,14 +1647,21 @@ const deliveryAlertsForSchedule=(events=[],cases=[],user,now=new Date())=>(event
     const moment=deliveryEventMoment(event);
     if(!moment)return[];
     const diff=moment.getTime()-now.getTime();
-    if(diff<=0)return[];
-    const rule=DELIVERY_ALERT_RULES.find(item=>diff<=item.ms);
-    if(!rule)return[];
     const vessel=String(related?.buque||event.titulo||'BUQUE').toUpperCase();
     const port=String(related?.puerto||event.destino||event.puerto||'PUERTO POR CONFIRMAR').toUpperCase();
     const driver=event.asignado&&event.asignado!=='Sin asignar'?event.asignado:'sin conductor asignado';
     const when=moment.toLocaleString('es-ES',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
     const timeNote=calendarHasValidStart(event)?when:`${when} aprox. (hora pendiente)`;
+    if(diff<=0&&calendarHasValidStart(event)){
+      const elapsed=Math.max(0,now.getTime()-moment.getTime());
+      const bucket=Math.floor(elapsed/TRANSPORT_FOLLOWUP_INTERVAL_MS);
+      const rule={key:'active30',label:'seguimiento activo cada 30 min'};
+      const message=`Seguimiento activo: ${vessel} tenía transporte programado para ${timeNote} en ${port}. Confirma con ${driver} que está coordinado o registra el avance.`;
+      return [{key:`${event.id||event.transporte||event.expediente}-${rule.key}-${moment.toISOString()}-${bucket}`,event,case:related,rule,message,moment}];
+    }
+    if(diff<=0)return[];
+    const rule=DELIVERY_ALERT_RULES.find(item=>diff<=item.ms);
+    if(!rule)return[];
     const message=rule.followUp
       ? `Seguimiento: ${vessel} se entrega en 2 horas (${timeNote}). Revisa con ${driver}.`
       : `${vessel}: ${rule.label} para la entrega (${timeNote}) en ${port}. Conductor: ${driver}.`;
