@@ -25,7 +25,6 @@ if (!is_array($clientProfile)) {
 }
 $clientFiscalName = trim((string) ($clientProfile['fiscalName'] ?? $clientProfile['razonSocial'] ?? $clientName));
 $clientTaxId = strtoupper(trim((string) ($clientProfile['taxId'] ?? $clientProfile['nif'] ?? '')));
-$clientAddress = trim((string) ($clientProfile['direccion'] ?? ''));
 $concept = trim((string) ($invoice['concepto'] ?? ''));
 $lines = $invoice['lines'] ?? [];
 if ($clientName === '' || $concept === '' || !is_array($lines) || count($lines) === 0) {
@@ -146,7 +145,6 @@ function holded_line_tax(mixed $tax): string
 }
 
 $total = (float) ($invoice['importe'] ?? 0);
-$detailLines = [];
 $holdedItems = [];
 foreach ($lines as $line) {
     if (!is_array($line)) {
@@ -162,8 +160,6 @@ foreach ($lines as $line) {
         $total += $units * $price;
     }
     $detail = trim((string) ($line['detail'] ?? ''));
-    $amount = $price > 0 ? ' - ' . number_format($price * max($units, 1), 2, ',', '.') . ' EUR' : '';
-    $detailLines[] = trim($name . ($detail !== '' ? ' - ' . $detail : '') . $amount);
     $item = [
         'name' => $name,
         'desc' => $detail,
@@ -177,27 +173,23 @@ foreach ($lines as $line) {
     $holdedItems[] = $item;
 }
 
-if (!$detailLines || !$holdedItems) {
+if (!$holdedItems) {
     respond(['error' => 'No hay concepto válido para enviar a Holded.'], 422);
 }
 
 $docType = 'proform';
-$simpleDescription = trim(implode("\n", array_slice($detailLines, 0, 20)));
 $notes = trim((string) ($invoice['observaciones'] ?? ''));
 $request = [
     'contactName' => $clientFiscalName ?: $clientName,
     'date' => holded_timestamp(date('Y-m-d')),
     'dueDate' => holded_timestamp((string) ($invoice['vencimiento'] ?? '')),
     'desc' => $concept,
-    'notes' => trim($notes . "\n\nDetalle operativo Swiftport:\n" . $simpleDescription),
+    'notes' => $notes,
     'currency' => 'EUR',
     'items' => $holdedItems,
 ];
 if ($clientTaxId !== '') {
     $request['contactCode'] = $clientTaxId;
-}
-if ($clientAddress !== '') {
-    $request['contactAddress'] = $clientAddress;
 }
 
 [$status, $response, $usedAuth, $usedVersion] = holded_try_create_document($apiKey, $docType, $request);
