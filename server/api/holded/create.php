@@ -32,12 +32,6 @@ function holded_timestamp(?string $date): int
     return $timestamp ?: (strtotime('today') ?: time());
 }
 
-function holded_tax_value(mixed $value): string
-{
-    $tax = strtoupper(trim((string) $value));
-    return str_contains($tax, '21') ? 's_iva_21' : 's_iva_0';
-}
-
 function holded_safe_error(mixed $decoded, string $raw): string
 {
     $candidates = [];
@@ -69,46 +63,8 @@ function holded_safe_error(mixed $decoded, string $raw): string
     }
     $text = preg_replace('/\s+/', ' ', implode(' ', $candidates));
     $text = preg_replace('/sk-[A-Za-z0-9_\-]+/', '[clave oculta]', (string) $text);
-    return mb_substr(trim((string) $text), 0, 220);
+    return substr(trim((string) $text), 0, 220);
 }
-
-$items = [];
-foreach ($lines as $line) {
-    if (!is_array($line)) {
-        continue;
-    }
-    $name = trim((string) ($line['item'] ?? ''));
-    if ($name === '') {
-        continue;
-    }
-    $units = max(0.0, (float) ($line['units'] ?? 1));
-    $price = max(0.0, (float) ($line['price'] ?? 0));
-    if ($units <= 0) {
-        continue;
-    }
-    $items[] = [
-        'name' => $name,
-        'desc' => trim((string) ($line['detail'] ?? '')),
-        'units' => $units,
-        'subtotal' => $price,
-        'tax' => holded_tax_value($line['tax'] ?? '0%'),
-    ];
-}
-
-if (!$items) {
-    respond(['error' => 'No hay líneas válidas para enviar a Holded.'], 422);
-}
-
-$docType = 'proform';
-$request = [
-    'contactName' => $clientName,
-    'date' => holded_timestamp(date('Y-m-d')),
-    'dueDate' => holded_timestamp((string) ($invoice['vencimiento'] ?? '')),
-    'desc' => $concept,
-    'notes' => trim((string) ($invoice['observaciones'] ?? '')),
-    'currency' => 'EUR',
-    'items' => $items,
-];
 
 function holded_post_document(string $apiKey, string $docType, array $request): array
 {
@@ -130,19 +86,58 @@ function holded_post_document(string $apiKey, string $docType, array $request): 
     return [$status, $response];
 }
 
+$total = (float) ($invoice['importe'] ?? 0);
+$detailLines = [];
+foreach ($lines as $line) {
+    if (!is_array($line)) {
+        continue;
+    }
+    $name = trim((string) ($line['item'] ?? ''));
+    if ($name === '') {
+        continue;
+    }
+    $units = max(0.0, (float) ($line['units'] ?? 1));
+    $price = max(0.0, (float) ($line['price'] ?? 0));
+    if ($total <= 0 && $units > 0) {
+        $total += $units * $price;
+    }
+    $detail = trim((string) ($line['detail'] ?? ''));
+    $amount = $price > 0 ? ' - ' . number_format($price * max($units, 1), 2, ',', '.') . ' EUR' : '';
+    $detailLines[] = trim($name . ($detail !== '' ? ' - ' . $detail : '') . $amount);
+}
+
+if (!$detailLines) {
+    respond(['error' => 'No hay concepto válido para enviar a Holded.'], 422);
+}
+
+$docType = 'proform';
+$simpleDescription = trim(implode("\n", array_slice($detailLines, 0, 20)));
+$notes = trim((string) ($invoice['observaciones'] ?? ''));
+$request = [
+    'contactName' => $clientName,
+    'date' => holded_timestamp(date('Y-m-d')),
+    'dueDate' => holded_timestamp((string) ($invoice['vencimiento'] ?? '')),
+    'desc' => $concept,
+    'notes' => trim($notes . "\n\nDetalle operativo Swiftport:\n" . $simpleDescription),
+    'currency' => 'EUR',
+    'items' => [[
+        'name' => $concept,
+        'desc' => $simpleDescription,
+        'units' => 1,
+        'subtotal' => max(0.0, $total),
+        'tax' => 's_iva_0',
+    ]],
+];
+
 [$status, $response] = holded_post_document($apiKey, $docType, $request);
 
 if ($status >= 400 && $status < 500) {
-    $billableItems = array_values(array_filter($items, static fn(array $item): bool => ((float) ($item['subtotal'] ?? 0)) > 0 && ((float) ($item['units'] ?? 0)) > 0));
-    if ($billableItems && count($billableItems) < count($items)) {
-        $fallbackRequest = $request;
-        $fallbackRequest['notes'] = trim(($request['notes'] ? $request['notes'] . "\n\n" : '') . 'Detalle operativo en Swiftport: ' . $concept);
-        $fallbackRequest['items'] = $billableItems;
-        [$fallbackStatus, $fallbackResponse] = holded_post_document($apiKey, $docType, $fallbackRequest);
-        if ($fallbackStatus >= 200 && $fallbackStatus < 300) {
-            $status = $fallbackStatus;
-            $response = $fallbackResponse;
-        }
+    $fallbackRequest = $request;
+    unset($fallbackRequest['items'][0]['tax']);
+    [$fallbackStatus, $fallbackResponse] = holded_post_document($apiKey, $docType, $fallbackRequest);
+    if ($fallbackStatus >= 200 && $fallbackStatus < 300) {
+        $status = $fallbackStatus;
+        $response = $fallbackResponse;
     }
 }
 
@@ -185,5 +180,5 @@ respond([
     'docType' => $docType,
     'holdedId' => $holdedId,
     'holdedNumber' => $holdedNumber,
-    'holdedStatus' => 'Proforma creada',
+    'holdedStatus' => 'Proforma simple creada',
 ]);
