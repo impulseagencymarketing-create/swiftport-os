@@ -444,7 +444,7 @@ const invoiceCargoSummary=(item,warehouseEntries=[])=>{
   if(item.resumenMercancia)return String(item.resumenMercancia).toUpperCase();
   return `${Number(item.bultos)||1} BOX${Number(item.bultos)===1?'':'ES'}${item.peso&&!/pendiente|registrar/i.test(item.peso)?` ${String(item.peso).toUpperCase()}`:''}`;
 };
-const invoiceHeaderTitle=item=>`${item.id} - ${item.buque} - ${formatEtaDate(item.eta)} - ${item.puerto}`;
+const invoiceHeaderTitle=item=>[item.id,item.buque,formatEtaDate(item.eta),item.puerto].filter(Boolean).join(' ').toUpperCase();
 const suggestedTransportPrice=(item,warehouseEntries=[],route='warehouseToVessel')=>{
   const weight=invoiceCargoWeight(item,warehouseEntries);
   if(isLimaniCase(item)){
