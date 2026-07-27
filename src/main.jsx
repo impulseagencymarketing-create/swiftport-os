@@ -544,19 +544,36 @@ async function playAlertSound(){
   const audio=window.__swiftportAudioContext||(window.__swiftportAudioContext=new AudioContext());
   if(audio.state==='suspended')await audio.resume();
   const now=audio.currentTime;
-  const sequence=[{frequency:880,start:0,duration:.14},{frequency:660,start:.18,duration:.18}];
-  sequence.forEach(({frequency,start,duration})=>{
-    const oscillator=audio.createOscillator();
-    const gain=audio.createGain();
-    oscillator.type='sine';
-    oscillator.frequency.setValueAtTime(frequency,now+start);
-    gain.gain.setValueAtTime(0.0001,now+start);
-    gain.gain.exponentialRampToValueAtTime(0.22,now+start+.02);
-    gain.gain.exponentialRampToValueAtTime(0.0001,now+start+duration);
-    oscillator.connect(gain);
-    gain.connect(audio.destination);
-    oscillator.start(now+start);
-    oscillator.stop(now+start+duration+.03);
+  const master=audio.createGain();
+  const filter=audio.createBiquadFilter();
+  const compressor=audio.createDynamicsCompressor();
+  master.gain.setValueAtTime(0.72,now);
+  filter.type='lowpass';
+  filter.frequency.setValueAtTime(520,now);
+  compressor.threshold.setValueAtTime(-18,now);
+  compressor.ratio.setValueAtTime(6,now);
+  compressor.attack.setValueAtTime(.004,now);
+  compressor.release.setValueAtTime(.18,now);
+  master.connect(filter);
+  filter.connect(compressor);
+  compressor.connect(audio.destination);
+  const horns=[{start:0,duration:.62},{start:.78,duration:.78}];
+  horns.forEach(({start,duration})=>{
+    [{frequency:148,type:'sawtooth',level:.44},{frequency:196,type:'sine',level:.34},{frequency:74,type:'sine',level:.24}].forEach(({frequency,type,level})=>{
+      const oscillator=audio.createOscillator();
+      const gain=audio.createGain();
+      oscillator.type=type;
+      oscillator.frequency.setValueAtTime(frequency,now+start);
+      oscillator.frequency.linearRampToValueAtTime(frequency*.96,now+start+duration);
+      gain.gain.setValueAtTime(0.0001,now+start);
+      gain.gain.exponentialRampToValueAtTime(level,now+start+.06);
+      gain.gain.setValueAtTime(level,now+start+Math.max(.08,duration-.18));
+      gain.gain.exponentialRampToValueAtTime(0.0001,now+start+duration);
+      oscillator.connect(gain);
+      gain.connect(master);
+      oscillator.start(now+start);
+      oscillator.stop(now+start+duration+.04);
+    });
   });
   return true;
 }
