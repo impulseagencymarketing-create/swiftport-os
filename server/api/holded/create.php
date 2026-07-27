@@ -47,11 +47,16 @@ foreach ($lines as $line) {
     if ($name === '') {
         continue;
     }
+    $units = max(0.0, (float) ($line['units'] ?? 1));
+    $price = max(0.0, (float) ($line['price'] ?? 0));
+    if ($units <= 0) {
+        continue;
+    }
     $items[] = [
         'name' => $name,
         'desc' => trim((string) ($line['detail'] ?? '')),
-        'units' => max(0.0, (float) ($line['units'] ?? 1)),
-        'subtotal' => max(0.0, (float) ($line['price'] ?? 0)),
+        'units' => $units,
+        'subtotal' => $price,
         'tax' => holded_tax_value($line['tax'] ?? '0%'),
     ];
 }
@@ -67,26 +72,45 @@ $request = [
     'dueDate' => holded_timestamp((string) ($invoice['vencimiento'] ?? '')),
     'desc' => $concept,
     'notes' => trim((string) ($invoice['observaciones'] ?? '')),
-    'currency' => 'eur',
+    'currency' => 'EUR',
     'items' => $items,
 ];
 
-$ch = curl_init('https://api.holded.com/api/invoicing/v1/documents/' . $docType);
-curl_setopt_array($ch, [
-    CURLOPT_POST => true,
-    CURLOPT_RETURNTRANSFER => true,
-    CURLOPT_TIMEOUT => 25,
-    CURLOPT_HTTPHEADER => [
-        'Accept: application/json',
-        'Content-Type: application/json',
-        'key: ' . $apiKey,
-    ],
-    CURLOPT_POSTFIELDS => json_encode($request, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
-]);
+function holded_post_document(string $apiKey, string $docType, array $request): array
+{
+    $ch = curl_init('https://api.holded.com/api/invoicing/v1/documents/' . $docType);
+    curl_setopt_array($ch, [
+        CURLOPT_POST => true,
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_TIMEOUT => 25,
+        CURLOPT_HTTPHEADER => [
+            'Accept: application/json',
+            'Content-Type: application/json',
+            'key: ' . $apiKey,
+        ],
+        CURLOPT_POSTFIELDS => json_encode($request, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+    ]);
+    $response = curl_exec($ch);
+    $status = (int) curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
+    curl_close($ch);
+    return [$status, $response];
+}
 
-$response = curl_exec($ch);
-$status = (int) curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
-curl_close($ch);
+[$status, $response] = holded_post_document($apiKey, $docType, $request);
+
+if ($status >= 400 && $status < 500) {
+    $billableItems = array_values(array_filter($items, static fn(array $item): bool => ((float) ($item['subtotal'] ?? 0)) > 0 && ((float) ($item['units'] ?? 0)) > 0));
+    if ($billableItems && count($billableItems) < count($items)) {
+        $fallbackRequest = $request;
+        $fallbackRequest['notes'] = trim(($request['notes'] ? $request['notes'] . "\n\n" : '') . 'Detalle operativo en Swiftport: ' . $concept);
+        $fallbackRequest['items'] = $billableItems;
+        [$fallbackStatus, $fallbackResponse] = holded_post_document($apiKey, $docType, $fallbackRequest);
+        if ($fallbackStatus >= 200 && $fallbackStatus < 300) {
+            $status = $fallbackStatus;
+            $response = $fallbackResponse;
+        }
+    }
+}
 
 if ($response === false) {
     respond(['error' => 'No se pudo conectar con Holded.'], 502);

@@ -2119,11 +2119,11 @@ function Facturacion({openCase,notify,invoices,cases,warehouseEntries=[],clients
     setSendingHolded(item.id);
     api('/api/holded/create.php',{method:'POST',headers:{'X-CSRF-Token':csrfToken},body:JSON.stringify({invoice:prepared})})
       .then(result=>{
-        updateInvoice({...prepared,estado:'Enviado a Holded',holdedStatus:result.holdedStatus||'Proforma creada',holdedDocType:result.docType||'proform',holdedId:result.holdedId||'',holdedNumber:result.holdedNumber||'',holdedAt:new Date().toISOString()});
-        notify(result.holdedNumber?`Proforma creada en Holded: ${result.holdedNumber}`:'Proforma creada en Holded');
-      })
-      .catch(reason=>notify(reason.message))
-      .finally(()=>setSendingHolded(''));
+      updateInvoice({...prepared,estado:'Enviado a Holded',holdedStatus:result.holdedStatus||'Proforma creada',holdedDocType:result.docType||'proform',holdedId:result.holdedId||'',holdedNumber:result.holdedNumber||'',holdedAt:new Date().toISOString()});
+      notify(result.holdedNumber?`Proforma creada en Holded: ${result.holdedNumber}`:'Proforma creada en Holded');
+    })
+    .catch(reason=>notify([reason.message,reason.body?.holdedStatus].filter(Boolean).join(' · ')))
+    .finally(()=>setSendingHolded(''));
   };
   return <>
     <section className="billing-flow-panel panel"><SectionHeader title="Flujo de facturación" subtitle="Control interno antes de crear la proforma real en Holded"/><div className="billing-flow-steps">{groupedStatus.map((status,index)=><span key={status}><b>{index+1}</b><small>{status}</small></span>)}</div><div className="billing-rules"><div><b>Se puede modificar aquí</b><small>Cliente, concepto, importe, estado y vencimiento.</small></div><div><b>No se modifica aquí</b><small>Buque, mercancía, POD y evidencias: se corrigen desde Expediente.</small></div></div></section>
