@@ -1422,6 +1422,7 @@ function NotificationDrawer({alerts=[],history=[],close,clear,openCalendar}){
       </header>
       <section className="notification-drawer-actions">
         <button className="button secondary" onClick={openCalendar}><CalendarDays/> Abrir calendario</button>
+        <button className="button secondary" onClick={()=>{try{localStorage.setItem('swiftport-alert-sound','1')}catch{};playAlertSound().catch(()=>{})}}><Bell/> Probar sonido</button>
         <button className="button tertiary" onClick={clear}>Limpiar historial</button>
       </section>
       <section>
