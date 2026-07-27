@@ -465,6 +465,28 @@ const suggestedHandlingPrice=(item,warehouseEntries=[])=>{
 };
 const suggestedStoragePrice=(item,warehouseEntries=[])=>isLimaniCase(item)?priceByWeight(invoiceCargoWeight(item,warehouseEntries),LIMANI_BARCELONA_RATES.storage):0;
 const suggestedWaitingPrice=item=>isLimaniCase(item)?LIMANI_BARCELONA_RATES.waitingHour:0;
+const invoiceDetailWeight=detail=>{
+  const matches=[...String(detail||'').matchAll(/(\d+(?:[.,]\d+)?)\s*(?:kg|kgs|kilo|kilos)\b/gi)];
+  return matches.reduce((sum,match)=>sum+Number(String(match[1]).replace(',','.')),0);
+};
+const isStandardInvoiceLine=line=>['ref','reception','handling','storage','transport'].includes(line?.id);
+const repriceLimaniInvoiceLines=(lines,weight,detail)=>{
+  const kilos=Number(weight)||0;
+  return lines.map(line=>{
+    if(!isStandardInvoiceLine(line))return line;
+    const next={...line,detail:line.id==='storage'?line.detail:detail};
+    if(line.id==='ref')return {...next,price:0};
+    if(line.id==='reception')return {...next,price:priceByWeight(kilos,LIMANI_BARCELONA_RATES.reception)};
+    if(line.id==='handling')return {...next,price:kilos>0?LIMANI_BARCELONA_RATES.handlingHour:0};
+    if(line.id==='storage'){
+      const days=Number(line.units)||0;
+      const storageDetail=String(line.detail||'').replace(/\s-\s.*$/,'');
+      return {...next,detail:`${storageDetail||`${days} DAYS`} - ${detail}`,price:priceByWeight(kilos,LIMANI_BARCELONA_RATES.storage)};
+    }
+    if(line.id==='transport')return {...next,price:priceByWeight(kilos,LIMANI_BARCELONA_RATES.warehouseToVessel)};
+    return next;
+  });
+};
 const draftInvoiceFromCase=(item,warehouseEntries=[])=>{
   const cargo=invoiceCargoSummary(item,warehouseEntries);
   const date=formatEtaDate(item.eta);
@@ -2346,7 +2368,18 @@ function InvoiceEditModal({item,cases=[],warehouseEntries=[],clients=[],close,su
     }
     setForm({...form,[name]:value});
   };
-  const updateLine=(index,field,value)=>setForm({...form,lines:form.lines.map((line,lineIndex)=>lineIndex===index?{...line,[field]:value}:line)});
+  const updateLine=(index,field,value)=>{
+    const editedLine=form.lines[index];
+    const updatedLines=form.lines.map((line,lineIndex)=>lineIndex===index?{...line,[field]:value}:line);
+    if(field==='detail'&&isLimaniCase({...relatedCase,cliente:form.cliente})&&isStandardInvoiceLine(editedLine)){
+      const weight=invoiceDetailWeight(value);
+      if(weight>0){
+        setForm({...form,lines:repriceLimaniInvoiceLines(updatedLines,weight,value)});
+        return;
+      }
+    }
+    setForm({...form,lines:updatedLines});
+  };
   const addLine=()=>setForm({...form,lines:[...form.lines,{id:`line-${Date.now()}`,item:'WAITING TIME',detail:'',price:0,units:1,tax:'0%'}]});
   const removeLine=index=>setForm({...form,lines:form.lines.filter((_,lineIndex)=>lineIndex!==index)});
   const total=invoiceTotal(form);
