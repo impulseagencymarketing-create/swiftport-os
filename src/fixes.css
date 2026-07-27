@@ -574,3 +574,32 @@
 .billing-table .table-head,.billing-table .table-row{grid-template-columns:1.05fr .8fr 1.2fr .55fr .75fr 170px}
 .billing-row-actions{display:flex;align-items:center;justify-content:flex-end;gap:8px}
 .billing-row-actions .button.compact{padding:8px 10px;font-size:10px}
+
+.notification-backdrop{position:fixed;inset:0;border:0;background:rgba(8,21,38,.24);z-index:88}
+.notification-drawer{position:fixed;left:254px;top:0;bottom:0;width:min(420px,calc(100vw - 254px));z-index:89;background:#fff;border-right:1px solid var(--line);box-shadow:18px 0 40px rgba(8,26,47,.18);padding:18px;overflow:auto;animation:drawerIn .18s ease-out}
+.notification-drawer header{display:flex;align-items:center;justify-content:space-between;gap:12px;padding-bottom:14px;border-bottom:1px solid var(--line)}
+.notification-drawer header span{display:flex;align-items:center;gap:9px;font:900 16px Manrope,sans-serif;color:var(--ink)}
+.notification-drawer header svg{color:var(--blue)}
+.notification-drawer-actions{display:flex;gap:8px;flex-wrap:wrap;padding:14px 0}
+.notification-drawer h3{margin:16px 0 9px;font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:#71849a}
+.notification-card{display:grid;grid-template-columns:auto 1fr;gap:10px;padding:12px;border:1px solid var(--line);border-radius:13px;background:#fbfcfe;margin-bottom:9px}
+.notification-card.active{border-color:#f0cf91;background:#fff8e8}
+.notification-card>span{display:grid;place-items:center;width:34px;height:34px;border-radius:10px;background:#eef6ff;color:var(--blue)}
+.notification-card.active>span{background:#fff0d2;color:#bd7911}
+.notification-card b,.notification-card p,.notification-card small{display:block}
+.notification-card b{font-size:11px;color:var(--ink)}
+.notification-card p{margin:4px 0;font-size:10px;line-height:1.4;color:#526378}
+.notification-card small{font-size:8px;color:#8795a7;font-weight:800}
+.notification-empty{margin:0 0 10px;padding:13px;border:1px dashed #cbd8e5;border-radius:12px;color:#71849a;font-size:10px;text-align:center}
+.delivery-popup{position:fixed;right:24px;top:112px;z-index:95;display:grid;grid-template-columns:auto minmax(0,1fr);gap:14px;width:min(520px,calc(100vw - 32px));padding:17px;border:1px solid #f0cf91;border-left:5px solid #f59e0b;border-radius:16px;background:#fffaf0;box-shadow:0 22px 55px rgba(8,26,47,.22);animation:popupIn .2s ease-out}
+.delivery-popup-icon{display:grid;place-items:center;width:44px;height:44px;border-radius:14px;background:#fff0d2;color:#bd7911}
+.delivery-popup small{display:block;color:#9b6200;font-size:9px;font-weight:900;text-transform:uppercase;letter-spacing:.08em}
+.delivery-popup b{display:block;margin-top:4px;font:900 16px Manrope,sans-serif;color:#12233d}
+.delivery-popup p{margin:6px 0 13px;color:#526378;font-size:12px;line-height:1.45}
+.delivery-popup-actions{display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap}
+@keyframes drawerIn{from{transform:translateX(-18px);opacity:.4}to{transform:none;opacity:1}}
+@keyframes popupIn{from{transform:translateY(-8px);opacity:.35}to{transform:none;opacity:1}}
+@media(max-width:720px){
+  .notification-drawer{left:0;width:100vw}
+  .delivery-popup{left:12px;right:12px;top:92px;width:auto}
+}

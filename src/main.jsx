@@ -855,11 +855,15 @@ function App({auth,finance,onFinanceChange,onLogout}){
   const [toast,setToast]=useState('');
   const aisAlertSnapshotRef=useRef(null);
   const [alertTick,setAlertTick]=useState(Date.now());
+  const [notificationOpen,setNotificationOpen]=useState(false);
+  const [notificationLog,setNotificationLog]=useState([]);
+  const [deliveryPopup,setDeliveryPopup]=useState(null);
   const casesWithFinance=useMemo(()=>cases.map(item=>({...item,importe:finance.caseAmounts[item.id]||0})),[cases,finance.caseAmounts]);
   const selected=casesWithFinance.find(item=>item.id===selectedId)||casesWithFinance[0];
   const notify=message=>{setToast(message);window.clearTimeout(window.__swiftportToast);window.__swiftportToast=window.setTimeout(()=>setToast(''),2600)};
   const navigate=id=>{setTab(canAccess(effectiveRoles,id)?id:(availableNav[0]?.[0]||'dashboard'));setMenuOpen(false);setSearch('')};
   useEffect(()=>{try{localStorage.removeItem(`swiftport-driver-alerts-${user.id}`)}catch{}},[user.id]);
+  useEffect(()=>{try{setNotificationLog(JSON.parse(localStorage.getItem(`swiftport-notification-log-${user.id}`)||'[]')||[])}catch{setNotificationLog([])}},[user.id]);
   useEffect(()=>{const timer=window.setInterval(()=>setAlertTick(Date.now()),300000);return()=>window.clearInterval(timer)},[]);
   const loadTeam=()=>api('/api/users/directory.php').then(result=>setTeam(result.users)).catch(reason=>notify(reason.message));
   const loadOperational=()=>api('/api/operational.php').then(result=>{
@@ -918,6 +922,9 @@ function App({auth,finance,onFinanceChange,onLogout}){
     if(!fresh.length)return;
     fresh.forEach(alert=>{sent[alert.key]=new Date().toISOString()});
     try{localStorage.setItem(storageKey,JSON.stringify(sent))}catch{}
+    const entries=fresh.map(alert=>({id:alert.key,type:'delivery',title:alert.rule?.followUp?'Seguimiento de entrega':'Aviso de entrega',message:alert.message,createdAt:new Date().toISOString(),caseId:alert.case?.id||alert.event?.expediente||'',vessel:alert.case?.buque||alert.event?.titulo||'',rule:alert.rule?.label||''}));
+    setNotificationLog(previous=>{const next=[...entries,...previous].slice(0,100);try{localStorage.setItem(`swiftport-notification-log-${user.id}`,JSON.stringify(next))}catch{}return next});
+    setDeliveryPopup(fresh[0]);
     notify(fresh.length===1?fresh[0].message:`${fresh.length} avisos de entrega activos. Revisa el calendario.`);
     if(localStorage.getItem('swiftport-device-alerts')==='1'){
       fresh.forEach(alert=>showDeviceNotification('Swiftport entrega',alert.message,alert.key).catch(()=>{}));
@@ -1340,6 +1347,7 @@ No se borrarán documentos ni fotos. El expediente volverá a este punto para co
     ? calendarEvents.filter(event=>samePerson(event.asignado,visibleUser.fullName)&&cases.find(item=>item.id===event.expediente)?.estado!=='Completado')
     : calendarEvents.filter(event=>!event.asignado||event.asignado==='Sin asignar');
   const notificationCount=assignedAlerts.length+deliveryAlerts.length;
+  const clearNotificationLog=()=>{setNotificationLog([]);try{localStorage.removeItem(`swiftport-notification-log-${user.id}`)}catch{}};
   return <div className="shell">
     <Sidebar tab={tab} open={menuOpen} navigate={navigate} close={()=>setMenuOpen(false)} nav={availableNav} user={visibleUser} onLogout={onLogout}/>
     {menuOpen&&<button className="scrim" aria-label="Cerrar menú" onClick={()=>setMenuOpen(false)}/>} 
@@ -1350,7 +1358,7 @@ No se borrarán documentos ni fotos. El expediente volverá a este punto para co
           <div><div className="eyebrow">Operaciones  -  {new Date().toLocaleDateString('es-ES',{day:'numeric',month:'long',year:'numeric'})}</div><h1>{title}</h1><p>{subtitle}</p></div>
         </div>
         <div className="topbar-actions">
-          <button className="icon-button notification" aria-label="Notificaciones" onClick={()=>{navigate('calendario');notify(deliveryAlerts.length?deliveryAlerts[0].message:(assignedAlerts.length?`Tienes ${assignedAlerts.length} servicios que requieren atención`:'No tienes avisos operativos'))}}><Bell/>{notificationCount>0&&<i>{notificationCount}</i>}</button>
+          <button className="icon-button notification" aria-label="Notificaciones" onClick={()=>setNotificationOpen(true)}><Bell/>{notificationCount>0&&<i>{notificationCount}</i>}</button>
           {!driverOnly&&<button className="button primary" aria-label="Nuevo expediente" onClick={()=>setNewOpen(true)}><Plus/> <span>Nuevo expediente</span></button>}
           <div className="avatar" title={visibleUser.fullName+'  -  '+roleLabel(visibleUser)}>{initials(visibleUser.fullName)}</div>
         </div>
@@ -1372,11 +1380,59 @@ No se borrarán documentos ni fotos. El expediente volverá a este punto para co
     </main>
     <MobileNav tab={tab} navigate={navigate} more={()=>setMenuOpen(true)} nav={availableNav}/>
     {newOpen&&<NewCaseModal clientOptions={clientOptions} vessels={vessels} team={operationalTeam} close={()=>setNewOpen(false)} submit={createCase}/>}
+    {notificationOpen&&<NotificationDrawer alerts={deliveryAlerts} history={notificationLog} close={()=>setNotificationOpen(false)} clear={clearNotificationLog} openCalendar={()=>{setNotificationOpen(false);navigate('calendario')}}/>}
+    {deliveryPopup&&<DeliveryPopup alert={deliveryPopup} close={()=>setDeliveryPopup(null)} openHistory={()=>{setDeliveryPopup(null);setNotificationOpen(true)}}/>}
     {toast&&<div className="toast" role="status"><CheckCircle2/>{toast}</div>}
   </div>;
 }
 
 const initials=name=>name.split(/\s+/).filter(Boolean).map(word=>word[0]).slice(0,2).join('').toUpperCase();
+function NotificationDrawer({alerts=[],history=[],close,clear,openCalendar}){
+  const formatDate=value=>value?new Date(value).toLocaleString('es-ES',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}):'Ahora';
+  return <>
+    <button className="notification-backdrop" aria-label="Cerrar notificaciones" onClick={close}/>
+    <aside className="notification-drawer" aria-label="Centro de notificaciones">
+      <header>
+        <span><Bell/> Notificaciones</span>
+        <button className="icon-button" aria-label="Cerrar" onClick={close}><X/></button>
+      </header>
+      <section className="notification-drawer-actions">
+        <button className="button secondary" onClick={openCalendar}><CalendarDays/> Abrir calendario</button>
+        <button className="button tertiary" onClick={clear}>Limpiar historial</button>
+      </section>
+      <section>
+        <h3>Ahora requiere atención</h3>
+        {alerts.length?alerts.map(alert=><article className="notification-card active" key={alert.key}>
+          <span><Timer/></span>
+          <div><b>{alert.case?.buque||alert.event?.titulo||'Entrega'}</b><p>{alert.message}</p><small>{alert.rule?.label||'Aviso operativo'}</small></div>
+        </article>):<p className="notification-empty">No hay avisos activos ahora mismo.</p>}
+      </section>
+      <section>
+        <h3>Historial</h3>
+        {history.length?history.map(item=><article className="notification-card" key={item.id}>
+          <span><CheckCircle2/></span>
+          <div><b>{item.title}</b><p>{item.message}</p><small>{formatDate(item.createdAt)}</small></div>
+        </article>):<p className="notification-empty">Todavía no hay avisos guardados en este dispositivo.</p>}
+      </section>
+    </aside>
+  </>;
+}
+
+function DeliveryPopup({alert,close,openHistory}){
+  return <div className="delivery-popup" role="alertdialog" aria-label="Aviso de entrega">
+    <div className="delivery-popup-icon"><Bell/></div>
+    <div>
+      <small>{alert.rule?.followUp?'Seguimiento operativo':'Aviso de entrega'}</small>
+      <b>{alert.case?.buque||alert.event?.titulo||'Entrega programada'}</b>
+      <p>{alert.message}</p>
+      <div className="delivery-popup-actions">
+        <button className="button secondary" onClick={openHistory}>Ver historial</button>
+        <button className="button primary" onClick={close}>Entendido</button>
+      </div>
+    </div>
+  </div>;
+}
+
 function Sidebar({tab,open,navigate,close,nav,user,onLogout}){
   return <aside className={'sidebar '+(open?'open':'')}>
     <div className="brand"><span className="brand-mark"><Anchor/></span><div><b>SWIFTPORT</b><small>OPERATING SYSTEM</small></div><button className="icon-button sidebar-close" aria-label="Cerrar menú" onClick={close}><X/></button></div>
