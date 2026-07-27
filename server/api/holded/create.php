@@ -66,24 +66,67 @@ function holded_safe_error(mixed $decoded, string $raw): string
     return substr(trim((string) $text), 0, 220);
 }
 
-function holded_post_document(string $apiKey, string $docType, array $request): array
+function holded_post_document(string $apiKey, string $docType, array $request, string $authMode = 'key', string $apiVersion = 'v1'): array
 {
-    $ch = curl_init('https://api.holded.com/api/invoicing/v1/documents/' . $docType);
+    $headers = [
+        'Accept: application/json',
+        'Content-Type: application/json',
+    ];
+    if ($authMode === 'bearer') {
+        $headers[] = 'Authorization: Bearer ' . $apiKey;
+    } else {
+        $headers[] = 'key: ' . $apiKey;
+    }
+
+    $ch = curl_init('https://api.holded.com/api/invoicing/' . $apiVersion . '/documents/' . $docType);
     curl_setopt_array($ch, [
         CURLOPT_POST => true,
         CURLOPT_RETURNTRANSFER => true,
         CURLOPT_TIMEOUT => 25,
-        CURLOPT_HTTPHEADER => [
-            'Accept: application/json',
-            'Content-Type: application/json',
-            'key: ' . $apiKey,
-        ],
+        CURLOPT_HTTPHEADER => $headers,
         CURLOPT_POSTFIELDS => json_encode($request, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
     ]);
     $response = curl_exec($ch);
     $status = (int) curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
     curl_close($ch);
-    return [$status, $response];
+    return [$status, $response, $authMode, $apiVersion];
+}
+
+function holded_response_has_invalid_key(int $status, mixed $decoded, string $raw): bool
+{
+    if ($status !== 400 && $status !== 401 && $status !== 403) {
+        return false;
+    }
+    $text = strtolower(holded_safe_error($decoded, $raw));
+    return str_contains($text, 'invalid key')
+        || str_contains($text, 'api key')
+        || str_contains($text, 'unauthorized')
+        || str_contains($text, 'forbidden')
+        || str_contains($text, 'token');
+}
+
+function holded_try_create_document(string $apiKey, string $docType, array $request): array
+{
+    $attempts = [
+        ['key', 'v1'],
+        ['bearer', 'v1'],
+        ['bearer', 'v2'],
+    ];
+
+    $last = [0, false, 'key', 'v1'];
+    foreach ($attempts as [$authMode, $apiVersion]) {
+        [$status, $response, $usedAuth, $usedVersion] = holded_post_document($apiKey, $docType, $request, $authMode, $apiVersion);
+        $decoded = json_decode((string) $response, true);
+        $last = [$status, $response, $usedAuth, $usedVersion];
+        if ($status >= 200 && $status < 300) {
+            return $last;
+        }
+        if (!holded_response_has_invalid_key($status, $decoded, (string) $response) && $status !== 404) {
+            break;
+        }
+    }
+
+    return $last;
 }
 
 $total = (float) ($invoice['importe'] ?? 0);
@@ -129,15 +172,17 @@ $request = [
     ]],
 ];
 
-[$status, $response] = holded_post_document($apiKey, $docType, $request);
+[$status, $response, $usedAuth, $usedVersion] = holded_try_create_document($apiKey, $docType, $request);
 
 if ($status >= 400 && $status < 500) {
     $fallbackRequest = $request;
     unset($fallbackRequest['items'][0]['tax']);
-    [$fallbackStatus, $fallbackResponse] = holded_post_document($apiKey, $docType, $fallbackRequest);
+    [$fallbackStatus, $fallbackResponse, $fallbackAuth, $fallbackVersion] = holded_try_create_document($apiKey, $docType, $fallbackRequest);
     if ($fallbackStatus >= 200 && $fallbackStatus < 300) {
         $status = $fallbackStatus;
         $response = $fallbackResponse;
+        $usedAuth = $fallbackAuth;
+        $usedVersion = $fallbackVersion;
     }
 }
 
@@ -150,6 +195,8 @@ if ($status < 200 || $status >= 300) {
     $safeMessage = 'Holded rechazó la proforma.';
     if ($status === 401 || $status === 403) {
         $safeMessage = 'Holded rechazó la clave API o permisos.';
+    } elseif (holded_response_has_invalid_key($status, $decoded, (string) $response)) {
+        $safeMessage = 'Holded no reconoce la clave API configurada.';
     } elseif ($status === 429) {
         $safeMessage = 'Holded ha limitado temporalmente las solicitudes.';
     } elseif ($status >= 500) {
@@ -158,7 +205,7 @@ if ($status < 200 || $status >= 300) {
     respond([
         'error' => $safeMessage,
         'holdedStatus' => 'HTTP ' . $status,
-        'holdedReason' => holded_safe_error($decoded, (string) $response),
+        'holdedReason' => holded_safe_error($decoded, (string) $response) . ' · Se probó key v1, Bearer v1 y Bearer v2.',
     ], 502);
 }
 
@@ -173,6 +220,7 @@ audit((int) $user['id'], 'holded.proform.create', [
     'invoice' => substr((string) ($invoice['id'] ?? ''), 0, 40),
     'case' => substr((string) ($invoice['expediente'] ?? ''), 0, 40),
     'holded_id' => substr($holdedId, 0, 80),
+    'auth' => $usedAuth . ' ' . $usedVersion,
 ]);
 
 respond([
