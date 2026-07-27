@@ -408,6 +408,13 @@ const parseWarehouseMoment=value=>{
   const normalized=String(value).replace(' - ',' ').trim();
   const direct=new Date(normalized.replace(' ','T'));
   if(!Number.isNaN(direct.getTime()))return direct;
+  const numeric=normalized.match(/^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{2,4})(?:[,\s]+(\d{1,2}):(\d{2}))?/);
+  if(numeric){
+    const year=Number(numeric[3])<100?2000+Number(numeric[3]):Number(numeric[3]);
+    const date=new Date(year,Number(numeric[2])-1,Number(numeric[1]),0,0,0,0);
+    if(numeric[4])date.setHours(Number(numeric[4])||0,Number(numeric[5])||0,0,0);
+    return Number.isNaN(date.getTime())?null:date;
+  }
   const months={ene:0,jan:0,feb:1,mar:2,abr:3,apr:3,may:4,jun:5,jul:6,ago:7,aug:7,sep:8,oct:9,nov:10,dic:11,dec:11};
   const match=normalized.toLowerCase().match(/(\d{1,2})\s+([a-záéíóú]{3,})\s*(\d{1,2}:\d{2})?/i);
   if(!match)return null;
@@ -415,14 +422,15 @@ const parseWarehouseMoment=value=>{
   if(match[3]){const [hour,minute]=match[3].split(':').map(Number);date.setHours(hour||0,minute||0,0,0)}
   return date;
 };
+const dayStart=date=>new Date(date.getFullYear(),date.getMonth(),date.getDate()).getTime();
+const calendarDaysBetween=(start,end=new Date())=>Math.max(0,Math.floor((dayStart(end)-dayStart(start))/86400000));
 const invoiceWarehouseEntries=(item,warehouseEntries=[])=>warehouseEntries.filter(entry=>entry.expediente===item.id);
 const storageDaysForEntry=(entry,item)=>{
   const manual=Number(entry.dias);
-  if(manual>0)return manual;
   const start=parseWarehouseMoment(entry.fechaRecepcion||entry.entrada);
-  if(!start)return 0;
+  if(!start)return manual>0?manual:0;
   const end=parseWarehouseMoment(entry.salida)||(entry.archivado||entry.estado==='Expedido'?new Date():new Date());
-  return Math.max(0,Math.ceil((end-start)/86400000));
+  return calendarDaysBetween(start,end);
 };
 const invoiceStorageDays=(item,warehouseEntries=[])=>{
   const linked=invoiceWarehouseEntries(item,warehouseEntries);
@@ -2267,7 +2275,7 @@ function Almacen({items,cases,openCase,registerEntry,updateEntry,deleteEntry,sho
           <span data-label="Ubicacion"><b>{item.zona}</b></span>
           <span data-label="Entrada">{item.entrada}</span>
           <span data-label="Mercancia">{item.bultos} bultos<small>{item.peso}</small></span>
-          <span data-label="Storage">{item.dias} dia{item.dias===1?'':'s'}</span>
+          <span data-label="Storage">{storageDaysForEntry(item)} dia{storageDaysForEntry(item)===1?'':'s'}</span>
           <span data-label="Estado"><Badge>{item.expediente?item.estado:'Por vincular'}</Badge></span>
         </button>)}
       </div>
