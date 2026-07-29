@@ -408,6 +408,44 @@
 @media(max-width:720px){.service-type-selector{grid-template-columns:1fr}.case-card .service-type-badge{margin-left:0}.service-type-badge.large{font-size:9px}}
 .notification-ack{margin-top:8px;padding:7px 10px;font-size:10px}
 .document-switch.pod-exception{margin-top:10px;border-color:#f4c76f;background:#fff8e8}.document-switch.pod-exception.checked{border-color:#e49a20;background:#fff4dc;color:#8a5208}.document-switch.pod-exception svg{color:#c47a10}.pod-exception-note{display:flex;gap:10px;align-items:flex-start;background:#fff8e8;border:1px solid #f2d49b;border-radius:10px;padding:10px;margin:8px 0;color:#7a4a0b}.pod-exception-note svg{color:#c47a10;flex:0 0 auto;width:17px}.pod-exception-note b,.pod-exception-note small{display:block}.pod-exception-note small{color:#8d6930;margin-top:3px;font-size:10px;line-height:1.4}
+.billing-sort-control{
+  display:flex;
+  align-items:center;
+  gap:9px;
+  padding:8px 10px;
+  border:1px solid var(--line);
+  border-radius:10px;
+  background:#f8fbff;
+  color:#526378;
+  font-size:11px;
+  font-weight:800;
+}
+.billing-sort-control span{
+  color:#8795a7;
+  text-transform:uppercase;
+  letter-spacing:.07em;
+  font-size:9px;
+}
+.billing-sort-control select{
+  border:0;
+  background:transparent;
+  color:var(--ink);
+  font-weight:800;
+  min-width:210px;
+  outline:0;
+}
+@media(max-width:720px){
+  .billing-sort-control{
+    width:100%;
+    justify-content:space-between;
+    align-items:flex-start;
+    flex-direction:column;
+  }
+  .billing-sort-control select{
+    width:100%;
+    min-width:0;
+  }
+}
 /* Modal operativo: necesita respirar porque combina mapa, AIS, flujo y evidencias */
 .operation-modal{
   width:min(1080px,calc(100vw - 36px));
