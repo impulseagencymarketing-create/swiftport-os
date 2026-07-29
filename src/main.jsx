@@ -1640,7 +1640,10 @@ function AisTrackingPanel({item,csrfToken,reloadOperational,notify}){
 
 const isoDate=date=>date.toISOString().slice(0,10);
 const addDays=(date,days)=>{const next=new Date(date);next.setDate(next.getDate()+days);return next};
+const addMonths=(date,months)=>{const next=new Date(date);next.setMonth(next.getMonth()+months);return next};
 const startOfWeek=date=>{const value=new Date(date);value.setHours(12,0,0,0);return addDays(value,-((value.getDay()+6)%7))};
+const startOfMonth=date=>{const value=new Date(date);value.setHours(12,0,0,0);value.setDate(1);return value};
+const monthCalendarDays=date=>Array.from({length:42},(_,index)=>addDays(startOfWeek(startOfMonth(date)),index));
 const DRIVER_TONES=['blue','teal','orange','purple','red','pink','green'];
 function driverTone(name,team){if(!name||name==='Sin asignar')return 'gray';const index=team.findIndex(member=>member.fullName===name);return index<0?'gray':DRIVER_TONES[index%DRIVER_TONES.length]}
 const PORT_TONES=['blue','orange','teal','purple','red','pink','green'];
@@ -1771,7 +1774,7 @@ const calendarServiceStatus=(event,cases=[])=>{
   return done?{className:'done',label:'Terminado',icon:<CheckCircle2/>}:{className:'pending',label:'Pendiente',icon:<CircleAlert/>};
 };
 function DriverLegend({events=[],cases=[]}){const ports=[...new Set((events||[]).filter(isTransportCalendarEvent).map(event=>cases.find(item=>item.id===event.expediente)?.puerto||event.puerto).filter(Boolean).map(port=>String(port).trim().toUpperCase()))].sort();return <div className="driver-legend port-legend"><span><i className="gray"/>Puerto sin indicar</span>{ports.map(port=><span key={port}><i className={portTone(port)}/>{port}</span>)}</div>}
-function CalendarEventContent({event,cases}){const related=cases.find(item=>item.id===event.expediente);const schedule=related?portCallSchedule(related):null;const missingTime=calendarNeedsTime(event);const port=related?.puerto||event.puerto||'';const status=calendarServiceStatus(event,cases);return <><span className={`calendar-status-pill ${status.className}`} title={status.label}>{status.icon}<em>{status.label}</em></span><time>{missingTime?'FALTA HORARIO':`${event.inicio}${event.fin?`–${event.fin}`:''}`}</time><b className="calendar-vessel-name">{related?.buque||event.titulo||'Buque sin indicar'}</b>{port&&<b className="calendar-port-name">{port}</b>}<small className="calendar-service">{event.tipoServicio||'Transporte'}</small>{missingTime&&<small className="calendar-provisional">PENDIENTE ETB / HORA</small>}<small>{event.asignado||'Sin asignar'}</small>{schedule&&<small className="calendar-port-call">LLEGADA  -  ETA {schedule.eta}</small>}</>}
+function CalendarEventContent({event,cases}){const related=cases.find(item=>item.id===event.expediente);const schedule=related?portCallSchedule(related):null;const missingTime=calendarNeedsTime(event);const port=related?.puerto||event.puerto||'';const status=calendarServiceStatus(event,cases);const route=routeParts(event);const routeLabel=[route.origen,route.destino].filter(Boolean).join(' → ');return <><span className={`calendar-status-pill ${status.className}`} title={status.label}>{status.icon}<em>{status.label}</em></span><time>{missingTime?'FALTA HORARIO':`${event.inicio}${event.fin?`–${event.fin}`:''}`}</time><b className="calendar-vessel-name">{related?.buque||event.titulo||'Buque sin indicar'}</b>{port&&<b className="calendar-port-name">{port}</b>}<small className="calendar-service">{event.tipoServicio||'Transporte'}</small>{routeLabel&&<small className="calendar-route">{routeLabel}</small>}{missingTime&&<small className="calendar-provisional">PENDIENTE ETB / HORA</small>}<small>{event.asignado||'Sin asignar'}</small>{schedule&&<small className="calendar-port-call">LLEGADA  -  ETA {schedule.eta}</small>}</>}
 function CalendarDriverSelect({event,team,saveEvent}){const drivers=team.filter(member=>hasRole(member,'operations')||hasRole(member,'driver'));const assign=change=>{change.stopPropagation();saveEvent({...withoutCalendarLayout(event),asignado:change.target.value})};return <label className="calendar-driver-quick" onPointerDown={event=>event.stopPropagation()} onClick={event=>event.stopPropagation()}><span>Conductor</span><select value={event.asignado||'Sin asignar'} onChange={assign} aria-label="Asignar conductor"><option>Sin asignar</option>{drivers.map(member=><option key={member.id} value={member.fullName}>{member.fullName}</option>)}</select></label>}
 const calendarMinutes=value=>{const [hour,minute]=String(value||'').split(':').map(Number);return Number.isFinite(hour)?hour*60+(minute||0):0};
 const layoutOverlappingEvents=events=>{
@@ -1825,8 +1828,16 @@ const calendarDropTime=(mouseEvent,dayElement)=>{
   const minutes=Math.round(((y/CALENDAR_HOUR_HEIGHT)*60)/15)*15;
   return minutesToClock(Math.max(0,Math.min(1410,minutes)));
 };
+function CalendarMonthView({days,monthDate,events,cases,setEditing,openCase}){
+  const today=isoDate(new Date());
+  const activeMonth=startOfMonth(monthDate).getMonth();
+  const weekday=new Intl.DateTimeFormat('es-ES',{weekday:'short'});
+  const eventsByDay=days.reduce((acc,day)=>({...acc,[isoDate(day)]:events.filter(event=>event.fecha===isoDate(day)).sort((a,b)=>driverEventSort(a,b))}),{});
+  return <section className="calendar-shell panel calendar-month-shell"><div className="calendar-month-head">{days.slice(0,7).map(day=><b key={weekday.format(day)}>{weekday.format(day).replace('.','')}</b>)}</div><div className="calendar-month-grid">{days.map(day=>{const fecha=isoDate(day);const dayEvents=eventsByDay[fecha]||[];return <div key={fecha} className={`calendar-month-day ${day.getMonth()!==activeMonth?'muted':''} ${fecha===today?'today':''}`}><span>{day.getDate()}</span>{dayEvents.slice(0,5).map(event=>{const related=cases.find(item=>item.id===event.expediente);const route=routeParts(event);return <button key={event.id} className={`calendar-month-event ${event.color||'gray'}`} onClick={()=>event.expediente?openCase(event.expediente):setEditing(event)}><time>{calendarNeedsTime(event)?'Falta hora':event.inicio}</time><b>{related?.buque||event.titulo}</b><small>{related?.puerto||event.puerto||'Puerto pendiente'}</small><em>{route.origen} → {route.destino}</em></button>})}{dayEvents.length>5&&<small className="calendar-month-more">+{dayEvents.length-5} servicios más</small>}</div>})}</div></section>;
+}
 function Calendario({events,team,cases,transports,providers,warehouseEntries,saveEvent,deleteEvent,completeCaseStep,undoCaseStep,openCase,currentUser,csrfToken,reloadOperational,notify}){
   const [weekStart,setWeekStart]=useState(startOfWeek(new Date()));
+  const [viewMode,setViewMode]=useState('week');
   const [editing,setEditing]=useState(null);
   const [mineOnly,setMineOnly]=useState(false);
   const [draggingId,setDraggingId]=useState('');
@@ -1834,9 +1845,13 @@ function Calendario({events,team,cases,transports,providers,warehouseEntries,sav
   const pointerDrag=useRef(null);
   const suppressCalendarClick=useRef(false);
   if(isDriverOnly(currentUser))return <DriverCalendarV2 events={events} cases={cases} transports={transports} warehouseEntries={warehouseEntries} currentUser={currentUser} saveEvent={saveEvent} completeCaseStep={completeCaseStep} undoCaseStep={undoCaseStep} csrfToken={csrfToken} reloadOperational={reloadOperational} notify={notify}/>;
-  const days=Array.from({length:7},(_,index)=>addDays(weekStart,index));
+  const periodStart=viewMode==='week'?startOfWeek(weekStart):viewMode==='month'?startOfMonth(weekStart):localDay(weekStart);
+  const days=viewMode==='month'?monthCalendarDays(periodStart):Array.from({length:viewMode==='day'?1:7},(_,index)=>addDays(periodStart,index));
   const hours=Array.from({length:24},(_,index)=>index);
   const dayLabel=new Intl.DateTimeFormat('es-ES',{weekday:'short',day:'numeric',month:'short'});
+  const calendarTitle=viewMode==='month'?periodStart.toLocaleDateString('es-ES',{month:'long',year:'numeric'}):viewMode==='day'?periodStart.toLocaleDateString('es-ES',{weekday:'long',day:'numeric',month:'long',year:'numeric'}):`${days[0].toLocaleDateString('es-ES',{day:'numeric',month:'long'})} – ${days[6].toLocaleDateString('es-ES',{day:'numeric',month:'long',year:'numeric'})}`;
+  const movePeriod=direction=>setWeekStart(current=>viewMode==='month'?addMonths(current,direction):addDays(current,direction*(viewMode==='day'?1:7)));
+  const goToday=()=>setWeekStart(viewMode==='week'?startOfWeek(new Date()):new Date());
   const newEvent=()=>setEditing({id:'EV-'+Date.now(),titulo:'',tipoServicio:'Transporte',fecha:isoDate(days[0]),inicio:'',fin:'',asignado:'Sin asignar',expediente:'',transporte:'',color:'gray',scheduleStatus:'missing_time'});
   const baseEvents=(mineOnly?events.filter(event=>samePerson(event.asignado,currentUser.fullName)):events).filter(isTransportCalendarEvent).map(event=>calendarEventWithCaseSlot(event,cases));
   const timedEvents=baseEvents.filter(event=>!calendarNeedsTime(event));
@@ -1911,10 +1926,10 @@ function Calendario({events,team,cases,transports,providers,warehouseEntries,sav
   },[saveEvent,notify]);
   return <>
     <section className="calendar-toolbar">
-      <div className="calendar-nav"><button className="button tertiary" onClick={()=>setWeekStart(addDays(weekStart,-7))}>‹</button><button className="button tertiary" onClick={()=>setWeekStart(startOfWeek(new Date()))}>Hoy</button><button className="button tertiary" onClick={()=>setWeekStart(addDays(weekStart,7))}>›</button><h2>{days[0].toLocaleDateString('es-ES',{day:'numeric',month:'long'})} – {days[6].toLocaleDateString('es-ES',{day:'numeric',month:'long',year:'numeric'})}</h2></div>
-      <div className="calendar-actions">{hasRole(currentUser,'operations')&&<button className={'button '+(mineOnly?'secondary':'tertiary')} onClick={()=>setMineOnly(!mineOnly)}><UserRound/> Mis servicios</button>}<button className="button primary" onClick={newEvent}><Plus/> Nuevo transporte</button></div>
+      <div className="calendar-nav"><button className="button tertiary" onClick={()=>movePeriod(-1)}>‹</button><button className="button tertiary" onClick={goToday}>Hoy</button><button className="button tertiary" onClick={()=>movePeriod(1)}>›</button><h2>{calendarTitle}</h2></div>
+      <div className="calendar-actions"><div className="calendar-view-switch">{['day','week','month'].map(mode=><button key={mode} className={viewMode===mode?'active':''} onClick={()=>{setViewMode(mode);setWeekStart(current=>mode==='week'?startOfWeek(current):mode==='month'?startOfMonth(current):localDay(current))}}>{mode==='day'?'Día':mode==='week'?'Semana':'Mes'}</button>)}</div>{hasRole(currentUser,'operations')&&<button className={'button '+(mineOnly?'secondary':'tertiary')} onClick={()=>setMineOnly(!mineOnly)}><UserRound/> Mis servicios</button>}<button className="button primary" onClick={newEvent}><Plus/> Nuevo transporte</button></div>
     </section>
-    <section className="calendar-shell panel">
+    {viewMode==='month'?<CalendarMonthView days={days} monthDate={periodStart} events={baseEvents} cases={cases} setEditing={setEditing} openCase={openCase}/>:<section className="calendar-shell panel" style={{'--calendar-days':days.length,'--calendar-min-width':`${70+(days.length*260)}px`}}>
       <div className="calendar-help"><span><CalendarDays/> Solo transportes a ETB/ETA</span><small>Las recepciones quedan en expediente/almacén. Si falta hora ETB/ETA, el transporte queda arriba del día como “Falta horario”.</small></div>
       <div className="calendar-scroll">
         <div className="calendar-head"><span className="calendar-zone">GMT+2</span>{days.map(day=><div key={isoDate(day)} className={isoDate(day)===isoDate(new Date())?'today':''}><b>{dayLabel.format(day).replace('.','')}</b></div>)}</div>
@@ -1922,7 +1937,7 @@ function Calendario({events,team,cases,transports,providers,warehouseEntries,sav
         <div className="calendar-body"><div className="calendar-hours">{hours.map(hour=><span key={hour}>{String(hour).padStart(2,'0')}:00</span>)}</div>{days.map(day=><div data-calendar-day={isoDate(day)} className={`calendar-day ${dropTarget===`time-${isoDate(day)}`?'drop-target':''}`} key={isoDate(day)}>{hours.map(hour=><i className="calendar-line" key={hour}/>)}
           {layoutOverlappingEvents(timedEvents.filter(event=>event.fecha===isoDate(day))).map(event=><DraggableCalendarEvent key={event.id} event={event} cases={cases} team={team} saveEvent={saveEvent} setEditing={setEditing} openCase={openCase} canDeleteEvent={canDeleteEvent} deleteEvent={deleteEvent} startPointerDrag={startPointerDrag} draggingId={draggingId} suppressClick={()=>suppressCalendarClick.current}/>)}</div>)}</div>
       </div>
-    </section>
+    </section>}
     {editing&&<CalendarEventModal item={editing} team={team} cases={cases} transports={transports} providers={providers} close={()=>setEditing(null)} submit={item=>{saveEvent(item);setEditing(null)}} openCase={openCase}/>}
   </>;
 }
