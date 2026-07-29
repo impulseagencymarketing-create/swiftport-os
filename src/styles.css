@@ -408,3 +408,184 @@
 @media(max-width:720px){.service-type-selector{grid-template-columns:1fr}.case-card .service-type-badge{margin-left:0}.service-type-badge.large{font-size:9px}}
 .notification-ack{margin-top:8px;padding:7px 10px;font-size:10px}
 .document-switch.pod-exception{margin-top:10px;border-color:#f4c76f;background:#fff8e8}.document-switch.pod-exception.checked{border-color:#e49a20;background:#fff4dc;color:#8a5208}.document-switch.pod-exception svg{color:#c47a10}.pod-exception-note{display:flex;gap:10px;align-items:flex-start;background:#fff8e8;border:1px solid #f2d49b;border-radius:10px;padding:10px;margin:8px 0;color:#7a4a0b}.pod-exception-note svg{color:#c47a10;flex:0 0 auto;width:17px}.pod-exception-note b,.pod-exception-note small{display:block}.pod-exception-note small{color:#8d6930;margin-top:3px;font-size:10px;line-height:1.4}
+/* Modal operativo: necesita respirar porque combina mapa, AIS, flujo y evidencias */
+.operation-modal{
+  width:min(1080px,calc(100vw - 36px));
+  max-height:calc(100vh - 28px);
+  display:flex;
+  flex-direction:column;
+  overflow:hidden;
+}
+.operation-modal .modal-head{
+  flex:0 0 auto;
+  padding:20px 26px 16px;
+}
+.operation-modal .modal-head h2{
+  font-size:22px;
+  line-height:1.15;
+}
+.operation-modal .modal-head p{
+  margin-top:5px;
+  white-space:normal;
+  overflow-wrap:anywhere;
+}
+.operation-modal-body{
+  padding:20px 26px 0;
+  overflow-y:auto;
+  overflow-x:hidden;
+  display:grid;
+  gap:18px;
+}
+.operation-modal .ais-panel{
+  margin:0;
+  grid-template-columns:minmax(340px,0.95fr) minmax(320px,1fr);
+  max-width:100%;
+}
+.operation-modal .ais-map,
+.operation-modal .ais-map iframe{
+  min-height:300px;
+  height:300px;
+}
+.operation-modal .ais-info{
+  padding:22px;
+  gap:14px;
+}
+.operation-modal .ais-status b{
+  font-size:22px;
+  line-height:1.15;
+}
+.operation-modal .ais-status p{
+  font-size:13px;
+  line-height:1.45;
+}
+.operation-modal .ais-actions{
+  display:flex;
+  flex-wrap:wrap;
+  gap:10px;
+}
+.operation-modal .ais-actions .button{
+  min-height:42px;
+  white-space:normal;
+}
+.operation-modal .operation-checklist{
+  padding:0 0 4px;
+  background:transparent;
+  border-bottom:0;
+}
+.operation-modal .operation-checklist>div{
+  margin-bottom:12px;
+  flex-wrap:wrap;
+}
+.operation-modal .operation-checklist ol{
+  grid-template-columns:repeat(6,minmax(126px,1fr));
+  gap:10px;
+}
+.operation-modal .operation-checklist li{
+  min-height:70px;
+  padding:11px;
+  align-items:flex-start;
+}
+.operation-modal .operation-checklist li b{
+  font-size:10px;
+  line-height:1.25;
+}
+.operation-modal .operation-checklist li small{
+  font-size:7px;
+  line-height:1.25;
+}
+.operation-modal .operation-guidance,
+.operation-modal .pod-scanner,
+.operation-modal .warehouse-transport-review,
+.operation-modal .shipment-documents,
+.operation-modal .warehouse-cargo-reception{
+  max-width:100%;
+}
+.operation-modal .operation-guidance{
+  padding:18px;
+  border-radius:14px;
+}
+.operation-modal .operation-guidance b,
+.operation-modal .pod-scanner b{
+  font-size:13px;
+}
+.operation-modal .operation-guidance p,
+.operation-modal .pod-scanner small{
+  font-size:12px;
+}
+.operation-modal .pod-scanner{
+  padding:18px;
+  border-radius:14px;
+}
+.operation-modal .pod-scanner-actions{
+  display:grid;
+  grid-template-columns:repeat(auto-fit,minmax(190px,1fr));
+  gap:10px;
+}
+.operation-modal .pod-scanner-actions .button{
+  width:100%;
+  min-height:46px;
+}
+.operation-modal .field input{
+  min-height:48px;
+}
+.operation-modal .modal-actions{
+  position:sticky;
+  bottom:0;
+  z-index:4;
+  margin:2px -26px 0;
+  padding:16px 26px 18px;
+  background:linear-gradient(180deg,rgba(255,255,255,.82),#fff 34%);
+  border-top:1px solid var(--line);
+}
+@media(max-width:900px){
+  .operation-modal{
+    width:calc(100vw - 18px);
+    max-height:calc(100vh - 18px);
+  }
+  .operation-modal .modal-head{
+    padding:18px 18px 14px;
+  }
+  .operation-modal-body{
+    padding:16px 18px 0;
+  }
+  .operation-modal .ais-panel{
+    grid-template-columns:1fr;
+  }
+  .operation-modal .ais-map,
+  .operation-modal .ais-map iframe{
+    min-height:260px;
+    height:260px;
+  }
+  .operation-modal .operation-checklist{
+    overflow-x:auto;
+    padding-bottom:8px;
+  }
+  .operation-modal .operation-checklist ol{
+    grid-template-columns:repeat(6,minmax(132px,1fr));
+    min-width:860px;
+  }
+  .operation-modal .modal-actions{
+    margin-inline:-18px;
+    padding:14px 18px;
+  }
+}
+@media(max-width:560px){
+  .operation-modal .modal-head h2{
+    font-size:20px;
+  }
+  .operation-modal .ais-map,
+  .operation-modal .ais-map iframe{
+    min-height:230px;
+    height:230px;
+  }
+  .operation-modal .ais-info{
+    padding:18px;
+  }
+  .operation-modal .modal-actions{
+    display:grid;
+    grid-template-columns:1fr;
+  }
+  .operation-modal .modal-actions .button{
+    width:100%;
+  }
+}
