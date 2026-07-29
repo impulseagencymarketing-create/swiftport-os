@@ -2100,6 +2100,7 @@ function DriverTaskModal({event,item,transport,warehouseEntries,currentUser,csrf
   const podFiles=evidenceFiles.filter(file=>file.evidenceType==='pod');
   const vesselWarehouseEntries=warehouseEntriesForVessel(warehouseEntries,item);
   const noteRequiredForPodException=step?.key==='delivery'&&!storageOnly&&!surveyService&&podException;
+  const warehouseReviewMissing=step?.key==='delivery'&&!surveyService&&!warehouseReviewed;
   const evidenceReady=step?.key==='cargo'?cargoPhotos.length>0||surveyService:step?.key==='delivery'?(surveyService?(deliveryPhotos.length>0||podFiles.length>0):warehouseReviewed&&deliveryPhotos.length>0&&(storageOnly||podFiles.length>0||(podException&&note.trim().length>0))):true;
   const needsEvidence=['cargo','delivery'].includes(step?.key);
   const evidenceLabel=file=>file.evidenceType==='pod'?(surveyService?'Informe / documento':'POD escaneado'):file.evidenceType==='delivery-photo'?(surveyService?'Evidencia survey':'Foto de entrega'):'Foto de recepción';
@@ -2129,7 +2130,7 @@ function DriverTaskModal({event,item,transport,warehouseEntries,currentUser,csrf
             {error&&<p className="form-error"><CircleAlert/>{error}</p>}
           </div>}
           <label className="field"><span>{noteRequiredForPodException?'Observación obligatoria':'Observación del trabajo (opcional)'}</span><input value={note} onChange={change=>setNote(change.target.value)} placeholder={noteRequiredForPodException?'Ej. El buque/consignatario no selló el POD, entrega realizada sin sello…':'Persona que recibe, incidencia, referencia…'}/></label>
-          <button className="button primary full driver-confirm" disabled={uploading||!evidenceReady} onClick={()=>submit(step.key,note,{files:evidenceFiles,podException,podExceptionReason:note})}><CheckCircle2/> {!evidenceReady?(step.key==='cargo'?'Añade una foto para confirmar':surveyService?'Añade evidencia o informe del survey':storageOnly?'Revisa almacén y añade evidencia de salida':podException?'Escribe la observación del POD no sellado':'Revisa almacén, foto de entrega y POD'):`Confirmar: ${step.title}`}</button>
+          <button className="button primary full driver-confirm" disabled={uploading||!evidenceReady} onClick={()=>submit(step.key,note,{files:evidenceFiles,podException,podExceptionReason:note})}><CheckCircle2/> {!evidenceReady?(step.key==='cargo'?'Añade una foto para confirmar':surveyService?'Añade evidencia o informe del survey':warehouseReviewMissing?'Marca que revisaste el almacén':storageOnly?'Añade evidencia de salida':podException?'Escribe la observación del POD no sellado':'Revisa almacén, foto de entrega y POD'):`Confirmar: ${step.title}`}</button>
         </>:<div className="driver-finished"><CheckCircle2/><span><b>Trabajo terminado</b><small>{surveyService?'Survey confirmado y expediente listo para facturación.':storageOnly?'Salida confirmada y expediente listo para facturación.':'POD recibido y expediente listo para facturación.'}</small></span></div>}
         {mine&&lastCompleted&&<button className="button tertiary full driver-undo-step" onClick={()=>undo(lastCompleted.key)}><Undo2/> Deshacer: {lastCompleted.title}</button>}
         <button className="button tertiary full" onClick={close}>{flow.billingReady?'Cerrar':'Volver al calendario'}</button>
@@ -2337,6 +2338,7 @@ function OperationStepModal({item,warehouseEntries,transports,csrfToken,currentU
   const selectedWarehouseEntries=vesselWarehouseEntries.filter(entry=>selectedWarehouseRefs.includes(entry.ref));
   const needsEvidence=['cargo','delivery'].includes(step.key);
   const noteRequiredForPodException=step.key==='delivery'&&!storageOnly&&!surveyService&&podException;
+  const warehouseReviewMissing=step.key==='delivery'&&!surveyService&&!warehouseReviewed;
   const evidenceReady=step.key==='cargo'?cargoPhotos.length>0||selectedWarehouseEntries.length>0||surveyService:step.key==='delivery'?(surveyService?(deliveryPhotos.length>0||podFiles.length>0):warehouseReviewed&&deliveryPhotos.length>0&&(storageOnly||podFiles.length>0||(podException&&note.trim().length>0))):true;
   const toggleWarehouseEntry=ref=>setSelectedWarehouseRefs(current=>current.includes(ref)?current.filter(item=>item!==ref):[...current,ref]);
   return <div className="modal-backdrop" onMouseDown={event=>{if(event.target===event.currentTarget)close()}}>
@@ -2366,7 +2368,7 @@ function OperationStepModal({item,warehouseEntries,transports,csrfToken,currentU
           {error&&<p className="form-error"><CircleAlert/>{error}</p>}
         </div>}
         <label className="field"><span>{noteRequiredForPodException?'Observación obligatoria':'Observación (opcional)'}</span><input value={note} onChange={event=>setNote(event.target.value)} placeholder={noteRequiredForPodException?'Ej. El buque/consignatario no selló el POD, entrega realizada sin sello…':'Incidencias, persona que recibe, referencia…'}/></label>
-        <div className="modal-actions"><button className="button tertiary" onClick={close}>Cancelar</button><button className="button primary" disabled={uploading||!evidenceReady} onClick={()=>submit(step.key,note,step.key==='cargo'?{files:evidenceFiles,warehouseRefs:surveyService?[]:selectedWarehouseRefs}:{files:evidenceFiles,podException,podExceptionReason:note})}><CheckCircle2/> {!evidenceReady?(step.key==='cargo'?'Añade una foto o selecciona almacén':surveyService?'Añade evidencia o informe del survey':storageOnly?'Revisa almacén y añade evidencia de salida':podException?'Escribe la observación del POD no sellado':'Revisa almacén, foto de entrega y POD'):'Confirmar paso'}</button></div>
+        <div className="modal-actions"><button className="button tertiary" onClick={close}>Cancelar</button><button className="button primary" disabled={uploading||!evidenceReady} onClick={()=>submit(step.key,note,step.key==='cargo'?{files:evidenceFiles,warehouseRefs:surveyService?[]:selectedWarehouseRefs}:{files:evidenceFiles,podException,podExceptionReason:note})}><CheckCircle2/> {!evidenceReady?(step.key==='cargo'?'Añade una foto o selecciona almacén':surveyService?'Añade evidencia o informe del survey':warehouseReviewMissing?'Marca que revisaste el almacén':storageOnly?'Añade evidencia de salida':podException?'Escribe la observación del POD no sellado':'Revisa almacén, foto de entrega y POD'):'Confirmar paso'}</button></div>
       </div>
     </section>
   </div>;
