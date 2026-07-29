@@ -123,6 +123,10 @@
 .vessel-actions{display:flex;align-items:center;justify-content:flex-end;gap:7px}
 .icon-button.danger{border-color:#ffd2d8;background:#fff2f4;color:#dd2f4a}
 .icon-button.danger:hover{background:#ffe7eb}
+.button.secondary.danger{border-color:#ffd2d8;background:#fff2f4;color:#c7223d;box-shadow:none}
+.button.secondary.danger:hover{background:#ffe7eb}
+.billing-row-actions{display:flex!important;align-items:center;justify-content:flex-end;gap:7px}
+.billing-row-actions .icon-button{width:34px;height:34px;flex:0 0 auto}
 .vessel-modal{width:min(620px,calc(100vw - 32px));overflow:hidden}
 .vessel-modal form{grid-template-columns:repeat(2,minmax(0,1fr))}
 .vessel-modal form>*{min-width:0}
