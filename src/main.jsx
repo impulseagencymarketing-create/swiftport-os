@@ -1777,7 +1777,13 @@ const calendarMinutes=value=>{const [hour,minute]=String(value||'').split(':').m
 const layoutOverlappingEvents=events=>{
   const sorted=[...events].sort((first,second)=>calendarMinutes(first.inicio)-calendarMinutes(second.inicio)||calendarMinutes(first.fin)-calendarMinutes(second.fin));
   const result=[];let cluster=[];let clusterEnd=-1;let active=[];
-  const finishCluster=()=>{if(!cluster.length)return;const columns=Math.max(1,...cluster.map(item=>item._lane+1));cluster.forEach(item=>result.push({...item,_columns:columns}));cluster=[];active=[];clusterEnd=-1};
+  const finishCluster=()=>{
+    if(!cluster.length)return;
+    const rawColumns=Math.max(1,...cluster.map(item=>item._lane+1));
+    const columns=Math.min(rawColumns,2);
+    cluster.forEach(item=>result.push({...item,_columns:columns,_lane:item._lane%columns,_stackOffset:Math.floor(item._lane/columns),_rawColumns:rawColumns}));
+    cluster=[];active=[];clusterEnd=-1;
+  };
   sorted.forEach(event=>{
     const start=calendarMinutes(event.inicio);
     const end=Math.max(start+30,calendarMinutes(event.fin)||start+60);
@@ -1795,16 +1801,16 @@ const calendarEventStyle=event=>{
   const start=calendarMinutes(event.inicio),end=Math.max(start+30,calendarMinutes(event.fin)||start+60);
   const visibleStart=Math.max(0,Math.min(1439,start));
   const visibleEnd=Math.max(visibleStart+30,Math.min(1440,end));
-  const columns=event._columns||1,lane=event._lane||0;
+  const columns=event._columns||1,lane=event._lane||0,stackOffset=event._stackOffset||0;
   return {
-    top:visibleStart/60*CALENDAR_HOUR_HEIGHT,
+    top:visibleStart/60*CALENDAR_HOUR_HEIGHT+stackOffset*58,
     height:Math.max(96,(visibleEnd-visibleStart)/60*CALENDAR_HOUR_HEIGHT),
     left:`calc(4px + (100% - 8px) * ${lane}/${columns})`,
     width:`calc((100% - 8px) / ${columns} - ${columns>1?2:0}px)`,
     right:'auto'
   };
 };
-const withoutCalendarLayout=event=>{const {_lane,_columns,_end,...clean}=event;return clean};
+const withoutCalendarLayout=event=>{const {_lane,_columns,_end,_stackOffset,_rawColumns,...clean}=event;return clean};
 const minutesToClock=minutes=>{
   const safe=Math.max(0,Math.min(1439,Math.round(Number(minutes)||0)));
   return `${String(Math.floor(safe/60)).padStart(2,'0')}:${String(safe%60).padStart(2,'0')}`;
@@ -1853,7 +1859,7 @@ function Calendario({events,team,cases,transports,providers,warehouseEntries,sav
   };
   const startPointerDrag=(pointer,event)=>{
     if(pointer.button!==undefined&&pointer.button!==0)return;
-    if(pointer.target?.closest?.('.calendar-event-delete,.calendar-event-edit,.calendar-driver-quick,select,input'))return;
+    if(pointer.target?.closest?.('.calendar-event-open,.calendar-event-delete,.calendar-event-edit,.calendar-driver-quick,select,input'))return;
     pointerDrag.current={event,x:pointer.clientX,y:pointer.clientY,moved:false};
     setDraggingId(event.id);
     pointer.stopPropagation();
@@ -1929,11 +1935,11 @@ function DraggableCalendarEvent({event,cases,team,saveEvent,setEditing,openCase,
     clean.expediente?openCase(clean.expediente):setEditing(clean);
   };
   return <article onPointerDown={pointer=>startPointerDrag(pointer,clean)} onClick={openRelated} className={`calendar-event ${event.color} ${event._columns>1?'is-overlap':''} ${draggingId===event.id?'dragging':''}`} style={calendarEventStyle(event)} title={`${event.inicio}–${event.fin}  -  ${event.titulo||event.id}`}>
-    <button className="calendar-event-open" title={clean.expediente?'Abrir expediente':'Editar servicio'} onClick={click=>{click.stopPropagation();openRelated(click)}}><CalendarEventContent event={event} cases={cases}/></button>
+    <button className="calendar-event-open" title={clean.expediente?'Abrir expediente':'Editar servicio'} onPointerDown={pointer=>pointer.stopPropagation()} onClick={click=>{click.stopPropagation();openRelated(click)}}><CalendarEventContent event={event} cases={cases}/></button>
     <CalendarDriverSelect event={event} team={team} saveEvent={saveEvent}/>
     <button type="button" className="calendar-event-edit" title="Editar servicio" onClick={click=>{click.stopPropagation();setEditing(clean)}}><PencilLine/></button>
     {canDeleteEvent&&deleteEvent&&<button type="button" className="calendar-event-delete" title="Eliminar servicio" onClick={click=>{click.stopPropagation();deleteEvent(clean)}}><Trash2/></button>}
-    {event._columns>1&&<span className="overlap-indicator">{event._lane+1}/{event._columns}</span>}
+    {event._rawColumns>1&&<span className="overlap-indicator">{(event._stackOffset||0)*event._columns+event._lane+1}/{event._rawColumns}</span>}
   </article>;
 }
 

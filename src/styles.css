@@ -629,3 +629,55 @@
     width:100%;
   }
 }
+
+/* Calendario: tarjetas legibles y click limpio al expediente */
+.calendar-head,
+.calendar-body,
+.calendar-unscheduled-row{
+  grid-template-columns:70px repeat(7,minmax(260px,1fr))!important;
+  min-width:1890px!important;
+}
+.calendar-event{
+  min-height:112px!important;
+  height:auto!important;
+  max-height:none!important;
+}
+.calendar-event.is-overlap{
+  min-height:104px!important;
+}
+.calendar-event-open{
+  cursor:pointer!important;
+}
+.calendar-event-open:hover .calendar-vessel-name,
+.calendar-event-open:hover .calendar-port-name{
+  text-decoration:underline;
+  text-underline-offset:2px;
+}
+.calendar-event .calendar-vessel-name{
+  font-size:13px!important;
+  line-height:1.08!important;
+}
+.calendar-event .calendar-port-name{
+  font-size:12px!important;
+  line-height:1.08!important;
+}
+.calendar-event.is-overlap .calendar-vessel-name{
+  font-size:11px!important;
+}
+.calendar-event.is-overlap .calendar-port-name{
+  font-size:10px!important;
+}
+.calendar-event.is-overlap .calendar-driver-quick select{
+  font-size:10px!important;
+}
+.overlap-indicator{
+  opacity:.95;
+}
+@media(max-width:900px){
+  .calendar-head,
+  .calendar-body,
+  .calendar-unscheduled-row{
+    grid-template-columns:58px repeat(7,230px)!important;
+    min-width:1668px!important;
+  }
+}
