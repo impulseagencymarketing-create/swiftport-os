@@ -539,7 +539,8 @@ const draftInvoiceFromCase=(item,warehouseEntries=[],transports=[],calendarEvent
   }
   const storageDays=invoiceStorageDays(item,warehouseEntries);
   const hasStorageLine=storageDays>0||invoiceWarehouseEntries(item,warehouseEntries).length>0||Number(item.billing?.storagePrice||0)>0;
-  const billOwnTransport=!isStorageOnly(item);
+  const transportServices=invoiceTransportServices(item,transports,calendarEvents);
+  const billOwnTransport=!isStorageOnly(item)&&(transportServices.length>0||(item.servicios||[]).some(service=>/transporte/i.test(String(service)))||Number(item.billing?.transportPrice||0)>0);
   const lines=[
     {id:'ref',item:invoiceHeaderTitle(item),detail:cargo,price:0,units:1,tax:'21%'},
     {id:'reception',item:'RECEPTION',detail:cargo,price:suggestedReceptionPrice(item,warehouseEntries),units:1,tax:'0%'},
@@ -547,7 +548,7 @@ const draftInvoiceFromCase=(item,warehouseEntries=[],transports=[],calendarEvent
   ];
   if(hasStorageLine)lines.splice(3,0,{id:'storage',item:'STORAGE',detail:`${storageDays} DAY${storageDays===1?'':'S'} - ${cargo}`,price:suggestedStoragePrice(item,warehouseEntries),units:storageDays,tax:'0%'});
   if(billOwnTransport){
-    const transportUnits=invoiceTransportUnits(item,transports,calendarEvents);
+    const transportUnits=Math.max(1,transportServices.length);
     const transportDetail=invoiceTransportDetail(cargo,item,transports,calendarEvents);
     lines.push({id:'transport',item:'TRANSPORT FROM WAREHOUSE TO VESSEL',detail:transportDetail,price:suggestedTransportPrice(item,warehouseEntries),units:transportUnits,tax:'0%'});
   }
