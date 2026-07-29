@@ -803,6 +803,19 @@
   font-size:9px;
   font-weight:850;
 }
+.billing-hold-panel{
+  margin-bottom:16px;
+  border-color:#f0d49a;
+  background:#fffaf0;
+}
+.billing-ready-card.warning{
+  border-color:#efd6a4;
+  background:#fffdf7;
+}
+.billing-ready-card.warning .invoice-icon{
+  background:#fff1d6;
+  color:#c47a13;
+}
 @media(max-width:900px){
   .calendar-head,
   .calendar-body,
