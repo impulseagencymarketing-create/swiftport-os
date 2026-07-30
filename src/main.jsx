@@ -7,7 +7,7 @@ import {
   Circle, Camera, Box, Scale, Layers3, Navigation, UserRound, FileText, UploadCloud,
   Download, Filter, CircleDollarSign, ExternalLink, Mail, PencilLine, ClipboardCheck,
   BadgeEuro, Sparkles, ArrowLeft, Save, LogOut, ShieldCheck, LockKeyhole, UserPlus, Eye,
-  RefreshCw, Timer, Undo2, ScanLine, Trash2, Archive
+  RefreshCw, Timer, Undo2, ScanLine, Trash2, Archive, ClipboardList
 } from 'lucide-react';
 import {
   expedientesIniciales, movimientosAlmacen, transportesIniciales, proveedoresIniciales, tramitesAduana, eventosCalendarioIniciales,
@@ -89,6 +89,7 @@ const NAV = [
   ['buques','Buques',Ship],
   ['clientes','Clientes / Tarifas',UsersRound],
   ['facturacion','Facturación',ReceiptText],
+  ['auditoria','Auditoría',ClipboardList],
   ['usuarios','Usuarios',ShieldCheck]
 ];
 const TITLES = {
@@ -102,6 +103,7 @@ const TITLES = {
   correos:['Correos automáticos','Servicios recibidos por info@ y operations@'],
   clientes:['Clientes y tarifas','Condiciones comerciales por cliente'],
   facturacion:['Facturación','Servicios listos para revisar y exportar'],
+  auditoria:['Auditoría','Registro de movimientos por usuario'],
   usuarios:['Usuarios y permisos','Control de acceso al equipo']
 };
 const ROLE_LABELS={driver:'Transportista',operations:'Operaciones',finance:'Finanzas',admin:'Administración'};
@@ -201,7 +203,7 @@ const canAccess=(roles,id)=>{
   if(['transportes','aduanas'].includes(id))return false;
   if(isDriverOnly(roles))return ['calendario','almacen'].includes(id);
   if (['clientes','facturacion'].includes(id)) return hasRole(roles,'finance')||hasRole(roles,'admin');
-  if (id==='usuarios') return hasRole(roles,'admin');
+  if (['usuarios','auditoria'].includes(id)) return hasRole(roles,'admin');
   return true;
 };
 const statusTone = value => {
@@ -1067,7 +1069,7 @@ function App({auth,finance,onFinanceChange,onLogout}){
       fresh.forEach(alert=>showDeviceNotification('Swiftport facturación',alert.message,alert.key).catch(()=>{}));
     }
   },[billingAlerts,operationalLoaded,user.id]);
-  const persistOperational=(nextCases=cases,nextTransports=transports,nextWarehouse=warehouseEntries,nextCustoms=customs,nextCalendar=calendarEvents,nextProviders=providers,nextVessels=vessels,nextDeletedVesselKeys=deletedVesselKeys)=>auth.demo?Promise.resolve({ok:true}):api('/api/operational.php',{method:'PUT',headers:{'X-CSRF-Token':auth.csrfToken},body:JSON.stringify({data:{cases:nextCases,transports:nextTransports,warehouseEntries:nextWarehouse,customs:nextCustoms,calendarEvents:nextCalendar,providers:nextProviders,vessels:nextVessels,deletedVesselKeys:nextDeletedVesselKeys}})});
+  const persistOperational=(nextCases=cases,nextTransports=transports,nextWarehouse=warehouseEntries,nextCustoms=customs,nextCalendar=calendarEvents,nextProviders=providers,nextVessels=vessels,nextDeletedVesselKeys=deletedVesselKeys,auditEvent=null)=>auth.demo?Promise.resolve({ok:true}):api('/api/operational.php',{method:'PUT',headers:{'X-CSRF-Token':auth.csrfToken},body:JSON.stringify({data:{cases:nextCases,transports:nextTransports,warehouseEntries:nextWarehouse,customs:nextCustoms,calendarEvents:nextCalendar,providers:nextProviders,vessels:nextVessels,deletedVesselKeys:nextDeletedVesselKeys},audit:auditEvent})});
   const saveOperational=(...args)=>persistOperational(...args).catch(reason=>notify(reason.message));
   const operationalTeam=useMemo(()=>team.filter(member=>hasRole(member,'operations')||hasRole(member,'driver')),[team]);
   useEffect(()=>{if(driverOnly&&!['calendario','almacen'].includes(tab))setTab('calendario')},[driverOnly,tab]);
@@ -1149,7 +1151,7 @@ function App({auth,finance,onFinanceChange,onLogout}){
     const nextTransports=transport?[transport,...transports]:transports;
     const nextCalendar=[transportEvent].filter(Boolean).concat(calendarEvents.filter(isTransportCalendarEvent));
     const nextVessels=upsertVesselFromCase(vessels,item);
-    try{await persistOperational(nextCases,nextTransports,warehouseEntries,customs,nextCalendar,providers,nextVessels);setCases(nextCases);setTransports(nextTransports);setCalendarEvents(nextCalendar);setVessels(nextVessels);setSelectedId(item.id);setNewOpen(false);setTab('expedientes');notify(`Expediente ${item.id} creado y guardado`)}
+    try{await persistOperational(nextCases,nextTransports,warehouseEntries,customs,nextCalendar,providers,nextVessels,deletedVesselKeys,{action:'case.create',details:{caseRef:item.id,vessel:item.buque,client:item.cliente,port:item.puerto,serviceType:serviceTypeOf(item),transportCreated:Boolean(transport)}});setCases(nextCases);setTransports(nextTransports);setCalendarEvents(nextCalendar);setVessels(nextVessels);setSelectedId(item.id);setNewOpen(false);setTab('expedientes');notify(`Expediente ${item.id} creado y guardado`)}
     catch(reason){notify('No se pudo guardar el expediente: '+reason.message)}
   };
   const updateTransport=updated=>{const parts=routeParts(updated);const normalized={...updated,...parts,ruta:`${parts.origen} → ${parts.destino}`,hora:formatSchedule(updated.fecha,updated.inicio,updated.fin),observacion:updated.observacion||'',scheduleSource:'manual',scheduleStatus:updated.inicio?'confirmed':'missing_time',scheduleNote:updated.inicio?'':'Falta hora ETB; pendiente de confirmar horario'};const nextTransports=transports.map(item=>item.id===updated.id?normalized:item);const nextCases=cases.map(item=>{if(item.id!==updated.expediente)return item;const flow=operationFlow(item);const assigned=Boolean(updated.conductor&&updated.conductor!=='Sin asignar');const changed=assigned&&item.conductor!==updated.conductor;const now=new Date();return normalizeMerchandise({...item,autoTransportDisabled:false,conductor:updated.conductor,operationalFlow:{...flow,assignment:flow.delivery||assigned},timelineCustom:changed?[{id:`ASSIGN-${item.id}-${Date.now()}`,fecha:now.toLocaleDateString('es-ES'),hora:now.toLocaleTimeString('es-ES',{hour:'2-digit',minute:'2-digit'}),titulo:'Conductor asignado',detalle:`${updated.conductor}  -  ${normalized.ruta}`,actor:visibleUser.fullName,estado:'done'},...(item.timelineCustom||[])]:item.timelineCustom})});const linkedEvent=calendarEvents.find(item=>item.transporte===updated.id);const synchronized={titulo:normalized.ruta,origen:normalized.origen,destino:normalized.destino,tipoServicio:'Transporte',fecha:updated.fecha,inicio:updated.inicio,fin:updated.fin,asignado:updated.conductor,proveedorId:updated.proveedorId||'',expediente:updated.expediente,transporte:updated.id,observacion:normalized.observacion,color:calendarTone({...updated,...normalized},nextCases),scheduleSource:'manual',scheduleStatus:normalized.scheduleStatus,scheduleNote:normalized.scheduleNote};const nextCalendar=(linkedEvent?calendarEvents.map(item=>item.transporte===updated.id?{...item,...synchronized}:item):[...calendarEvents,{id:'EV-'+Date.now(),...synchronized}]).filter(isTransportCalendarEvent);setTransports(nextTransports);setCases(nextCases);setCalendarEvents(nextCalendar);saveOperational(nextCases,nextTransports,warehouseEntries,customs,nextCalendar);notify('Ruta, transporte y calendario actualizados')};
@@ -1186,7 +1188,7 @@ function App({auth,finance,onFinanceChange,onLogout}){
       return slot.date?{...base,fecha:slot.date,inicio:slot.start,fin:end,color:calendarTone(base,next),scheduleStatus,scheduleNote}:base;
     });
     setCases(next);setVessels(nextVessels);setWarehouseEntries(nextWarehouse);setTransports(nextTransports);setCalendarEvents(nextCalendar);
-    saveOperational(next,nextTransports,nextWarehouse,customs,nextCalendar,providers,nextVessels);
+    saveOperational(next,nextTransports,nextWarehouse,customs,nextCalendar,providers,nextVessels,deletedVesselKeys,{action:'case.update',details:{caseRef:operationalCase.id,vessel:operationalCase.buque,client:operationalCase.cliente,port:operationalCase.puerto,eta:operationalCase.eta,etb:operationalCase.etb,etd:operationalCase.etd}});
     notify(slot.date?'Expediente, buque, almacén y calendario actualizados':(activeEntries.length===1?'Expediente, buque y almacén actualizados':'Expediente y buque actualizados'));
   };
   const deleteCaseAttachment=(caseId,scope,file,receptionRef='')=>{
@@ -1226,7 +1228,7 @@ function App({auth,finance,onFinanceChange,onLogout}){
       documentosRecepcion:scope==='reception-document'?(entry.documentosRecepcion||[]).filter(stored=>!sameAttachment(stored,file)):entry.documentosRecepcion
     }:entry):warehouseEntries;
     setCases(nextCases);setWarehouseEntries(nextWarehouse);saveOperational(nextCases,transports,nextWarehouse,customs,calendarEvents,providers,vessels);notify('Archivo eliminado del expediente');
-  };  const deleteCase=id=>{const target=cases.find(item=>item.id===id);if(!target)return;const linkedWarehouse=warehouseEntries.filter(entry=>entry.expediente===id&&!entry.archivado);const warning=linkedWarehouse.length?`\n\nTiene ${linkedWarehouse.length} entrada(s) de almacén vinculada(s). No se borrará la mercancía: quedará sin expediente para no perder evidencias.`:'';if(!window.confirm(`¿Borrar el expediente ${target.id} - ${target.buque}?${warning}\n\nSe quitarán sus trabajos del calendario y transportes.`))return;const nextCases=cases.filter(item=>item.id!==id);const nextTransports=transports.filter(item=>item.expediente!==id);const nextCalendar=calendarEvents.filter(item=>item.expediente!==id);const nextCustoms=customs.filter(item=>item.expediente!==id);const nextWarehouse=warehouseEntries.map(entry=>entry.expediente===id?{...entry,expediente:''}:entry);setCases(nextCases);setTransports(nextTransports);setCalendarEvents(nextCalendar);setCustoms(nextCustoms);setWarehouseEntries(nextWarehouse);saveOperational(nextCases,nextTransports,nextWarehouse,nextCustoms,nextCalendar);setSelectedId(nextCases[0]?.id||'');notify('Expediente borrado y calendario limpiado')};
+  };  const deleteCase=id=>{const target=cases.find(item=>item.id===id);if(!target)return;const linkedWarehouse=warehouseEntries.filter(entry=>entry.expediente===id&&!entry.archivado);const warning=linkedWarehouse.length?`\n\nTiene ${linkedWarehouse.length} entrada(s) de almacén vinculada(s). No se borrará la mercancía: quedará sin expediente para no perder evidencias.`:'';if(!window.confirm(`¿Borrar el expediente ${target.id} - ${target.buque}?${warning}\n\nSe quitarán sus trabajos del calendario y transportes.`))return;const nextCases=cases.filter(item=>item.id!==id);const nextTransports=transports.filter(item=>item.expediente!==id);const nextCalendar=calendarEvents.filter(item=>item.expediente!==id);const nextCustoms=customs.filter(item=>item.expediente!==id);const nextWarehouse=warehouseEntries.map(entry=>entry.expediente===id?{...entry,expediente:''}:entry);setCases(nextCases);setTransports(nextTransports);setCalendarEvents(nextCalendar);setCustoms(nextCustoms);setWarehouseEntries(nextWarehouse);saveOperational(nextCases,nextTransports,nextWarehouse,nextCustoms,nextCalendar,providers,vessels,deletedVesselKeys,{action:'case.delete',details:{caseRef:target.id,vessel:target.buque,client:target.cliente,port:target.puerto,linkedWarehouse:linkedWarehouse.length,linkedTransports:transports.filter(item=>item.expediente===id).length}});setSelectedId(nextCases[0]?.id||'');notify('Expediente borrado y calendario limpiado')};
   const rebuildCalendarServices=async()=>{const activeCaseIds=new Set(cases.filter(item=>item.estado!=='Completado').map(item=>item.id));const affected=calendarEvents.filter(event=>activeCaseIds.has(event.expediente)).length;const affectedTransports=transports.filter(item=>activeCaseIds.has(item.expediente)).length;if(!affected&&!affectedTransports){notify('No hay servicios activos que limpiar');return}if(!window.confirm(`¿Limpiar y reconstruir el calendario?\n\nSe quitarán ${affected} tarjetas del calendario y ${affectedTransports} transportes planificados de expedientes activos. No se borran expedientes, mercancía ni documentos. Después se reconstruirá SOLO con transportes usando ETB/fecha del buque.`))return;const nextCalendar=calendarEvents.filter(event=>!activeCaseIds.has(event.expediente));const nextTransports=transports.filter(item=>!activeCaseIds.has(item.expediente));setCalendarEvents(nextCalendar);setTransports(nextTransports);await saveOperational(cases,nextTransports,warehouseEntries,customs,nextCalendar);notify('Calendario limpiado; reconstruyendo solo transportes');await loadOperational()};
   const updateClient=updated=>{const normalized=normalizeClientProfile(updated);const key=normalized.codigo;const exists=finance.clients.some(item=>(item.codigo||item.id)===key);const next={...finance,clients:exists?finance.clients.map(item=>(item.codigo||item.id)===key?normalized:item):[normalized,...finance.clients]};onFinanceChange(next).then(()=>notify('Ficha de cliente actualizada')).catch(reason=>notify(reason.message))};
   const updateInvoice=updated=>{const exists=finance.invoices.some(item=>item.id===updated.id);const next={...finance,invoices:exists?finance.invoices.map(item=>item.id===updated.id?updated:item):[updated,...finance.invoices]};onFinanceChange(next).then(()=>notify(exists?'Documento actualizado':'Borrador de factura creado')).catch(reason=>notify(reason.message))};
@@ -1263,7 +1265,7 @@ function App({auth,finance,onFinanceChange,onLogout}){
         },...(item.timelineCustom||[])]:item.timelineCustom
       }:item);
     }
-    setWarehouseEntries(next);setCases(nextCases);saveOperational(nextCases,transports,next);
+    setWarehouseEntries(next);setCases(nextCases);saveOperational(nextCases,transports,next,customs,calendarEvents,providers,vessels,deletedVesselKeys,{action:'warehouse.update',details:{warehouseRef:normalized.ref,caseRef:normalized.expediente||'',vessel:normalized.buque,packages:normalized.bultos,weight:normalized.peso}});
     notify(relatedCase&&previous?.expediente!==updated.expediente?'Mercancía vinculada al expediente':'Entrada de almacén actualizada');
   };
   const deleteWarehouseEntry=entry=>{
@@ -1271,7 +1273,7 @@ function App({auth,finance,onFinanceChange,onLogout}){
     const nextWarehouse=warehouseEntries.filter(item=>item.ref!==entry.ref);
     const affectedCaseIds=[entry.expediente].filter(Boolean);
     const nextCases=affectedCaseIds.length?cases.map(item=>affectedCaseIds.includes(item.id)?syncCaseWithWarehouseEntries({...item,recepciones:(item.recepciones||[]).filter(reception=>reception.ref!==entry.ref)},nextWarehouse):item):cases;
-    setWarehouseEntries(nextWarehouse);setCases(nextCases);saveOperational(nextCases,transports,nextWarehouse);notify('Entrada de almacén eliminada');
+    setWarehouseEntries(nextWarehouse);setCases(nextCases);saveOperational(nextCases,transports,nextWarehouse,customs,calendarEvents,providers,vessels,deletedVesselKeys,{action:'warehouse.delete',details:{warehouseRef:entry.ref,caseRef:entry.expediente||'',vessel:entry.buque,packages:entry.bultos,weight:entry.peso}});notify('Entrada de almacén eliminada');
   };
   const updateCustom=updated=>{const next=customs.map(item=>item.id===updated.id?updated:item);setCustoms(next);saveOperational(cases,transports,warehouseEntries,next);notify('Trámite aduanero actualizado')};
   const deleteCalendarService=event=>{
@@ -1285,7 +1287,7 @@ function App({auth,finance,onFinanceChange,onLogout}){
     const nextTransports=event.transporte&&!transportStillReferenced?transports.filter(item=>item.id!==event.transporte):transports;
     const nextCases=cases.map(item=>item.id===event.expediente&&!hasOtherTransport?normalizeMerchandise({...item,autoTransportDisabled:true}):item);
     setCalendarEvents(nextCalendar);setTransports(nextTransports);setCases(nextCases);
-    saveOperational(nextCases,nextTransports,warehouseEntries,customs,nextCalendar,providers,vessels);
+    saveOperational(nextCases,nextTransports,warehouseEntries,customs,nextCalendar,providers,vessels,deletedVesselKeys,{action:'calendar.delete',details:{caseRef:event.expediente||'',transportId:event.transporte||'',vessel:related?.buque||event.titulo,service:event.tipoServicio||'Transporte',date:event.fecha,start:event.inicio}});
     notify(hasOtherTransport?'Servicio eliminado del calendario':'Servicio eliminado; no se recreará automáticamente hasta crear otro transporte');
   };
   const saveCalendarEvent=event=>{
@@ -1314,7 +1316,7 @@ function App({auth,finance,onFinanceChange,onLogout}){
     const newSchedule=[colored.fecha,colored.inicio,colored.fin].filter(Boolean).join(' ');
     const scheduleChanged=Boolean(oldSchedule&&newSchedule&&oldSchedule!==newSchedule);
     const nextCases=cases.map(item=>{if(item.id!==colored.expediente)return item;const flow=operationFlow(item);const isTransport=colored.tipoServicio==='Transporte'||String(colored.tipoServicio||'').toLowerCase().startsWith('survey');const assigned=Boolean(colored.asignado&&colored.asignado!=='Sin asignar');const changed=isTransport&&assigned&&item.conductor!==colored.asignado;const now=new Date();const timelineUpdates=[...(scheduleChanged?[{id:`MOVE-${item.id}-${Date.now()}`,fecha:now.toLocaleDateString('es-ES'),hora:now.toLocaleTimeString('es-ES',{hour:'2-digit',minute:'2-digit'}),titulo:'Servicio reprogramado',detalle:`${oldSchedule} → ${newSchedule}  -  ${colored.titulo}`,actor:visibleUser.fullName,estado:'done'}]:[]),...(changed?[{id:`ASSIGN-${item.id}-${Date.now()}`,fecha:now.toLocaleDateString('es-ES'),hora:now.toLocaleTimeString('es-ES',{hour:'2-digit',minute:'2-digit'}),titulo:'Responsable asignado',detalle:`${colored.asignado}  -  ${colored.titulo}`,actor:visibleUser.fullName,estado:'done'}]:[])];return normalizeMerchandise({...item,autoTransportDisabled:false,conductor:colored.asignado,operationalFlow:isTransport?{...flow,assignment:flow.delivery||assigned}:flow,timelineCustom:timelineUpdates.length?[...timelineUpdates,...(item.timelineCustom||[])]:item.timelineCustom})});
-    setCalendarEvents(nextCalendar);setTransports(nextTransports);setCases(nextCases);saveOperational(nextCases,nextTransports,warehouseEntries,customs,nextCalendar);notify(exists?'Tarea, transporte y expediente actualizados':'Trabajo añadido y sincronizado con el calendario');
+    setCalendarEvents(nextCalendar);setTransports(nextTransports);setCases(nextCases);saveOperational(nextCases,nextTransports,warehouseEntries,customs,nextCalendar,providers,vessels,deletedVesselKeys,{action:'calendar.update',details:{caseRef:colored.expediente||'',transportId:colored.transporte||'',service:colored.tipoServicio||'Transporte',route:colored.titulo,date:colored.fecha,start:colored.inicio,end:colored.fin,driver:colored.asignado||'Sin asignar'}});notify(exists?'Tarea, transporte y expediente actualizados':'Trabajo añadido y sincronizado con el calendario');
   };
   const saveProvider=provider=>{const exists=providers.some(item=>item.id===provider.id);const next=exists?providers.map(item=>item.id===provider.id?provider:item):[...providers,{...provider,id:'PRV-'+String(providers.length+1).padStart(3,'0')}];setProviders(next);saveOperational(cases,transports,warehouseEntries,customs,calendarEvents,next);notify(exists?'Proveedor actualizado':'Proveedor añadido')};
   const saveVessel=vessel=>{
@@ -1380,7 +1382,7 @@ function App({auth,finance,onFinanceChange,onLogout}){
     const automaticWarehouseEntry=stepKey==='cargo'&&!surveyService&&!alreadyInWarehouse?{ref:cargoReference,source:'driver-flow',expediente:id,buque:target.buque,zona:'PENDIENTE',entrada:formatReceptionDate(now.toISOString()),fechaRecepcion:now.toISOString(),bultos:merchandiseCount(cargoMerchandise),peso:merchandiseWeightLabel(cargoMerchandise),mercancias:cargoMerchandise,fotos:cargoPhotos,documentosRecepcion:[],dias:0,estado:'En stock',archivado:false}:null;
     const nextWarehouse=ready?warehouseEntries.map(item=>deliveryWarehouseScope.includes(item)?{...item,expediente:item.expediente||id,estado:'Expedido',archivado:true,salida:new Date().toISOString()}:item):cargoHasWarehouse?warehouseEntries.map(entry=>selectedWarehouseRefs.includes(entry.ref)?{...entry,expediente:id,buque:target.buque,estado:entry.estado||'En stock',archivado:false}:entry):automaticWarehouseEntry?[automaticWarehouseEntry,...warehouseEntries]:warehouseEntries;
     setCases(nextCases);setTransports(nextTransports);setWarehouseEntries(nextWarehouse);
-    saveOperational(nextCases,nextTransports,nextWarehouse);
+    saveOperational(nextCases,nextTransports,nextWarehouse,customs,calendarEvents,providers,vessels,deletedVesselKeys,{action:'step.complete',details:{caseRef:id,vessel:target.buque,step:stepKey,title:expected.title,readyForBilling:ready,podException}});
     notify(ready?(surveyService?'Survey confirmado: expediente listo para facturar':storageOnly?'Salida confirmada: expediente listo para facturar':podException?'Entrega cerrada sin POD sellado: expediente listo para facturar':'POD registrado: expediente listo para facturar'):expected.title+' registrado');
     return true;
   };
@@ -1402,7 +1404,7 @@ function App({auth,finance,onFinanceChange,onLogout}){
     const nextTransports=stepKey==='delivery'?transports.map(item=>item.expediente===id?{...item,estado:item.conductor&&item.conductor!=='Sin asignar'?'Asignado':'Sin asignar'}:item):transports;
     const nextWarehouse=stepKey==='delivery'?warehouseEntries.map(item=>item.expediente===id?{...item,estado:'En stock',archivado:false,salida:null}:item):warehouseEntries;
     setCases(nextCases);setTransports(nextTransports);setWarehouseEntries(nextWarehouse);
-    saveOperational(nextCases,nextTransports,nextWarehouse);
+    saveOperational(nextCases,nextTransports,nextWarehouse,customs,calendarEvents,providers,vessels,deletedVesselKeys,{action:'step.reopen',details:{caseRef:id,vessel:target.buque,step:stepKey,title:reopened.title,method:'undo'}});
     notify(`${reopened.title} reabierto`);
   };
   const reopenCaseStep=(id,stepKey)=>{
@@ -1426,7 +1428,7 @@ No se borrarán documentos ni fotos. El expediente volverá a este punto para co
     const nextTransports=stepIndex<=steps.findIndex(step=>step.key==='delivery')?transports.map(item=>item.expediente===id&&item.estado==='Entregado'?{...item,estado:item.conductor&&item.conductor!=='Sin asignar'?'Asignado':'Sin asignar'}:item):transports;
     const nextWarehouse=stepIndex<=steps.findIndex(step=>step.key==='delivery')?warehouseEntries.map(item=>item.expediente===id&&item.archivado?{...item,estado:'En stock',archivado:false,salida:null}:item):warehouseEntries;
     setCases(nextCases);setTransports(nextTransports);setWarehouseEntries(nextWarehouse);
-    saveOperational(nextCases,nextTransports,nextWarehouse);
+    saveOperational(nextCases,nextTransports,nextWarehouse,customs,calendarEvents,providers,vessels,deletedVesselKeys,{action:'step.reopen',details:{caseRef:id,vessel:target.buque,step:stepKey,title:reopened.title,method:'reopen'}});
     notify(`${reopened.title} reabierto`);
   };  const registerWarehouseEntry=form=>{
     const relatedCase=cases.find(item=>item.id===form.expediente);
@@ -1483,7 +1485,7 @@ No se borrarán documentos ni fotos. El expediente volverá a este punto para co
         },...(entry.timelineCustom||[])]
       });
     });
-    const next=[item,...warehouseEntries];setWarehouseEntries(next);setCases(nextCases);saveOperational(nextCases,transports,next);
+    const next=[item,...warehouseEntries];setWarehouseEntries(next);setCases(nextCases);saveOperational(nextCases,transports,next,customs,calendarEvents,providers,vessels,deletedVesselKeys,{action:'warehouse.create',details:{warehouseRef:item.ref,caseRef:item.expediente||'',vessel:item.buque,packages:item.bultos,weight:item.peso,zone:item.zona,photos:(item.fotos||[]).length,documents:(item.documentosRecepcion||[]).length}});
     notify(relatedCase?`Entrada ${item.ref} vinculada a ${relatedCase.id}`:`Entrada ${item.ref} guardada sin expediente`);
   };
   const [title,subtitle]=TITLES[tab];
@@ -1520,6 +1522,7 @@ No se borrarán documentos ni fotos. El expediente volverá a este punto para co
         {tab==='correos'&&<Correos csrfToken={auth.csrfToken} notify={notify} openCase={openCase} reloadOperational={loadOperational} canRebuild={hasRole(effectiveRoles,'admin')}/>}
         {tab==='clientes'&&showFinance&&<Clientes notify={notify} clients={finance.clients} updateClient={updateClient}/>}
         {tab==='facturacion'&&showFinance&&<Facturacion openCase={openCase} notify={notify} invoices={finance.invoices} cases={casesWithFinance} warehouseEntries={warehouseEntries} transports={transports} calendarEvents={calendarEvents} clients={finance.clients} updateInvoice={updateInvoice} syncInvoices={syncInvoices} csrfToken={auth.csrfToken} currentUser={visibleUser}/>}
+        {tab==='auditoria'&&hasRole(user,'admin')&&!previewUser&&<Auditoria csrfToken={auth.csrfToken} notify={notify}/>}
         {tab==='usuarios'&&hasRole(user,'admin')&&!previewUser&&<Usuarios csrfToken={auth.csrfToken} notify={notify} onPreview={startPreview} onUsersChanged={loadTeam}/>}
       </div>
     </main>
@@ -2763,6 +2766,68 @@ function MailReviewModal({item,close,submit}){
   const service=(type,key,value)=>setForm({...form,[type]:{...form[type],[key]:value}});
   const save=async event=>{event.preventDefault();setBusy(true);setError('');try{await submit(form)}catch(reason){setError(reason.message);setBusy(false)}};
   return <div className="modal-backdrop" onMouseDown={event=>{if(event.target===event.currentTarget&&!busy)close()}}><section className="modal mail-review-modal"><div className="modal-head"><div><span className="overline">Revisión de correo</span><h2>Confirmar trabajo operativo</h2><p>{item.subject}</p></div><button className="icon-button" disabled={busy} onClick={close}><X/></button></div><form onSubmit={save}>{error&&<div className="form-error wide"><CircleAlert/>{error}</div>}<label className="field"><span>Cliente</span><input name="client" value={form.client} onChange={top}/></label><label className="field"><span>Buque *</span><input name="vessel" value={form.vessel} onChange={top} required/></label><label className="field"><span>ETA  -  fecha</span><input name="eta" type="date" value={form.eta} onChange={top}/></label><label className="field"><span>ETA  -  hora</span><input name="eta_time" type="time" value={form.eta_time} onChange={top}/></label><label className="field"><span>ETB  -  fecha</span><input name="etb" type="date" value={form.etb} onChange={top}/></label><label className="field"><span>ETB  -  hora</span><input name="etb_time" type="time" value={form.etb_time} onChange={top}/></label><label className="field"><span>ETD  -  fecha</span><input name="etd" type="date" value={form.etd} onChange={top}/></label><label className="field"><span>ETD  -  hora</span><input name="etd_time" type="time" value={form.etd_time} onChange={top}/></label><label className="field"><span>Puerto</span><input name="port" value={form.port} onChange={top}/></label><label className="field"><span>Prioridad</span><select name="priority" value={form.priority} onChange={top}>{['Baja','Media','Alta','Urgente'].map(value=><option key={value}>{value}</option>)}</select></label><label className="field"><span>Referencia cliente</span><input name="existing_reference" value={form.existing_reference} onChange={top}/></label><label className="field wide"><span>Resumen de mercancía</span><input name="cargo_summary" value={form.cargo_summary} onChange={top}/></label><label className="field wide"><span>Instrucciones operativas</span><input name="operational_notes" value={form.operational_notes} onChange={top}/></label><fieldset className="mail-service-fieldset wide"><label className="service-check"><input type="checkbox" checked={form.reception.required} onChange={event=>service('reception','required',event.target.checked)}/><Box/><span><b>RECEPCIÓN</b><small>Crear tarea de recepción</small></span></label>{form.reception.required&&<div className="mail-service-fields"><label className="field"><span>Fecha *</span><input type="date" value={form.reception.date} onChange={event=>service('reception','date',event.target.value)} required/></label><label className="field"><span>Hora</span><input type="time" value={form.reception.time} onChange={event=>service('reception','time',event.target.value)}/></label><label className="field"><span>Lugar</span><input value={form.reception.location} onChange={event=>service('reception','location',event.target.value)}/></label></div>}</fieldset><fieldset className="mail-service-fieldset wide"><label className="service-check"><input type="checkbox" checked={form.transport.required} onChange={event=>service('transport','required',event.target.checked)}/><Truck/><span><b>TRANSPORTE</b><small>Crear transporte y tarea de calendario</small></span></label>{form.transport.required&&<div className="mail-service-fields"><label className="field"><span>Fecha *</span><input type="date" value={form.transport.date} onChange={event=>service('transport','date',event.target.value)} required/></label><label className="field"><span>Hora</span><input type="time" value={form.transport.time} onChange={event=>service('transport','time',event.target.value)}/></label><label className="field"><span>Recogida</span><input value={form.transport.pickup} onChange={event=>service('transport','pickup',event.target.value)}/></label><label className="field"><span>Entrega</span><input value={form.transport.delivery} onChange={event=>service('transport','delivery',event.target.value)}/></label></div>}</fieldset><div className="modal-actions wide"><button type="button" className="button tertiary" disabled={busy} onClick={close}>Cancelar</button><button className="button primary" disabled={busy}><CheckCircle2/>{busy?'Creando…':'Crear expediente y trabajos'}</button></div></form></section></div>;
+}
+
+const AUDIT_LABELS={
+  'auth.login':'Inicio de sesión',
+  'auth.logout':'Cierre de sesión',
+  'auth.initial_admin_created':'Administrador inicial creado',
+  'users.create':'Usuario creado',
+  'users.roles_update':'Roles actualizados',
+  'clients.create':'Cliente creado',
+  'finance.update':'Facturación actualizada',
+  'holded.proform.create':'Proforma enviada a Holded',
+  'attachment.upload':'Archivo subido',
+  'operational.update':'Operativa actualizada',
+  'case.create':'Expediente creado',
+  'case.update':'Expediente editado',
+  'case.delete':'Expediente borrado',
+  'warehouse.create':'Entrada de almacén creada',
+  'warehouse.update':'Entrada de almacén editada',
+  'warehouse.delete':'Entrada de almacén eliminada',
+  'calendar.update':'Calendario/transporte editado',
+  'calendar.delete':'Servicio de calendario eliminado',
+  'step.complete':'Paso operativo completado',
+  'step.reopen':'Paso operativo reabierto'
+};
+const auditLabel=action=>AUDIT_LABELS[action]||String(action||'Movimiento');
+const auditDetailsText=details=>{
+  if(!details||typeof details!=='object')return '—';
+  const entries=Object.entries(details).filter(([,value])=>value!==''&&value!==null&&value!==undefined);
+  if(!entries.length)return '—';
+  return entries.map(([key,value])=>`${key}: ${Array.isArray(value)?value.join(', '):typeof value==='object'?JSON.stringify(value):value}`).join(' · ');
+};
+function Auditoria({notify}){
+  const [items,setItems]=useState([]);
+  const [query,setQuery]=useState('');
+  const [loading,setLoading]=useState(true);
+  const [error,setError]=useState('');
+  const load=()=>{
+    setLoading(true);setError('');
+    api('/api/admin/audit.php?limit=300').then(result=>setItems(result.items||[])).catch(reason=>{setError(reason.message);notify(reason.message)}).finally(()=>setLoading(false));
+  };
+  useEffect(load,[]);
+  const visible=items.filter(item=>{
+    const haystack=[item.userName,item.email,item.action,auditLabel(item.action),auditDetailsText(item.details),item.ipAddress,item.createdAt].join(' ').toLowerCase();
+    return haystack.includes(query.toLowerCase());
+  });
+  const important=visible.filter(item=>!/operational\.update/.test(item.action)).length;
+  return <section className="panel audit-panel">
+    <SectionHeader title="Registro de actividad" subtitle="Solo administradores: entradas, borrados, cambios, archivos, facturación y accesos" action={<button className="button secondary" onClick={load} disabled={loading}>{loading?<RefreshCw className="spin"/>:<RefreshCw/>} Actualizar</button>}/>
+    <div className="audit-toolbar"><label className="search-box standalone"><Search/><input value={query} onChange={event=>setQuery(event.target.value)} placeholder="Buscar usuario, acción, expediente, IP o detalle…"/></label><div className="audit-kpis"><span><b>{visible.length}</b><small>movimientos</small></span><span><b>{important}</b><small>relevantes</small></span></div></div>
+    {error&&<div className="form-error"><CircleAlert/>{error}</div>}
+    {loading?<div className="users-loading">Cargando auditoría…</div>:<div className="audit-table">
+      <div className="audit-head"><span>Fecha</span><span>Usuario</span><span>Acción</span><span>Detalle</span><span>IP</span></div>
+      {visible.map(item=><article className="audit-row" key={item.id}>
+        <time>{item.createdAt?new Date(item.createdAt.replace(' ','T')).toLocaleString('es-ES'):'—'}</time>
+        <span><b>{item.userName}</b><small>{item.email||'Sistema'}</small></span>
+        <span><Badge tone={/delete|borr|ignore|error|logout/.test(item.action)?'danger':/create|upload|login|complete/.test(item.action)?'success':'info'}>{auditLabel(item.action)}</Badge><small>{item.action}</small></span>
+        <p>{auditDetailsText(item.details)}</p>
+        <code>{item.ipAddress}</code>
+      </article>)}
+      {!visible.length&&<Empty text="No hay movimientos con ese filtro."/>}
+    </div>}
+  </section>;
 }
 
 function Usuarios({csrfToken,notify,onPreview,onUsersChanged}){

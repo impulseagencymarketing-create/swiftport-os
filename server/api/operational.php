@@ -52,5 +52,11 @@ $statement = db()->prepare(
      ON DUPLICATE KEY UPDATE data = VALUES(data), updated_by = VALUES(updated_by)'
 );
 $statement->execute([$encoded, $user['id']]);
-audit((int) $user['id'], 'operational.update');
+$audit = $payload['audit'] ?? null;
+if (is_array($audit) && isset($audit['action']) && is_string($audit['action']) && $audit['action'] !== '') {
+    $details = $audit['details'] ?? [];
+    audit((int) $user['id'], substr($audit['action'], 0, 80), is_array($details) ? $details : []);
+} else {
+    audit((int) $user['id'], 'operational.update');
+}
 respond(['ok' => true]);
