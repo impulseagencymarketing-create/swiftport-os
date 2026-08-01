@@ -1111,7 +1111,7 @@ function App({auth,finance,onFinanceChange,onLogout}){
   useEffect(()=>{
     if(!operationalLoaded||!team.length)return;
     const names=new Set(operationalTeam.map(member=>member.fullName));
-    const normalizedCalendar=calendarEvents.filter(isTransportCalendarEvent).map(event=>{const asignado=event.asignado!=='Sin asignar'&&!names.has(event.asignado)?'Sin asignar':event.asignado;return {...event,asignado,tipoServicio:event.tipoServicio||'Transporte',color:calendarTone(event,cases)}});
+    const normalizedCalendar=calendarEvents.filter(isTransportCalendarEvent).map(event=>{const synced=calendarEventWithCaseSlot(event,cases);const asignado=synced.asignado!=='Sin asignar'&&!names.has(synced.asignado)?'Sin asignar':synced.asignado;return {...synced,asignado,tipoServicio:synced.tipoServicio||'Transporte',color:calendarTone(synced,cases)}});
     const normalized=transports.map(item=>{const linked=normalizedCalendar.find(event=>event.transporte===item.id);const conductor=item.conductor!=='Sin asignar'&&!names.has(item.conductor)?'Sin asignar':linked?.asignado||item.conductor;return linked?{...item,conductor,fecha:linked.fecha,inicio:linked.inicio,fin:linked.fin,hora:formatSchedule(linked.fecha,linked.inicio,linked.fin),estado:conductor==='Sin asignar'?'Sin asignar':item.estado==='Sin asignar'?'Asignado':item.estado}:{...item,conductor,estado:conductor==='Sin asignar'?'Sin asignar':item.estado}});
     const changed=normalized.some((item,index)=>JSON.stringify(item)!==JSON.stringify(transports[index]))||normalizedCalendar.some((item,index)=>item.color!==calendarEvents[index]?.color);
     if(changed){setTransports(normalized);setCalendarEvents(normalizedCalendar);saveOperational(cases,normalized,warehouseEntries,customs,normalizedCalendar)}
@@ -1178,17 +1178,38 @@ function App({auth,finance,onFinanceChange,onLogout}){
     const nextTransports=transports.map(item=>{
       if(item.expediente!==operationalCase.id)return item;
       const linked=syncLinkedTransportWithCase(item,previousCase,operationalCase);
-      if(linked.scheduleSource==='manual')return linked;
-      return slot.date?{...linked,fecha:slot.date,inicio:slot.start,fin:end,hora:slot.start?formatSchedule(slot.date,slot.start,end):`${slot.date}  -  FALTA HORARIO`,scheduleStatus,scheduleNote}:linked;
+      if(['Entregado','Completado','Cancelado'].includes(String(linked.estado||'')))return linked;
+      return slot.date?{...linked,fecha:slot.date,inicio:slot.start,fin:end,hora:slot.start?formatSchedule(slot.date,slot.start,end):`${slot.date}  -  FALTA HORARIO`,scheduleSource:slot.source,scheduleStatus,scheduleNote}:linked;
     });
-    const nextCalendar=calendarEvents.map(event=>{
+    const syncedCalendar=calendarEvents.map(event=>{
       if(event.expediente!==operationalCase.id||!isTransportCalendarEvent(event))return event;
       const linkedTransport=nextTransports.find(item=>item.id===event.transporte);
       const syncedRoute=linkedTransport?transportRoute(linkedTransport):replaceLinkedVesselText(event.titulo,previousCase,operationalCase);
       const base={...event,titulo:syncedRoute,origen:linkedTransport?.origen||event.origen,destino:linkedTransport?.destino||event.destino};
-      if(base.scheduleSource==='manual')return {...base,color:calendarTone(base,next)};
-      return slot.date?{...base,fecha:slot.date,inicio:slot.start,fin:end,color:calendarTone(base,next),scheduleStatus,scheduleNote}:base;
+      if(['Entregado','Completado','Cancelado'].includes(String(linkedTransport?.estado||event.estado||'')))return {...base,color:calendarTone(base,next)};
+      return slot.date?{...base,fecha:slot.date,inicio:slot.start,fin:end,color:calendarTone(base,next),scheduleSource:slot.source,scheduleStatus,scheduleNote}:base;
     });
+    const existingEventTransports=new Set(syncedCalendar.map(event=>event.transporte).filter(Boolean));
+    const missingCalendarEvents=nextTransports.filter(item=>item.expediente===operationalCase.id&&!existingEventTransports.has(item.id)&&!['Entregado','Completado','Cancelado'].includes(String(item.estado||''))).map((item,index)=>({
+      id:`EV-${Date.now()}-${index}`,
+      titulo:transportRoute(item),
+      origen:item.origen,
+      destino:item.destino,
+      tipoServicio:String(item.vehiculo||'').toLowerCase().includes('survey')?'Survey / muestras':'Transporte',
+      fecha:item.fecha,
+      inicio:item.inicio,
+      fin:item.fin,
+      asignado:item.conductor||'Sin asignar',
+      expediente:item.expediente,
+      transporte:item.id,
+      proveedorId:item.proveedorId||'',
+      observacion:item.observacion||'',
+      color:calendarTone(item,next),
+      scheduleSource:item.scheduleSource||slot.source,
+      scheduleStatus:item.scheduleStatus||scheduleStatus,
+      scheduleNote:item.scheduleNote||scheduleNote
+    }));
+    const nextCalendar=[...syncedCalendar,...missingCalendarEvents].filter(isTransportCalendarEvent);
     setCases(next);setVessels(nextVessels);setWarehouseEntries(nextWarehouse);setTransports(nextTransports);setCalendarEvents(nextCalendar);
     saveOperational(next,nextTransports,nextWarehouse,customs,nextCalendar,providers,nextVessels,deletedVesselKeys,{action:'case.update',details:{caseRef:operationalCase.id,vessel:operationalCase.buque,client:operationalCase.cliente,port:operationalCase.puerto,eta:operationalCase.eta,etb:operationalCase.etb,etd:operationalCase.etd}});
     notify(slot.date?'Expediente, buque, almacén y calendario actualizados':(activeEntries.length===1?'Expediente, buque y almacén actualizados':'Expediente y buque actualizados'));
@@ -1667,12 +1688,11 @@ const calendarNeedsTime=event=>!calendarHasValidStart(event)||String(event?.sche
 const calendarEventWithCaseSlot=(event,cases)=>{
   const related=(cases||[]).find(item=>item.id===event?.expediente);
   const color=portTone(related?.puerto||event?.puerto||event?.destino||event?.titulo);
-  if(event?.scheduleSource==='manual')return {...event,color};
   const slot=related?transportSlotFromCase(related):null;
   if(!slot?.date)return {...event,color};
-  const start=/^\d{2}:\d{2}$/.test(String(slot.start||''))?slot.start:(event?.inicio||'');
+  const start=/^\d{2}:\d{2}$/.test(String(slot.start||''))?slot.start:'';
   const hasStart=/^\d{2}:\d{2}$/.test(String(start||''));
-  return {...event,color,fecha:slot.date,inicio:start,fin:hasStart?plusHourClient(start):(event?.fin||''),scheduleStatus:hasStart?'confirmed':'missing_time',scheduleNote:hasStart?`Programado por ${slot.source}`:`Falta hora ${slot.source||'ETB/ETA'}; pendiente de confirmar horario del buque`};
+  return {...event,color,fecha:slot.date,inicio:start,fin:hasStart?plusHourClient(start):'',scheduleSource:slot.source,scheduleStatus:hasStart?'confirmed':'missing_time',scheduleNote:hasStart?`Programado por ${slot.source}`:`Falta hora ${slot.source||'ETB/ETA'}; pendiente de confirmar horario del buque`};
 };
 const DELIVERY_ALERT_RULES=[
   {key:'2h',label:'seguimiento 2 horas antes',ms:2*60*60*1000,followUp:true},
