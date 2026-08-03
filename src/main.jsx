@@ -1,5 +1,6 @@
 import React, {useEffect, useMemo, useRef, useState} from 'react';
 import {createRoot} from 'react-dom/client';
+import * as pdfjsLib from 'pdfjs-dist/legacy/build/pdf.mjs';
 import {
   Anchor, LayoutDashboard, FolderKanban, Warehouse as WarehouseIcon, Truck, FileCheck2,
   UsersRound, ReceiptText, Menu, X, Plus, Search, Bell, ChevronRight, Ship,
@@ -592,36 +593,93 @@ const umeAlgecirasLines=(item,warehouseEntries=[],transports=[],calendarEvents=[
   return lines;
 };
 const supplierConceptLabel=value=>String(value||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toUpperCase().replace(/\s+/g,' ').trim();
-const supplierConceptLine=(rawLine,item,warehouseEntries=[],transports=[],calendarEvents=[],index=0)=>{
+const supplierLineAmount=rawLine=>{
+  const matches=[...String(rawLine||'').matchAll(/(\d{1,6}(?:[.,]\d{1,2}))\s*(?:EUR|€)?/gi)];
+  if(!matches.length)return 0;
+  return Number(matches[matches.length-1][1].replace(',','.'))||0;
+};
+const supplierCargoFromLine=rawLine=>{
+  const match=String(rawLine||'').replace(/\s+/g,' ').trim().match(/(\d+(?:[.,]\d+)?)\s*(PC|PCS|PIECE|PIECES|BOX|BOXES|PALLET|PALLETS|BULTO|BULTOS|CAJA|CAJAS)\s+(\d+(?:[.,]\d+)?)\s*KGS?/i);
+  if(!match)return '';
+  const qtyNumber=Number(String(match[1]).replace(',','.'))||0;
+  const qty=String(match[1]).replace('.',',').replace(/,0$/,'');
+  const baseUnit=/PC|PIECE|BOX|CAJA/i.test(match[2])?'BOX':/PALLET/i.test(match[2])?'PALLET':'BULTO';
+  const unit=qtyNumber===1?baseUnit:`${baseUnit}S`;
+  const weight=String(match[3]).replace('.',',').replace(/,0$/,'');
+  return `${qty} ${unit} ${weight} KGS`.toUpperCase();
+};
+const supplierServiceDate=rawLine=>{
+  const match=String(rawLine||'').match(/\b(\d{1,2}\/\d{1,2})(?:\/\d{2,4})?\b/);
+  return match?match[1]:'';
+};
+const supplierConceptLine=(rawLine,item,warehouseEntries=[],transports=[],calendarEvents=[],index=0,contextCargo='')=>{
   const cargo=invoiceCargoSummary(item,warehouseEntries);
   const weight=invoiceCargoWeight(item,warehouseEntries);
   const storageDays=invoiceStorageDays(item,warehouseEntries);
   const transportUnits=Math.max(1,invoiceTransportServices(item,transports,calendarEvents).length);
   const clean=String(rawLine||'').replace(/\s+/g,' ').trim();
   if(!clean)return null;
+  const lineCargo=contextCargo||supplierCargoFromLine(clean)||cargo;
+  const amount=supplierLineAmount(clean);
+  const serviceDate=supplierServiceDate(clean);
   const withoutAmount=clean.replace(/\s+[-+]?\d+[.,]\d{1,2}\s*(EUR|€)?$/i,'').trim();
   const label=supplierConceptLabel(withoutAmount);
   if(!/[A-Z]/.test(label))return null;
   if(/^(INVOICE|FACTURA|CUSTOMER|CLIENTE|DATE|FECHA|TOTAL|SUBTOTAL|BASE|VAT|IVA|PAGE|PAG|NUMERO|NIF|CIF|ADDRESS|DIRECCION)\b/.test(label))return null;
-  const make=(id,itemName,detail,price,units=1,tax='0%')=>({id:`supplier-${id}-${Date.now()}-${index}`,item:itemName,detail:String(detail||cargo).toUpperCase(),price:Number(price)||0,units:Number(units)||1,tax});
-  if(/LOAD\s*\/\s*UNLOAD|UNLOAD|RECEPTION/.test(label))return make('load-unload','LOAD / UNLOAD',cargo,umeHandlingPrice(weight));
-  if(/WAREHOUSE|STORAGE|ALMACEN/.test(label))return make('warehouse','WAREHOUSE',`${storageDays} DAYS - ${cargo}`,umeStorageTotal(weight,storageDays)||UME_ALGECIRAS_RATES.minWarehousing);
-  if(/CUSTOMS.*T\s*-?\s*1|CLEARANCE.*T\s*-?\s*1|T1/.test(label))return make('customs-t1','CUSTOMS CLEARANCE T-1',cargo,UME_ALGECIRAS_RATES.customT1Ex1);
-  if(/CUSTOMS|CLEARANCE|ADUANA/.test(label))return make('customs','CUSTOMS CLEARANCE',cargo,UME_ALGECIRAS_RATES.customClearanceC);
-  if(/DELIVERY.*VESSEL|VESSEL.*PORT|TRANSPORT.*VESSEL|ENTREGA.*BUQUE|BUQUE/.test(label))return make('delivery-vessel','DELIVERY VESSEL ALGECIRAS PORT',invoiceTransportDetail(cargo,item,transports,calendarEvents),umeTransportPrice(weight),transportUnits);
-  if(/DOC.*CESSION.*DHL|CESION.*DHL/.test(label))return make('docs-cession-dhl','DOC CESSION DHL',cargo,UME_ALGECIRAS_RATES.docsCessionDhl);
-  if(/DOC.*CESSION.*TNT|CESION.*TNT/.test(label))return make('docs-cession-tnt','DOC CESSION TNT',cargo,UME_ALGECIRAS_RATES.docsCessionTnt);
+  const make=(id,itemName,detail,price,units=1,tax='0%')=>({id:`supplier-${id}-${Date.now()}-${index}`,item:itemName,detail:String(detail||lineCargo).toUpperCase(),price:Number(price)||0,units:Number(units)||1,tax});
+  if(/ARRIVAL.*EXPENSES.*AIRPORT/.test(label))return make('airport-expenses','ARRIVAL EXPENSES AIRPORT',lineCargo,amount);
+  if(/AGENCY.*CLEARANCE.*AIRPORT/.test(label))return make('airport-agency','AGENCY & CLEARANCE AIRPORT',lineCargo,amount);
+  if(/LOAD\s*\/\s*UNLOAD|UNLOAD|RECEPTION/.test(label))return make('load-unload','LOAD / UNLOAD',lineCargo,umeHandlingPrice(weight));
+  if(/WAREHOUSE|STORAGE|ALMACEN/.test(label))return make('warehouse','WAREHOUSE',`${storageDays} DAYS - ${lineCargo}`,umeStorageTotal(weight,storageDays)||UME_ALGECIRAS_RATES.minWarehousing);
+  if(/CUSTOMS.*T\s*-?\s*1|CLEARANCE.*T\s*-?\s*1|T1/.test(label))return make('customs-t1','CUSTOMS CLEARANCE T-1',lineCargo,UME_ALGECIRAS_RATES.customT1Ex1);
+  if(/CUSTOMS|CLEARANCE|ADUANA/.test(label))return make('customs','CUSTOMS CLEARANCE',lineCargo,UME_ALGECIRAS_RATES.customClearanceC);
+  if(/DELIVERY.*VESSEL|VESSEL.*PORT|TRANSPORT.*VESSEL|ENTREGA.*BUQUE|BUQUE/.test(label))return make('delivery-vessel','DELIVERY VESSEL ALGECIRAS PORT',`${invoiceTransportDetail(lineCargo,item,transports,calendarEvents)}${serviceDate?` - ${serviceDate}`:''}`,umeTransportPrice(weight),serviceDate?1:transportUnits);
+  if(/DOC.*CESSION.*DHL|CESION.*DHL/.test(label))return make('docs-cession-dhl','DOC CESSION DHL',lineCargo,UME_ALGECIRAS_RATES.docsCessionDhl);
+  if(/DOC.*CESSION.*TNT|CESION.*TNT/.test(label))return make('docs-cession-tnt','DOC CESSION TNT',lineCargo,UME_ALGECIRAS_RATES.docsCessionTnt);
   if(/OPEN FILE|APERTURA/.test(label))return make('open-file','OPEN FILE',invoiceHeaderTitle(item),UME_ALGECIRAS_RATES.openFile);
-  if(/OPEN WAREHOUSE|NIGHT|WEEKEND|HOLIDAY|FESTIVO/.test(label))return make('open-warehouse-night','OPEN WAREHOUSE NIGHT/BANK HOLIDAYS',cargo,UME_ALGECIRAS_RATES.openWarehouseNightHoliday);
+  if(/OPEN WAREHOUSE|NIGHT|WEEKEND|HOLIDAY|FESTIVO/.test(label))return make('open-warehouse-night','OPEN WAREHOUSE NIGHT/BANK HOLIDAYS',lineCargo,UME_ALGECIRAS_RATES.openWarehouseNightHoliday);
+  if(/AGP|MALAGA|AIRPORT|AEROPUERTO/.test(label)&&/TRANSPORT|TRUCK|RECOGIDA|COLLECTION/.test(label))return make('transport-agp','TRANSPORT FROM AGP TO WAREHOUSE',lineCargo,UME_ALGECIRAS_RATES.transportAgpXrjNextDay);
   if(/AGP|MALAGA|MÁLAGA|AIRPORT|AEROPUERTO/.test(label)&&/TRANSPORT|TRUCK|RECOGIDA|COLLECTION/.test(label))return make('transport-agp','TRANSPORT FROM AGP TO WAREHOUSE',cargo,UME_ALGECIRAS_RATES.transportAgpXrjNextDay);
-  if(/SVQ|SEVILLA/.test(label)&&/TRANSPORT|TRUCK|RECOGIDA|COLLECTION/.test(label))return make('transport-svq','TRANSPORT FROM SVQ TO WAREHOUSE',cargo,UME_ALGECIRAS_RATES.transportFromSvq);
-  if(/COURIER/.test(label))return make('courier','COURIER SERVICE',cargo,0);
-  if(/COLLECTION|PICK\s*UP|RECOGIDA/.test(label))return make('collection','COLLECTION / PICK UP',cargo,UME_ALGECIRAS_RATES.pickUpSmallParcels);
+  if(/SVQ|SEVILLA/.test(label)&&/TRANSPORT|TRUCK|RECOGIDA|COLLECTION/.test(label))return make('transport-svq','TRANSPORT FROM SVQ TO WAREHOUSE',lineCargo,UME_ALGECIRAS_RATES.transportFromSvq);
+  if(/COURIER/.test(label))return make('courier','COURIER SERVICE',lineCargo,0);
+  if(/COLLECTION|PICK\s*UP|RECOGIDA/.test(label))return make('collection','COLLECTION / PICK UP',lineCargo,UME_ALGECIRAS_RATES.pickUpSmallParcels);
   return null;
 };
 const parseSupplierInvoiceConcepts=(text,item,warehouseEntries=[],transports=[],calendarEvents=[])=>{
   const seen=new Set();
-  return String(text||'').split(/\r?\n/).map((line,index)=>supplierConceptLine(line,item,warehouseEntries,transports,calendarEvents,index)).filter(Boolean).filter(line=>{const key=`${line.item}|${line.detail}|${line.price}|${line.units}`;if(seen.has(key))return false;seen.add(key);return true});
+  let contextCargo='';
+  return String(text||'').split(/\r?\n/).map((line,index)=>{
+    const cargo=supplierCargoFromLine(line);
+    if(cargo)contextCargo=cargo;
+    return supplierConceptLine(line,item,warehouseEntries,transports,calendarEvents,index,contextCargo);
+  }).filter(Boolean).filter(line=>{const key=`${line.item}|${line.detail}|${line.price}|${line.units}`;if(seen.has(key))return false;seen.add(key);return true});
+};
+const extractTextWithPdfJs=async file=>{
+  const buffer=await file.arrayBuffer();
+  const pdf=await pdfjsLib.getDocument({data:buffer,disableWorker:true,useSystemFonts:true}).promise;
+  const pages=[];
+  for(let pageNumber=1;pageNumber<=pdf.numPages;pageNumber+=1){
+    const page=await pdf.getPage(pageNumber);
+    const content=await page.getTextContent({normalizeWhitespace:true,disableCombineTextItems:false});
+    const rows=new Map();
+    (content.items||[]).forEach(item=>{
+      const text=String(item?.str||'').replace(/\s+/g,' ').trim();
+      if(!text)return;
+      const transform=item.transform||[];
+      const x=Number(transform[4])||0;
+      const y=Number(transform[5])||0;
+      const key=Math.round(y/3)*3;
+      if(!rows.has(key))rows.set(key,[]);
+      rows.get(key).push({x,text});
+    });
+    const pageText=[...rows.entries()]
+      .sort((a,b)=>b[0]-a[0])
+      .map(([,items])=>items.sort((a,b)=>a.x-b.x).map(item=>item.text).join(' ').replace(/\s+/g,' ').trim())
+      .filter(Boolean)
+      .join('\n');
+    if(pageText)pages.push(pageText);
+  }
+  return cleanSupplierPdfTextForInvoices(pages.join('\n\n'));
 };
 const decodePdfLiteral=value=>String(value||'')
   .replace(/\\([nrtbf()\\])/g,(match,char)=>({n:'\n',r:'\r',t:'\t',b:'',f:'','(':'(',')':')','\\':'\\'}[char]??char))
@@ -686,7 +744,28 @@ const cleanSupplierPdfText=text=>{
   }).filter(Boolean);
   return [...new Set(lines)].join('\n').trim();
 };
+const cleanSupplierPdfTextForInvoices=text=>{
+  const keywords=/LOAD|UNLOAD|RECEPTION|WAREHOUSE|WAREHOUSING|STORAGE|CUSTOMS|CLEARANCE|DELIVERY|VESSEL|PORT|DOC|CESSION|TRANSPORT|COURIER|COLLECTION|PICK|RECOGIDA|ALMACEN|ADUANA|BUQUE|PALLET|BOX|BULTO|KG|KGS|ARRIVAL|AGENCY/i;
+  const price=/\d+[.,]\d{1,2}\s*(EUR|€)?/i;
+  const lines=String(text||'').split(/\r?\n/).map(line=>{
+    const original=String(line||'');
+    const cleaned=original.replace(/[^\p{L}\p{N}€$.,:;()\/+\-\s]/gu,' ').replace(/\s+/g,' ').trim();
+    if(cleaned.length<3||cleaned.length>220)return '';
+    const printableRatio=cleaned.length/Math.max(original.length,1);
+    if(printableRatio<0.65)return '';
+    if(!/\p{L}/u.test(cleaned))return '';
+    if(!(keywords.test(cleaned)||price.test(cleaned)))return '';
+    return cleaned;
+  }).filter(Boolean);
+  return [...new Set(lines)].join('\n').trim();
+};
 const extractSupplierPdfText=async file=>{
+  try{
+    const textWithPdfJs=await extractTextWithPdfJs(file);
+    if(textWithPdfJs)return textWithPdfJs;
+  }catch(error){
+    // Si pdf.js no puede leer el PDF, usamos el extractor básico como respaldo.
+  }
   try{
     const buffer=await file.arrayBuffer();
     const bytes=new Uint8Array(buffer);
@@ -697,7 +776,7 @@ const extractSupplierPdfText=async file=>{
     }
     const rawText=extractTextFromRawPdf(binary);
     const inflatedText=await inflatePdfStreamText(bytes);
-    return cleanSupplierPdfText([rawText,inflatedText].filter(Boolean).join('\n\n'));
+    return cleanSupplierPdfTextForInvoices([rawText,inflatedText].filter(Boolean).join('\n\n'));
   }catch(error){
     return '';
   }

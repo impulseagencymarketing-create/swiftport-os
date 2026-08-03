@@ -23,18 +23,23 @@ jobs:
       - name: Descargar el código
         uses: actions/checkout@v5
 
+      - name: Preparar pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.9.0
+
       - name: Preparar Node.js
         uses: actions/setup-node@v5
         with:
           node-version: 22
-          cache: npm
+          cache: pnpm
 
       - name: Instalar dependencias
-        run: npm ci
+        run: pnpm install --frozen-lockfile
 
       - name: Compilar la aplicación
         run: |
-          npm run build
+          pnpm run build
           mkdir -p dist/api
           cp -R server/api/. dist/api/
 
