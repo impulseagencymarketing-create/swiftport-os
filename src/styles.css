@@ -933,6 +933,115 @@
   overflow:hidden;
   text-overflow:ellipsis;
 }
+.cargo-selection-panel{
+  grid-column:1/-1;
+  border:1px solid #cfe0f3;
+  background:#f8fbff;
+  border-radius:16px;
+  padding:14px;
+}
+.cargo-selection-head{
+  display:flex;
+  justify-content:space-between;
+  gap:12px;
+  align-items:flex-start;
+  margin-bottom:10px;
+}
+.cargo-selection-head b{
+  display:block;
+  font-size:12px;
+  color:var(--ink);
+}
+.cargo-selection-head small{
+  display:block;
+  margin-top:3px;
+  color:var(--muted);
+  font-size:11px;
+  line-height:1.35;
+}
+.cargo-selection-actions{
+  display:flex;
+  gap:8px;
+  flex-wrap:wrap;
+}
+.cargo-option-list{
+  display:grid;
+  grid-template-columns:repeat(auto-fit,minmax(260px,1fr));
+  gap:8px;
+}
+.cargo-option-card{
+  display:flex;
+  gap:10px;
+  align-items:flex-start;
+  border:1px solid var(--line);
+  border-radius:12px;
+  padding:10px;
+  background:#fff;
+  cursor:pointer;
+  min-width:0;
+}
+.cargo-option-card.selected{
+  border-color:#1d6fe8;
+  background:#eef6ff;
+  box-shadow:0 6px 16px rgba(29,111,232,.08);
+}
+.cargo-option-card input{
+  margin-top:2px;
+}
+.cargo-option-card span{
+  min-width:0;
+}
+.cargo-option-card b{
+  display:block;
+  overflow:hidden;
+  color:var(--ink);
+  font-size:11px;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
+.cargo-option-card small{
+  display:block;
+  margin-top:3px;
+  overflow:hidden;
+  color:var(--muted);
+  font-size:10px;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
+.manifest-selected-cargo{
+  display:flex;
+  gap:10px;
+  align-items:flex-start;
+  border:1px solid #b7dafd;
+  background:#eef6ff;
+  border-radius:12px;
+  padding:10px;
+}
+.manifest-selected-cargo svg{
+  width:18px;
+  height:18px;
+  color:var(--primary);
+}
+.manifest-selected-cargo small{
+  display:block;
+  color:var(--muted);
+  font-size:10px;
+  letter-spacing:.04em;
+  text-transform:uppercase;
+}
+.manifest-selected-cargo b{
+  display:block;
+  margin-top:5px;
+  color:var(--ink);
+  font-size:12px;
+}
+.manifest-selected-cargo em{
+  display:block;
+  margin-top:2px;
+  color:var(--muted);
+  font-size:10px;
+  font-style:normal;
+}
 @media(max-width:900px){
   .audit-head{
     display:none;
