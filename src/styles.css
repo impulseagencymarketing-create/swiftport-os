@@ -1077,3 +1077,52 @@
     min-width:980px;
   }
 }
+
+
+.supplier-invoice-import > .field {
+  display: none;
+}
+
+.supplier-import-actions .button.tertiary {
+  display: none;
+}
+
+.invoice-lines-title > span {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.invoice-lines-title small {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.invoice-concept-toolbar {
+  display: grid;
+  grid-template-columns: minmax(260px, 1fr) auto;
+  gap: 12px;
+  align-items: end;
+  padding: 14px;
+  border-bottom: 1px solid var(--line);
+  background: #f8fbff;
+}
+
+.invoice-concept-toolbar .field {
+  margin: 0;
+}
+
+.invoice-concept-toolbar .button {
+  height: 44px;
+}
+
+@media (max-width: 760px) {
+  .invoice-concept-toolbar {
+    grid-template-columns: 1fr;
+  }
+
+  .invoice-concept-toolbar .button {
+    width: 100%;
+  }
+}
