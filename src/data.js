@@ -34,7 +34,7 @@ export const tramitesAduana = [
   {id:'AD-879', expediente:'SW-2026-0048', tipo:'Levante', referencia:'CSV-81K2-P90', limite:'Completado', estado:'Liberado', nota:'Mercancía disponible'},
   {id:'AD-876', expediente:'SW-2026-0044', tipo:'T2L', referencia:'T2L-ES-9918', limite:'Completado', estado:'Liberado', nota:'Archivado en expediente'}
 ];
-export const clientNames = ['UME Shipping','Limani','A-Ships','BlueWave Marine'];
+export const clientNames = ['UME Shipping','Limani','ALS - ALGECIRAS LOGISTICS SOLUTION','A-Ships','BlueWave Marine'];
 export const holdedClientProfiles = [
   {
     codigo:'HLD-43000016',
