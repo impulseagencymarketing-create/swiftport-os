@@ -623,6 +623,70 @@ const parseSupplierInvoiceConcepts=(text,item,warehouseEntries=[],transports=[],
   const seen=new Set();
   return String(text||'').split(/\r?\n/).map((line,index)=>supplierConceptLine(line,item,warehouseEntries,transports,calendarEvents,index)).filter(Boolean).filter(line=>{const key=`${line.item}|${line.detail}|${line.price}|${line.units}`;if(seen.has(key))return false;seen.add(key);return true});
 };
+const decodePdfLiteral=value=>String(value||'')
+  .replace(/\\([nrtbf()\\])/g,(match,char)=>({n:'\n',r:'\r',t:'\t',b:'',f:'','(':'(',')':')','\\':'\\'}[char]??char))
+  .replace(/\\([0-7]{1,3})/g,(match,octal)=>String.fromCharCode(parseInt(octal,8)))
+  .replace(/\s+/g,' ')
+  .trim();
+const extractTextFromRawPdf=raw=>{
+  const textParts=[];
+  const literalRegex=/\((?:\\.|[^\\)])*\)/g;
+  let match;
+  while((match=literalRegex.exec(raw))){
+    const literal=decodePdfLiteral(match[0].slice(1,-1));
+    if(literal&&/[A-Za-z0-9]/.test(literal))textParts.push(literal);
+  }
+  const hexRegex=/<([0-9A-Fa-f]{8,})>/g;
+  while((match=hexRegex.exec(raw))){
+    const hex=match[1];
+    let decoded='';
+    for(let index=0;index<hex.length;index+=4){
+      const code=parseInt(hex.slice(index,index+4),16);
+      if(code>=32&&code<65535)decoded+=String.fromCharCode(code);
+    }
+    decoded=decoded.replace(/\s+/g,' ').trim();
+    if(decoded&&/[A-Za-z0-9]/.test(decoded))textParts.push(decoded);
+  }
+  return textParts.join('\n').replace(/\n{3,}/g,'\n\n').trim();
+};
+const inflatePdfStreamText=async bytes=>{
+  if(typeof DecompressionStream==='undefined')return '';
+  const raw=Array.from(bytes,byte=>String.fromCharCode(byte)).join('');
+  const texts=[];
+  const streamRegex=/<<[\s\S]{0,500}?\/FlateDecode[\s\S]{0,500}?>>\s*stream\r?\n([\s\S]*?)\r?\nendstream/g;
+  let match;
+  while((match=streamRegex.exec(raw))){
+    try{
+      const streamBinary=match[1];
+      const streamBytes=new Uint8Array(streamBinary.length);
+      for(let index=0;index<streamBinary.length;index+=1)streamBytes[index]=streamBinary.charCodeAt(index)&255;
+      const decompressedStream=new Blob([streamBytes]).stream().pipeThrough(new DecompressionStream('deflate'));
+      const decompressedBuffer=await new Response(decompressedStream).arrayBuffer();
+      const decoded=new TextDecoder('latin1').decode(decompressedBuffer);
+      const text=extractTextFromRawPdf(decoded);
+      if(text)texts.push(text);
+    }catch(error){
+      continue;
+    }
+  }
+  return texts.join('\n\n').trim();
+};
+const extractSupplierPdfText=async file=>{
+  try{
+    const buffer=await file.arrayBuffer();
+    const bytes=new Uint8Array(buffer);
+    let binary='';
+    const chunkSize=0x8000;
+    for(let index=0;index<bytes.length;index+=chunkSize){
+      binary+=String.fromCharCode(...bytes.subarray(index,index+chunkSize));
+    }
+    const rawText=extractTextFromRawPdf(binary);
+    const inflatedText=await inflatePdfStreamText(bytes);
+    return [rawText,inflatedText].filter(Boolean).join('\n\n').trim();
+  }catch(error){
+    return '';
+  }
+};
 const clientCostLineTotal=line=>(Number(line.price)||0)*(Number(line.units)||0);
 const clientCostTotal=estimate=>(estimate?.lines||[]).reduce((sum,line)=>sum+clientCostLineTotal(line),0);
 const defaultClientCostEstimate=(item,warehouseEntries=[])=>{
@@ -3199,11 +3263,30 @@ function InvoiceEditModal({item,cases=[],warehouseEntries=[],transports=[],calen
   };
   const addLine=()=>setForm({...form,lines:[...form.lines,{id:`line-${Date.now()}`,item:'WAITING TIME',detail:'',price:0,units:1,tax:'0%'}]});
   const removeLine=index=>setForm({...form,lines:form.lines.filter((_,lineIndex)=>lineIndex!==index)});
-  const addSupplierFiles=event=>{
-    const files=Array.from(event.target.files||[]).map(file=>({id:`SUP-${Date.now()}-${file.name}`,name:file.name,size:file.size,uploadedAt:new Date().toISOString()}));
-    if(!files.length)return;
-    setForm({...form,supplierInvoices:[...(form.supplierInvoices||[]),...files]});
-    setSupplierNote(`${files.length} factura(s) proveedor registradas como evidencia. Pega el texto para extraer conceptos.`);
+  const applySupplierLinesFromText=(text,source='texto')=>{
+    if(!relatedCase){setSupplierNote('Primero vincula la factura a un expediente.');return false}
+    const lines=parseSupplierInvoiceConcepts(text,relatedCase,warehouseEntries,transports,calendarEvents);
+    if(!lines.length){setSupplierNote(source==='PDF'?'PDF guardado, pero no pude leer conceptos claros. Si es escaneado/foto, pega el texto o usa OCR.':'No encontré conceptos claros. Pega líneas como “Load / Unload 18.00” o “Delivery vessel Algeciras Port 65.00”.');return false}
+    const baseLine=form.lines.find(line=>line.id==='ref')||{id:'ref',item:invoiceHeaderTitle(relatedCase),detail:currentCargo,price:0,units:1,tax:'21%'};
+    setForm(current=>({...current,lines:[baseLine,...lines]}));
+    setSupplierNote(`${lines.length} concepto(s) importados automáticamente desde ${source} con tarifa Swiftport. Revisa los importes antes de enviar a Holded.`);
+    return true;
+  };
+  const addSupplierFiles=async event=>{
+    const selectedFiles=Array.from(event.target.files||[]);
+    if(!selectedFiles.length)return;
+    const stamp=Date.now();
+    const files=selectedFiles.map((file,index)=>({id:`SUP-${stamp}-${index}-${file.name}`,name:file.name,size:file.size,uploadedAt:new Date().toISOString()}));
+    setForm(current=>({...current,supplierInvoices:[...(current.supplierInvoices||[]),...files]}));
+    setSupplierNote(`Leyendo ${files.length} PDF(s) de proveedor...`);
+    const extractedTexts=await Promise.all(selectedFiles.map(extractSupplierPdfText));
+    const extractedText=extractedTexts.filter(Boolean).join('\n\n');
+    if(extractedText){
+      setSupplierText(current=>[current,extractedText].filter(Boolean).join('\n\n'));
+      applySupplierLinesFromText(extractedText,'PDF');
+    }else{
+      setSupplierNote(`${files.length} PDF(s) guardados como evidencia. No pude extraer texto automático; pega los conceptos de la factura proveedor para aplicar tu tarifa.`);
+    }
     event.target.value='';
   };
   const removeSupplierFile=id=>setForm({...form,supplierInvoices:(form.supplierInvoices||[]).filter(file=>file.id!==id)});
