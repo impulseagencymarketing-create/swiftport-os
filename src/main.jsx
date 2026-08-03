@@ -562,6 +562,40 @@ const umeTransportPrice=weight=>{
   if(kilos<=0)return UME_ALGECIRAS_RATES.deliveryToVesselUnder50;
   return kilos<50?UME_ALGECIRAS_RATES.deliveryToVesselUnder50:UME_ALGECIRAS_RATES.deliveryOver50PerHour;
 };
+const umeAlgecirasCustomsLabel=item=>String(item?.billing?.customsType||'').toLowerCase().includes('t1')?'CUSTOMS CLEARANCE T-1':'CUSTOMS CLEARANCE';
+const umeAlgecirasCustomsPrice=item=>String(item?.billing?.customsType||'').toLowerCase().includes('t1')?UME_ALGECIRAS_RATES.customT1Ex1:UME_ALGECIRAS_RATES.customClearanceC;
+const hasRouteKeyword=(records=[],pattern)=>records.some(record=>pattern.test(`${record?.recogida||''} ${record?.entrega||''} ${record?.ruta||''} ${record?.observacion||''}`));
+const umeAlgecirasLines=(item,warehouseEntries=[],transports=[],calendarEvents=[],options={})=>{
+  const cargo=invoiceCargoSummary(item,warehouseEntries);
+  const weight=invoiceCargoWeight(item,warehouseEntries);
+  const storageDays=invoiceStorageDays(item,warehouseEntries);
+  const transportServices=invoiceTransportServices(item,transports,calendarEvents);
+  const billOwnTransport=!isStorageOnly(item)&&(transportServices.length>0||(item.servicios||[]).some(service=>/transporte|entrega|delivery/i.test(String(service)))||Number(item.billing?.transportPrice||0)>0);
+  const routeRecords=[...transportServices,...(transports||[]).filter(entry=>entry.expediente===item.id)];
+  const lines=[];
+  if(options.includeRef)lines.push({id:'ref',item:invoiceHeaderTitle(item),detail:cargo,price:0,units:1,tax:'21%'});
+  if(item.billing?.openFile)lines.push({id:'open-file',item:'OPEN FILE',detail:invoiceHeaderTitle(item),price:UME_ALGECIRAS_RATES.openFile,units:1,tax:'0%'});
+  if(item.billing?.docsCessionDhl||hasRouteKeyword(routeRecords,/dhl/i))lines.push({id:'docs-cession-dhl',item:'DOC CESSION DHL',detail:cargo,price:UME_ALGECIRAS_RATES.docsCessionDhl,units:1,tax:'0%'});
+  if(item.billing?.docsCessionTnt||hasRouteKeyword(routeRecords,/tnt/i))lines.push({id:'docs-cession-tnt',item:'DOC CESSION TNT',detail:cargo,price:UME_ALGECIRAS_RATES.docsCessionTnt,units:1,tax:'0%'});
+  if(item.billing?.airportExpenses)lines.push({id:'airport-expenses',item:'ARRIVAL EXPENSES AIRPORT',detail:cargo,price:Number(item.billing.airportExpenses)||0,units:1,tax:'0%'});
+  if(item.billing?.airportAgency)lines.push({id:'airport-agency',item:'AGENCY & CLEARANCE AIRPORT',detail:cargo,price:Number(item.billing.airportAgency)||0,units:1,tax:'0%'});
+  if(hasRouteKeyword(routeRecords,/\bAGP\b|MALAGA|MÁLAGA|AIRPORT|AEROPUERTO/i))lines.push({id:'transport-agp',item:'TRANSPORT FROM AGP TO WAREHOUSE',detail:cargo,price:UME_ALGECIRAS_RATES.transportAgpXrjNextDay,units:1,tax:'0%'});
+  if(hasRouteKeyword(routeRecords,/\bSVQ\b|SEVILLA/i))lines.push({id:'transport-svq',item:'TRANSPORT FROM SVQ TO WAREHOUSE',detail:cargo,price:UME_ALGECIRAS_RATES.transportFromSvq,units:1,tax:'0%'});
+  lines.push({id:'load-unload',item:'LOAD / UNLOAD',detail:cargo,price:umeHandlingPrice(weight),units:1,tax:'0%'});
+  if(storageDays>0)lines.push({id:'warehouse',item:'WAREHOUSE',detail:`${storageDays} DAY${storageDays===1?'':'S'} - ${cargo}`,price:umeStorageTotal(weight,storageDays),units:1,tax:'0%'});
+  if(item.billing?.customsClearance!==false)lines.push({id:'customs',item:umeAlgecirasCustomsLabel(item),detail:cargo,price:umeAlgecirasCustomsPrice(item),units:1,tax:'0%'});
+  if(item.billing?.customsType&&String(item.billing.customsType).toLowerCase().includes('t1'))lines.push({id:'reception-t1',item:'RECEPTION T1-1 (AVI)',detail:cargo,price:UME_ALGECIRAS_RATES.receptionT1Avi,units:1,tax:'0%'});
+  if(billOwnTransport){
+    const transportUnits=Math.max(1,transportServices.length);
+    lines.push({id:'delivery-vessel',item:'DELIVERY VESSEL ALGECIRAS PORT',detail:invoiceTransportDetail(cargo,item,transports,calendarEvents),price:umeTransportPrice(weight),units:transportUnits,tax:'0%'});
+  }
+  if(item.billing?.openWarehouseNightHoliday)lines.push({id:'open-warehouse-night',item:'OPEN WAREHOUSE NIGHT/BANK HOLIDAYS',detail:cargo,price:UME_ALGECIRAS_RATES.openWarehouseNightHoliday,units:1,tax:'0%'});
+  if(Number(item.billing?.waitingHours||0)>0)lines.push({id:'waiting',item:'WAITING TIME',detail:`${item.billing.waitingHours} HOURS WAITING`,price:UME_ALGECIRAS_RATES.deliveryOver50PerHour,units:Number(item.billing.waitingHours),tax:'0%'});
+  (item.billing?.algecirasExtras||[]).forEach((extra,index)=>{
+    lines.push({id:extra.id||`algeciras-extra-${index}`,item:String(extra.item||extra.concepto||'EXTRA SERVICE').toUpperCase(),detail:String(extra.detail||cargo).toUpperCase(),price:Number(extra.price||extra.importe)||0,units:Number(extra.units||extra.unidades)||1,tax:extra.tax||'0%'});
+  });
+  return lines;
+};
 const clientCostLineTotal=line=>(Number(line.price)||0)*(Number(line.units)||0);
 const clientCostTotal=estimate=>(estimate?.lines||[]).reduce((sum,line)=>sum+clientCostLineTotal(line),0);
 const defaultClientCostEstimate=(item,warehouseEntries=[])=>{
@@ -584,14 +618,7 @@ const defaultClientCostEstimate=(item,warehouseEntries=[])=>{
     };
   }
   if(isUmeAlgecirasCase(item)){
-    const storageTotal=umeStorageTotal(weight,storageDays);
-    const lines=[
-      {id:'open-file',item:'OPEN FILE',detail:invoiceHeaderTitle(item),price:UME_ALGECIRAS_RATES.openFile,units:1},
-      {id:'coordination',item:'COORDINATION FEE',detail:cargo,price:UME_ALGECIRAS_RATES.coordination,units:1},
-      {id:'handling',item:'HANDLING',detail:cargo,price:umeHandlingPrice(weight),units:1}
-    ];
-    if(storageDays>0)lines.push({id:'storage',item:'WAREHOUSING / STORAGE',detail:`${storageDays} DAYS - ${cargo}`,price:storageTotal,units:1});
-    lines.push({id:'delivery',item:'DELIVERY TO VESSEL',detail:cargo,price:umeTransportPrice(weight),units:1});
+    const lines=umeAlgecirasLines(item,warehouseEntries,[],[],{includeRef:false}).map(line=>({...line,tax:undefined}));
     return {
       id:`COST-${item.id}`,
       title:`PREVISIÃ“N COSTES ${item.buque||item.id}`.toUpperCase(),
@@ -657,23 +684,7 @@ const draftInvoiceFromCase=(item,warehouseEntries=[],transports=[],calendarEvent
     return {...invoice,importe,coste,margen:importe-coste};
   }
   if(isUmeAlgecirasCase(item)){
-    const weight=invoiceCargoWeight(item,warehouseEntries);
-    const storageDays=invoiceStorageDays(item,warehouseEntries);
-    const storageTotal=umeStorageTotal(weight,storageDays);
-    const transportServices=invoiceTransportServices(item,transports,calendarEvents);
-    const billOwnTransport=!isStorageOnly(item)&&(transportServices.length>0||(item.servicios||[]).some(service=>/transporte|entrega|delivery/i.test(String(service)))||Number(item.billing?.transportPrice||0)>0);
-    const lines=[
-      {id:'ref',item:invoiceHeaderTitle(item),detail:cargo,price:0,units:1,tax:'21%'},
-      {id:'open-file',item:'OPEN FILE',detail:invoiceHeaderTitle(item),price:UME_ALGECIRAS_RATES.openFile,units:1,tax:'0%'},
-      {id:'coordination',item:'COORDINATION FEE',detail:cargo,price:UME_ALGECIRAS_RATES.coordination,units:1,tax:'0%'},
-      {id:'handling',item:'HANDLING',detail:cargo,price:umeHandlingPrice(weight),units:1,tax:'0%'}
-    ];
-    if(storageDays>0)lines.push({id:'storage',item:'WAREHOUSING / STORAGE',detail:`${storageDays} DAY${storageDays===1?'':'S'} - ${cargo}`,price:storageTotal,units:1,tax:'0%'});
-    if(billOwnTransport){
-      const transportUnits=Math.max(1,transportServices.length);
-      lines.push({id:'delivery',item:'DELIVERY TO VESSEL',detail:invoiceTransportDetail(cargo,item,transports,calendarEvents),price:umeTransportPrice(weight),units:transportUnits,tax:'0%'});
-    }
-    if(Number(item.billing?.waitingHours||0)>0)lines.push({id:'waiting',item:'WAITING TIME',detail:`${item.billing.waitingHours} HOURS WAITING`,price:UME_ALGECIRAS_RATES.deliveryOver50PerHour,units:Number(item.billing.waitingHours),tax:'0%'});
+    const lines=umeAlgecirasLines(item,warehouseEntries,transports,calendarEvents,{includeRef:true});
     const due=new Date(Date.now()+30*86400000).toISOString().slice(0,10);
     const invoice={id:'BOR-'+item.id.replace('SW-',''),expediente:item.id,cliente:item.cliente,concepto:invoiceHeaderTitle(item),importe:0,estado:'Borrador',vencimiento:due,buque:item.buque,puerto:item.puerto,proforma:`PRO${String(260000+numericRef(item.id)).slice(-6)}`,observaciones:'ExenciÃ³n de IVA segÃºn ART 22 de la ley 37/1992 y 10.2 del real decreto ley 1624/92 de Diciembre',payment:'BANK ACCOUNT: ES06 0182 4775 5102 0174 1635\\nSWIFT: BBVAESMMXXX',lines};
     const importe=invoiceTotal(invoice);
@@ -2756,7 +2767,7 @@ function Facturacion({openCase,notify,invoices,cases,warehouseEntries=[],transpo
   const totalCosts=activeInvoices.reduce((sum,item)=>sum+invoiceCostOf(item),0);
   const billableCases=cases.filter(item=>operationFlow(item).billingReady);
   const readyCases=billableCases.filter(item=>!invoices.some(invoice=>invoice.expediente===item.id));
-  useEffect(()=>{const standardIds=['ref','reception','handling','storage','transport','waiting','survey'];const standardSet=new Set(standardIds);let changed=false;let nextInvoices=[...invoices];billableCases.forEach(item=>{const existing=nextInvoices.find(invoice=>invoice.expediente===item.id);const draft=draftInvoiceFromCase(item,warehouseEntries,transports,calendarEvents);const locked=existing&&['Enviado a Holded','Facturado','Cobrado','Archivado'].includes(existing.estado);if(locked)return;if(!existing){nextInvoices=[draft,...nextInvoices];changed=true;return}const currentStandard=standardIds.map(id=>{const line=(existing.lines||[]).find(entry=>entry.id===id);return line?[id,line.item,line.detail,Number(line.price)||0,Number(line.units)||0,line.tax||'0%']:null}).filter(Boolean);const draftStandard=standardIds.map(id=>{const line=(draft.lines||[]).find(entry=>entry.id===id);return line?[id,line.item,line.detail,Number(line.price)||0,Number(line.units)||0,line.tax||'0%']:null}).filter(Boolean);const needsRefresh=String(existing.concepto||'')!==String(draft.concepto||'')||String(existing.buque||'')!==String(draft.buque||'')||String(existing.puerto||'')!==String(draft.puerto||'')||Number(existing.coste||0)!==Number(draft.coste||0)||JSON.stringify(currentStandard)!==JSON.stringify(draftStandard);if(!needsRefresh)return;const customLines=(existing.lines||[]).filter(line=>!standardSet.has(line.id));const refreshed={...draft,id:existing.id,cliente:existing.cliente||draft.cliente,estado:existing.estado||draft.estado,vencimiento:existing.vencimiento||draft.vencimiento,proforma:existing.proforma||draft.proforma,observaciones:existing.observaciones||draft.observaciones,payment:existing.payment||draft.payment,lines:[...draft.lines,...customLines]};refreshed.coste=draft.coste;refreshed.margen=invoiceRevenue(refreshed)-Number(draft.coste||0);nextInvoices=nextInvoices.map(invoice=>invoice.id===existing.id?refreshed:invoice);changed=true});if(changed)syncInvoices(nextInvoices)},[billableCases.map(item=>`${item.id}:${serviceTypeOf(item)}:${item.buque}:${item.puerto}:${item.eta}:${item.etb}:${item.etd}:${item.cliente}:${item.updatedAt||''}:${caseExpenseTotal(item)}:${caseExpenses(item).map(expense=>[expense.id,expense.fecha,expense.proveedor,expense.concepto,expense.importe].join(':')).join(',')}`).join('|'),invoices.map(item=>`${item.id}:${item.expediente}:${item.estado}:${item.concepto}:${item.buque}:${item.puerto}:${item.coste||0}:${(item.lines||[]).map(line=>[line.id,line.item,line.detail,line.price,line.units,line.tax].join(':')).join('|')}`).join('||'),warehouseEntries.map(item=>`${item.ref}:${item.expediente}:${item.dias}:${item.estado}:${item.archivado}:${item.salida||''}:${item.updatedAt||''}`).join('|'),transports.map(item=>`${item.id}:${item.expediente}:${item.fecha}:${item.inicio}:${item.fin}:${item.estado||''}`).join('|'),calendarEvents.map(item=>`${item.id}:${item.expediente}:${item.transporte}:${item.tipoServicio}:${item.fecha}:${item.inicio}:${item.fin}`).join('|')]);
+  useEffect(()=>{const standardIds=['ref','reception','handling','storage','transport','waiting','survey','coordination','delivery','load-unload','warehouse','customs','delivery-vessel','open-file','docs-cession-dhl','docs-cession-tnt','airport-expenses','airport-agency','transport-agp','transport-svq','reception-t1','open-warehouse-night'];const standardSet=new Set(standardIds);let changed=false;let nextInvoices=[...invoices];billableCases.forEach(item=>{const existing=nextInvoices.find(invoice=>invoice.expediente===item.id);const draft=draftInvoiceFromCase(item,warehouseEntries,transports,calendarEvents);const locked=existing&&['Enviado a Holded','Facturado','Cobrado','Archivado'].includes(existing.estado);if(locked)return;if(!existing){nextInvoices=[draft,...nextInvoices];changed=true;return}const currentStandard=standardIds.map(id=>{const line=(existing.lines||[]).find(entry=>entry.id===id);return line?[id,line.item,line.detail,Number(line.price)||0,Number(line.units)||0,line.tax||'0%']:null}).filter(Boolean);const draftStandard=standardIds.map(id=>{const line=(draft.lines||[]).find(entry=>entry.id===id);return line?[id,line.item,line.detail,Number(line.price)||0,Number(line.units)||0,line.tax||'0%']:null}).filter(Boolean);const needsRefresh=String(existing.concepto||'')!==String(draft.concepto||'')||String(existing.buque||'')!==String(draft.buque||'')||String(existing.puerto||'')!==String(draft.puerto||'')||Number(existing.coste||0)!==Number(draft.coste||0)||JSON.stringify(currentStandard)!==JSON.stringify(draftStandard);if(!needsRefresh)return;const customLines=(existing.lines||[]).filter(line=>!standardSet.has(line.id));const refreshed={...draft,id:existing.id,cliente:existing.cliente||draft.cliente,estado:existing.estado||draft.estado,vencimiento:existing.vencimiento||draft.vencimiento,proforma:existing.proforma||draft.proforma,observaciones:existing.observaciones||draft.observaciones,payment:existing.payment||draft.payment,lines:[...draft.lines,...customLines]};refreshed.coste=draft.coste;refreshed.margen=invoiceRevenue(refreshed)-Number(draft.coste||0);nextInvoices=nextInvoices.map(invoice=>invoice.id===existing.id?refreshed:invoice);changed=true});if(changed)syncInvoices(nextInvoices)},[billableCases.map(item=>`${item.id}:${serviceTypeOf(item)}:${item.buque}:${item.puerto}:${item.eta}:${item.etb}:${item.etd}:${item.cliente}:${item.updatedAt||''}:${caseExpenseTotal(item)}:${caseExpenses(item).map(expense=>[expense.id,expense.fecha,expense.proveedor,expense.concepto,expense.importe].join(':')).join(',')}`).join('|'),invoices.map(item=>`${item.id}:${item.expediente}:${item.estado}:${item.concepto}:${item.buque}:${item.puerto}:${item.coste||0}:${(item.lines||[]).map(line=>[line.id,line.item,line.detail,line.price,line.units,line.tax].join(':')).join('|')}`).join('||'),warehouseEntries.map(item=>`${item.ref}:${item.expediente}:${item.dias}:${item.estado}:${item.archivado}:${item.salida||''}:${item.updatedAt||''}`).join('|'),transports.map(item=>`${item.id}:${item.expediente}:${item.fecha}:${item.inicio}:${item.fin}:${item.estado||''}`).join('|'),calendarEvents.map(item=>`${item.id}:${item.expediente}:${item.transporte}:${item.tipoServicio}:${item.fecha}:${item.inicio}:${item.fin}`).join('|')]);
   const draftFromCase=item=>draftInvoiceFromCase(item,warehouseEntries,transports,calendarEvents);
   const createDraft=item=>setEditing(draftFromCase(item));
   const archiveInvoice=item=>{
