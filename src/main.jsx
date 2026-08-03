@@ -671,6 +671,21 @@ const inflatePdfStreamText=async bytes=>{
   }
   return texts.join('\n\n').trim();
 };
+const cleanSupplierPdfText=text=>{
+  const allowed=/[A-Za-z0-9ÁÉÍÓÚÜÑáéíóúüñ€$.,:;()\/+\-\s]/g;
+  const keywords=/LOAD|UNLOAD|RECEPTION|WAREHOUSE|STORAGE|CUSTOMS|CLEARANCE|DELIVERY|VESSEL|PORT|DOC|CESSION|TRANSPORT|COURIER|COLLECTION|PICK|RECOGIDA|ALMACEN|ADUANA|BUQUE|PALLET|BOX|BULTO|KG|KGS/i;
+  const price=/\d+[.,]\d{1,2}\s*(EUR|€)?/i;
+  const lines=String(text||'').split(/\r?\n/).map(line=>{
+    const cleaned=(line.match(allowed)||[]).join('').replace(/\s+/g,' ').trim();
+    if(cleaned.length<3||cleaned.length>220)return '';
+    const printableRatio=cleaned.length/Math.max(String(line||'').length,1);
+    if(printableRatio<0.65)return '';
+    if(!/[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]/.test(cleaned))return '';
+    if(!(keywords.test(cleaned)||price.test(cleaned)))return '';
+    return cleaned;
+  }).filter(Boolean);
+  return [...new Set(lines)].join('\n').trim();
+};
 const extractSupplierPdfText=async file=>{
   try{
     const buffer=await file.arrayBuffer();
@@ -682,7 +697,7 @@ const extractSupplierPdfText=async file=>{
     }
     const rawText=extractTextFromRawPdf(binary);
     const inflatedText=await inflatePdfStreamText(bytes);
-    return [rawText,inflatedText].filter(Boolean).join('\n\n').trim();
+    return cleanSupplierPdfText([rawText,inflatedText].filter(Boolean).join('\n\n'));
   }catch(error){
     return '';
   }
@@ -3290,14 +3305,7 @@ function InvoiceEditModal({item,cases=[],warehouseEntries=[],transports=[],calen
     event.target.value='';
   };
   const removeSupplierFile=id=>setForm({...form,supplierInvoices:(form.supplierInvoices||[]).filter(file=>file.id!==id)});
-  const importSupplierLines=()=>{
-    if(!relatedCase){setSupplierNote('Primero vincula la factura a un expediente.');return}
-    const lines=parseSupplierInvoiceConcepts(supplierText,relatedCase,warehouseEntries,transports,calendarEvents);
-    if(!lines.length){setSupplierNote('No encontré conceptos claros. Pega líneas como “Load / Unload 18.00” o “Delivery vessel Algeciras Port 65.00”.');return}
-    const baseLine=form.lines.find(line=>line.id==='ref')||{id:'ref',item:invoiceHeaderTitle(relatedCase),detail:currentCargo,price:0,units:1,tax:'21%'};
-    setForm({...form,lines:[baseLine,...lines]});
-    setSupplierNote(`${lines.length} concepto(s) importados con tarifa Swiftport. Revisa los importes antes de enviar a Holded.`);
-  };
+  const importSupplierLines=()=>{applySupplierLinesFromText(supplierText,'texto pegado')};
   const total=invoiceTotal(form);
   const expenseTotal=relatedCase?caseExpenseTotal(relatedCase):Number(form.coste)||0;
   const estimatedMargin=total-expenseTotal;
