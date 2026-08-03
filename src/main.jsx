@@ -26,6 +26,7 @@ const normalizeClientProfile=client=>{
   const name=client?.nombre||client?.name||'CLIENTE SIN NOMBRE';
   const isLimani=/limani/i.test(name);
   const isAls=/\bals\b|algeciras logistics solution/i.test(name);
+  const isUme=/\bume\b/i.test(name);
   return {
     codigo:client?.codigo||client?.id||clientCodeFromName(name),
     nombre:name,
@@ -43,6 +44,16 @@ const normalizeClientProfile=client=>{
     storage:client?.storage||(isLimani?'0-35 kg gratis  -  36-100 kg 5€/día  -  101-500 kg 10€/día  -  500+ kg 15€/día':isAls?'3 días gratis · 36-100 kg 2,50€/día · 101-500 kg 3,50€/día · 500+ kg 7,50€/día':'Pendiente de tarifa'),
     transporte:client?.transporte||(isLimani?'Warehouse→Vessel: 45€ / 95€ / 250€ / 350€ por peso':isAls?'Añadir manual según servicio: aeropuerto, recogidas o transporte especial':'Pendiente de tarifa'),
     recargo:client?.recargo||(isLimani||isAls?'+30% overtime / holidays':'Pendiente'),
+    tarifaActiva:client?.tarifaActiva||(isLimani?'LIMANI Barcelona 2026':isAls?'ALS Barcelona 2026':isUme?'UME Algeciras 2026':'Sin tarifa automÃ¡tica'),
+    recepcion:client?.recepcion||(isLimani?'0-35 kg 15â‚¬  -  35-250 kg 60â‚¬  -  251-500 kg 130â‚¬  -  501-2500 kg 245â‚¬':isAls?'LOAD / UNLOAD: 0,12 â‚¬/kg por separado':isUme?'Coordination 66â‚¬ + handling 0,0363â‚¬/kg (min. 19,80â‚¬ >50 kg)':'Pendiente de tarifa'),
+    storage:client?.storage||(isLimani?'0-35 kg gratis  -  36-100 kg 5â‚¬/dÃ­a  -  101-500 kg 10â‚¬/dÃ­a  -  500+ kg 15â‚¬/dÃ­a':isAls?'3 dÃ­as gratis Â· 36-100 kg 2,50â‚¬/dÃ­a Â· 101-500 kg 3,50â‚¬/dÃ­a Â· 500+ kg 7,50â‚¬/dÃ­a':isUme?'Warehousing 0,715â‚¬/kg/dÃ­a Â· min. 9,90â‚¬ Â· storage min. 99â‚¬':'Pendiente de tarifa'),
+    transporte:client?.transporte||(isLimani?'Warehouseâ†’Vessel: 45â‚¬ / 95â‚¬ / 250â‚¬ / 350â‚¬ por peso':isAls?'AÃ±adir manual segÃºn servicio: aeropuerto, recogidas o transporte especial':isUme?'Delivery to vessel <50 kg 71,50â‚¬ Â· >50 kg 71,50â‚¬/h':'Pendiente de tarifa'),
+    recargo:client?.recargo||(isLimani||isAls||isUme?'+30% overtime / holidays':'Pendiente'),
+    tarifaActiva:client?.tarifaActiva&&!/sin tarifa|pendiente/i.test(String(client.tarifaActiva))?client.tarifaActiva:(isLimani?'LIMANI Barcelona 2026':isAls?'ALS Barcelona 2026':isUme?'UME Algeciras 2026':'Sin tarifa automÃ¡tica'),
+    recepcion:client?.recepcion&&!/sin tarifa|pendiente/i.test(String(client.recepcion))?client.recepcion:(isLimani?'0-35 kg 15â‚¬  -  35-250 kg 60â‚¬  -  251-500 kg 130â‚¬  -  501-2500 kg 245â‚¬':isAls?'LOAD / UNLOAD: 0,12 â‚¬/kg por separado':isUme?'Coordination 66â‚¬ + handling 0,0363â‚¬/kg (min. 19,80â‚¬ >50 kg)':'Pendiente de tarifa'),
+    storage:client?.storage&&!/sin tarifa|pendiente/i.test(String(client.storage))?client.storage:(isLimani?'0-35 kg gratis  -  36-100 kg 5â‚¬/dÃ­a  -  101-500 kg 10â‚¬/dÃ­a  -  500+ kg 15â‚¬/dÃ­a':isAls?'3 dÃ­as gratis Â· 36-100 kg 2,50â‚¬/dÃ­a Â· 101-500 kg 3,50â‚¬/dÃ­a Â· 500+ kg 7,50â‚¬/dÃ­a':isUme?'Warehousing 0,715â‚¬/kg/dÃ­a Â· min. 9,90â‚¬ Â· storage min. 99â‚¬':'Pendiente de tarifa'),
+    transporte:client?.transporte&&!/sin tarifa|pendiente/i.test(String(client.transporte))?client.transporte:(isLimani?'Warehouseâ†’Vessel: 45â‚¬ / 95â‚¬ / 250â‚¬ / 350â‚¬ por peso':isAls?'AÃ±adir manual segÃºn servicio: aeropuerto, recogidas o transporte especial':isUme?'Delivery to vessel <50 kg 71,50â‚¬ Â· >50 kg 71,50â‚¬/h':'Pendiente de tarifa'),
+    recargo:client?.recargo&&!/sin tarifa|pendiente/i.test(String(client.recargo))?client.recargo:(isLimani||isAls||isUme?'+30% overtime / holidays':'Pendiente'),
     activo:client?.activo!==false
   };
 };
@@ -414,9 +425,44 @@ const ALS_BARCELONA_RATES={
   warehouseToVessel:[[35,49],[250,115],[500,220],[2500,320]],
   overtimeSurcharge:0.3
 };
+const UME_ALGECIRAS_RATES={
+  coordination:66,
+  openFile:9.9,
+  openWarehouseNightHoliday:132,
+  minHandlingOver50:19.8,
+  handlingPerKg:0.0363,
+  minWarehousing:9.9,
+  warehousingPerKg:0.715,
+  storageMinimum:99,
+  hazardousOvercharge:71.5,
+  pickUpSmallParcels:36.3,
+  deliveryToVesselUnder50:71.5,
+  deliveryOver50PerHour:71.5,
+  customClearanceC:36.3,
+  customT1Ex1:36.3,
+  receptionT1Avi:71.5,
+  transitExs:48.4,
+  instancia:44,
+  dae:36.3,
+  cub:26.4,
+  lsp:26.4,
+  importExportIssueDocs:42.9,
+  weekendWarehouseOpening:374,
+  transportAgpXrjNextDay:154,
+  urgentSameDay:225.5,
+  nightWeekendTransport:253,
+  transportFromSvq:275,
+  urgentFromSvq:396,
+  docsCessionDhl:121,
+  docsCessionTnt:154,
+  pickup010:104.5,
+  pickup1150:176,
+  overtimeSurcharge:0.3
+};
 const priceByWeight=(weight,table)=>{const kilos=Number(weight)||0;const match=table.find(([max])=>kilos<=max);return match?match[1]:table.at(-1)?.[1]||0};
 const isLimaniCase=item=>/limani/i.test(String(item?.cliente||''));
 const isAlsCase=item=>/\bals\b/i.test(String(item?.cliente||''));
+const isUmeAlgecirasCase=item=>/\bume\b/i.test(String(item?.cliente||''))&&/algeciras/i.test(String(item?.puerto||''));
 const invoiceCargoLines=(item,warehouseEntries=[])=>{
   const linkedWarehouse=warehouseEntries.filter(entry=>entry.expediente===item.id);
   const warehouseLines=linkedWarehouse.flatMap(entry=>(entry.mercancias||[]).length?entry.mercancias:[{tipo:'CAJA',cantidad:Number(entry.bultos)||0,peso:entry.peso||''}]).filter(line=>Number(line.cantidad)>0);
@@ -498,6 +544,24 @@ const suggestedHandlingPrice=(item,warehouseEntries=[])=>{
 };
 const suggestedStoragePrice=(item,warehouseEntries=[])=>isLimaniCase(item)?priceByWeight(invoiceCargoWeight(item,warehouseEntries),LIMANI_BARCELONA_RATES.storage):0;
 const suggestedWaitingPrice=item=>isLimaniCase(item)?LIMANI_BARCELONA_RATES.waitingHour:0;
+const umeHandlingPrice=weight=>{
+  const kilos=Number(weight)||0;
+  if(kilos<=0)return 0;
+  const variable=Math.round(kilos*UME_ALGECIRAS_RATES.handlingPerKg*100)/100;
+  return kilos>50?Math.max(UME_ALGECIRAS_RATES.minHandlingOver50,variable):variable;
+};
+const umeStorageTotal=(weight,days)=>{
+  const kilos=Number(weight)||0;
+  const storageDays=Number(days)||0;
+  if(kilos<=0||storageDays<=0)return 0;
+  const daily=Math.max(UME_ALGECIRAS_RATES.minWarehousing,Math.round(kilos*UME_ALGECIRAS_RATES.warehousingPerKg*100)/100);
+  return Math.max(UME_ALGECIRAS_RATES.storageMinimum,Math.round(daily*storageDays*100)/100);
+};
+const umeTransportPrice=weight=>{
+  const kilos=Number(weight)||0;
+  if(kilos<=0)return UME_ALGECIRAS_RATES.deliveryToVesselUnder50;
+  return kilos<50?UME_ALGECIRAS_RATES.deliveryToVesselUnder50:UME_ALGECIRAS_RATES.deliveryOver50PerHour;
+};
 const clientCostLineTotal=line=>(Number(line.price)||0)*(Number(line.units)||0);
 const clientCostTotal=estimate=>(estimate?.lines||[]).reduce((sum,line)=>sum+clientCostLineTotal(line),0);
 const defaultClientCostEstimate=(item,warehouseEntries=[])=>{
@@ -517,6 +581,22 @@ const defaultClientCostEstimate=(item,warehouseEntries=[])=>{
         {id:'storage',item:'STORAGE',detail:`${storageDays} DAYS (${chargeableStorageDays} BILLABLE + ${Math.min(storageDays,ALS_BARCELONA_RATES.freeStorageDays)} FREE) - ${cargo}`,price:storageDaily,units:chargeableStorageDays},
         {id:'load',item:'LOAD (SALIDA)',detail:cargo,price:loadUnload,units:1}
       ]
+    };
+  }
+  if(isUmeAlgecirasCase(item)){
+    const storageTotal=umeStorageTotal(weight,storageDays);
+    const lines=[
+      {id:'open-file',item:'OPEN FILE',detail:invoiceHeaderTitle(item),price:UME_ALGECIRAS_RATES.openFile,units:1},
+      {id:'coordination',item:'COORDINATION FEE',detail:cargo,price:UME_ALGECIRAS_RATES.coordination,units:1},
+      {id:'handling',item:'HANDLING',detail:cargo,price:umeHandlingPrice(weight),units:1}
+    ];
+    if(storageDays>0)lines.push({id:'storage',item:'WAREHOUSING / STORAGE',detail:`${storageDays} DAYS - ${cargo}`,price:storageTotal,units:1});
+    lines.push({id:'delivery',item:'DELIVERY TO VESSEL',detail:cargo,price:umeTransportPrice(weight),units:1});
+    return {
+      id:`COST-${item.id}`,
+      title:`PREVISIÃ“N COSTES ${item.buque||item.id}`.toUpperCase(),
+      note:'Tarifa UME Algeciras 2026. Base automática desde peso, storage y entrega a buque.',
+      lines
     };
   }
   return {
@@ -572,6 +652,30 @@ const draftInvoiceFromCase=(item,warehouseEntries=[],transports=[],calendarEvent
     ];
     const due=new Date(Date.now()+30*86400000).toISOString().slice(0,10);
     const invoice={id:'BOR-'+item.id.replace('SW-',''),expediente:item.id,cliente:item.cliente,concepto:invoiceHeaderTitle(item),importe:0,estado:'Borrador',vencimiento:due,buque:item.buque,puerto:item.puerto,proforma:`PRO${String(260000+numericRef(item.id)).slice(-6)}`,observaciones:'Exención de IVA según ART 22 de la ley 37/1992 y 10.2 del real decreto ley 1624/92 de Diciembre',payment:'BANK ACCOUNT: ES06 0182 4775 5102 0174 1635\\nSWIFT: BBVAESMMXXX',lines};
+    const importe=invoiceTotal(invoice);
+    const coste=caseExpenseTotal(item);
+    return {...invoice,importe,coste,margen:importe-coste};
+  }
+  if(isUmeAlgecirasCase(item)){
+    const weight=invoiceCargoWeight(item,warehouseEntries);
+    const storageDays=invoiceStorageDays(item,warehouseEntries);
+    const storageTotal=umeStorageTotal(weight,storageDays);
+    const transportServices=invoiceTransportServices(item,transports,calendarEvents);
+    const billOwnTransport=!isStorageOnly(item)&&(transportServices.length>0||(item.servicios||[]).some(service=>/transporte|entrega|delivery/i.test(String(service)))||Number(item.billing?.transportPrice||0)>0);
+    const lines=[
+      {id:'ref',item:invoiceHeaderTitle(item),detail:cargo,price:0,units:1,tax:'21%'},
+      {id:'open-file',item:'OPEN FILE',detail:invoiceHeaderTitle(item),price:UME_ALGECIRAS_RATES.openFile,units:1,tax:'0%'},
+      {id:'coordination',item:'COORDINATION FEE',detail:cargo,price:UME_ALGECIRAS_RATES.coordination,units:1,tax:'0%'},
+      {id:'handling',item:'HANDLING',detail:cargo,price:umeHandlingPrice(weight),units:1,tax:'0%'}
+    ];
+    if(storageDays>0)lines.push({id:'storage',item:'WAREHOUSING / STORAGE',detail:`${storageDays} DAY${storageDays===1?'':'S'} - ${cargo}`,price:storageTotal,units:1,tax:'0%'});
+    if(billOwnTransport){
+      const transportUnits=Math.max(1,transportServices.length);
+      lines.push({id:'delivery',item:'DELIVERY TO VESSEL',detail:invoiceTransportDetail(cargo,item,transports,calendarEvents),price:umeTransportPrice(weight),units:transportUnits,tax:'0%'});
+    }
+    if(Number(item.billing?.waitingHours||0)>0)lines.push({id:'waiting',item:'WAITING TIME',detail:`${item.billing.waitingHours} HOURS WAITING`,price:UME_ALGECIRAS_RATES.deliveryOver50PerHour,units:Number(item.billing.waitingHours),tax:'0%'});
+    const due=new Date(Date.now()+30*86400000).toISOString().slice(0,10);
+    const invoice={id:'BOR-'+item.id.replace('SW-',''),expediente:item.id,cliente:item.cliente,concepto:invoiceHeaderTitle(item),importe:0,estado:'Borrador',vencimiento:due,buque:item.buque,puerto:item.puerto,proforma:`PRO${String(260000+numericRef(item.id)).slice(-6)}`,observaciones:'ExenciÃ³n de IVA segÃºn ART 22 de la ley 37/1992 y 10.2 del real decreto ley 1624/92 de Diciembre',payment:'BANK ACCOUNT: ES06 0182 4775 5102 0174 1635\\nSWIFT: BBVAESMMXXX',lines};
     const importe=invoiceTotal(invoice);
     const coste=caseExpenseTotal(item);
     return {...invoice,importe,coste,margen:importe-coste};
