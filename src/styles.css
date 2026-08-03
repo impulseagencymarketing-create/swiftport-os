@@ -168,6 +168,7 @@
   .vessel-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}
   .vessel-actions{justify-content:flex-start}
 }
+.supplier-invoice-import{border:1px solid #d7e6f6;background:#f7fbff;border-radius:14px;padding:14px;display:grid;gap:12px}.supplier-import-head{display:flex;justify-content:space-between;gap:12px;align-items:center}.supplier-import-head b,.supplier-import-head small{display:block}.supplier-import-head small{color:var(--muted);font-size:10px;margin-top:3px}.supplier-import-head input[type=file]{display:none}.supplier-file-list{display:flex;flex-wrap:wrap;gap:8px}.supplier-file-list span{display:inline-flex;align-items:center;gap:8px;background:#fff;border:1px solid var(--line);border-radius:10px;padding:8px 9px;max-width:100%}.supplier-file-list svg{width:15px;height:15px;color:var(--blue)}.supplier-file-list b{font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:260px}.supplier-import-actions{display:flex;align-items:center;gap:12px;flex-wrap:wrap}.supplier-import-actions small{font-size:10px;color:#516b84;font-weight:800}.supplier-invoice-import textarea{resize:vertical;min-height:90px}
 
 .warehouse-actions{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}
 .warehouse-actions .button svg{width:16px}
