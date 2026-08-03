@@ -449,6 +449,27 @@
     min-width:0;
   }
 }
+.client-cost-panel{grid-column:1/-1;overflow:hidden}
+.client-cost-actions{display:flex;gap:8px;flex-wrap:wrap}
+.client-cost-summary{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;padding:0 20px 14px}
+.client-cost-summary article{border:1px solid var(--line);border-radius:12px;background:#f8fbff;padding:12px;min-width:0}
+.client-cost-summary small,.client-cost-summary b{display:block}
+.client-cost-summary small{font-size:8px;color:#7890a8;text-transform:uppercase;font-weight:900;letter-spacing:.06em}
+.client-cost-summary b{font-size:11px;margin-top:5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.client-cost-note{margin:0 20px 14px;border:1px solid #efd6a4;background:#fff9ec;border-radius:10px;padding:11px 12px;font-size:10px;line-height:1.5;color:#73531c}
+.client-cost-lines{margin:0 20px 14px;border:1px solid var(--line);border-radius:13px;overflow:hidden;background:#fff}
+.client-cost-lines-head{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:12px 14px;background:#f7fafc;border-bottom:1px solid var(--line)}
+.client-cost-lines-head b{font-size:12px}
+.client-cost-lines article{display:grid;grid-template-columns:1fr 1.25fr .55fr .45fr 90px auto;gap:10px;align-items:end;padding:12px 14px;border-bottom:1px solid var(--line)}
+.client-cost-lines article:last-child{border-bottom:0}
+.client-cost-lines article .field input{height:38px;background:#fbfdff}
+.client-cost-lines article strong{font-size:12px;text-align:right;padding-bottom:10px}
+.client-cost-footer{display:flex;align-items:center;justify-content:flex-end;gap:14px;padding:0 20px 20px}
+.client-cost-footer span{min-width:210px;border:1px solid #d8e6f5;background:#f8fbff;border-radius:12px;padding:12px}
+.client-cost-footer small,.client-cost-footer b{display:block}
+.client-cost-footer small{font-size:8px;color:#7890a8;text-transform:uppercase;font-weight:900;letter-spacing:.06em}
+.client-cost-footer b{font-family:Manrope,sans-serif;font-size:18px;margin-top:4px}
+@media(max-width:900px){.client-cost-summary{grid-template-columns:1fr 1fr}.client-cost-lines article{grid-template-columns:1fr}.client-cost-lines article strong{text-align:left;padding-bottom:0}.client-cost-footer{align-items:stretch;flex-direction:column}.client-cost-footer span{min-width:0}.client-cost-actions{width:100%}.client-cost-actions .button{flex:1}}
 /* Modal operativo: necesita respirar porque combina mapa, AIS, flujo y evidencias */
 .operation-modal{
   width:min(1080px,calc(100vw - 36px));

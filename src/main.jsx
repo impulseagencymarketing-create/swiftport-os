@@ -406,8 +406,17 @@ const LIMANI_BARCELONA_RATES={
   handlingHour:25,
   overtimeSurcharge:0.3
 };
+const ALS_BARCELONA_RATES={
+  loadUnloadPerKg:0.12,
+  freeStorageDays:3,
+  storage:[[35,0],[100,2.5],[500,3.5],[Infinity,7.5]],
+  airportToWarehouse:[[35,60],[250,120],[500,230],[2500,370]],
+  warehouseToVessel:[[35,49],[250,115],[500,220],[2500,320]],
+  overtimeSurcharge:0.3
+};
 const priceByWeight=(weight,table)=>{const kilos=Number(weight)||0;const match=table.find(([max])=>kilos<=max);return match?match[1]:table.at(-1)?.[1]||0};
 const isLimaniCase=item=>/limani/i.test(String(item?.cliente||''));
+const isAlsCase=item=>/\bals\b/i.test(String(item?.cliente||''));
 const invoiceCargoLines=(item,warehouseEntries=[])=>{
   const linkedWarehouse=warehouseEntries.filter(entry=>entry.expediente===item.id);
   const warehouseLines=linkedWarehouse.flatMap(entry=>(entry.mercancias||[]).length?entry.mercancias:[{tipo:'CAJA',cantidad:Number(entry.bultos)||0,peso:entry.peso||''}]).filter(line=>Number(line.cantidad)>0);
@@ -489,6 +498,34 @@ const suggestedHandlingPrice=(item,warehouseEntries=[])=>{
 };
 const suggestedStoragePrice=(item,warehouseEntries=[])=>isLimaniCase(item)?priceByWeight(invoiceCargoWeight(item,warehouseEntries),LIMANI_BARCELONA_RATES.storage):0;
 const suggestedWaitingPrice=item=>isLimaniCase(item)?LIMANI_BARCELONA_RATES.waitingHour:0;
+const clientCostLineTotal=line=>(Number(line.price)||0)*(Number(line.units)||0);
+const clientCostTotal=estimate=>(estimate?.lines||[]).reduce((sum,line)=>sum+clientCostLineTotal(line),0);
+const defaultClientCostEstimate=(item,warehouseEntries=[])=>{
+  const cargo=invoiceCargoSummary(item,warehouseEntries);
+  const weight=invoiceCargoWeight(item,warehouseEntries);
+  const storageDays=invoiceStorageDays(item,warehouseEntries);
+  const chargeableStorageDays=Math.max(0,storageDays-ALS_BARCELONA_RATES.freeStorageDays);
+  if(isAlsCase(item)){
+    const loadUnload=Math.round((weight*ALS_BARCELONA_RATES.loadUnloadPerKg)*100)/100;
+    const storageDaily=priceByWeight(weight,ALS_BARCELONA_RATES.storage);
+    return {
+      id:`COST-${item.id}`,
+      title:`PREVISIÓN COSTES ${item.buque||item.id}`.toUpperCase(),
+      note:'Tarifa ALS Barcelona 2026. Storage con 3 días gratis.',
+      lines:[
+        {id:'unload',item:'UNLOAD (RECEPTION)',detail:cargo,price:loadUnload,units:1},
+        {id:'storage',item:'STORAGE',detail:`${storageDays} DAYS (${chargeableStorageDays} BILLABLE + ${Math.min(storageDays,ALS_BARCELONA_RATES.freeStorageDays)} FREE) - ${cargo}`,price:storageDaily,units:chargeableStorageDays},
+        {id:'load',item:'LOAD (SALIDA)',detail:cargo,price:loadUnload,units:1}
+      ]
+    };
+  }
+  return {
+    id:`COST-${item.id}`,
+    title:`PREVISIÓN COSTES ${item.buque||item.id}`.toUpperCase(),
+    note:'Sin tarifa automática para este cliente. Añade conceptos manuales.',
+    lines:[{id:'manual-'+Date.now(),item:'CONCEPTO MANUAL',detail:cargo,price:0,units:1}]
+  };
+};
 const invoiceDetailWeight=detail=>{
   const matches=[...String(detail||'').matchAll(/(\d+(?:[.,]\d+)?)\s*(?:kg|kgs|kilo|kilos)\b/gi)];
   return matches.reduce((sum,match)=>sum+Number(String(match[1]).replace(',','.')),0);
@@ -2324,6 +2361,7 @@ function Expedientes({cases,selected,select,search,setSearch,completeCaseStep,no
     <section className={'panel case-list '+(selected?'has-selection':'')}><div className="list-toolbar"><label className="search-box"><Search/><input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Buscar número, buque, ETA o puerto…"/></label><div className="filter-chips">{['Todos','En curso','Cancelados','Completados'].map(value=><button key={value} className={filter===value?'active':''} onClick={()=>setFilter(value)}>{value}</button>)}</div></div><div className="case-count">{filtered.length} expedientes</div>{filtered.length?filtered.map(item=><button key={item.id} className={'case-card port-'+portTone(item.puerto)+' '+(selected.id===item.id?'selected':'')} onClick={()=>{select(item.id);setMobileDetail(true)}}><div className="case-card-top"><span className="ship-icon"><Ship/></span><span><b>{caseLabel(item)}</b><small>{item.cliente}</small></span><Badge>{item.estado}</Badge></div><span className={'service-type-badge '+serviceTypeOf(item)}>{serviceTypeMeta(item).short}</span><div className="case-card-meta"><span><MapPin/>{item.puerto}</span><span><CalendarDays/>{item.eta}</span></div><div className="case-progress"><span><i style={{width:item.progreso+'%'}}/></span><small>{item.progreso}%</small></div><p><b>Siguiente:</b> {item.siguiente}</p></button>):<Empty text="Prueba con otro término o estado."/>}</section>
     <section className="panel case-detail"><button className="mobile-detail-back" onClick={()=>setMobileDetail(false)}><ArrowLeft/> Expedientes</button><div className="detail-hero"><div><div className="detail-id">{selected.id} <Badge>{selected.estado}</Badge></div><h2>{selected.buque}</h2><p>{selected.cliente}  -  {selected.puerto}</p><span className={'service-type-badge large '+serviceTypeOf(selected)}>{serviceTypeMeta(selected).label}</span></div><div className="detail-actions"><button className="icon-button" aria-label="Editar expediente" onClick={()=>setEditOpen(true)}><PencilLine/></button>{(hasRole(currentUser,'operations')||hasRole(currentUser,'admin'))&&<button className="icon-button danger" aria-label="Borrar expediente" onClick={()=>deleteCase(selected.id)}><Trash2/></button>}</div></div><div className={'detail-stats '+(!showFinance?'detail-stats-three':'')}><Stat label="ETA" value={selected.eta} icon={Clock3}/><Stat label="Mercancía" value={selected.bultos+' bultos  -  '+selected.peso} icon={Box}/><Stat label="Conductor" value={selected.conductor} icon={UserRound}/>{showFinance&&<Stat label="Importe previsto" value={money(selected.importe)} icon={BadgeEuro}/>}</div><PortCallPanel item={selected}/><OperationChecklist item={selected} csrfToken={csrfToken} reloadOperational={reloadOperational} notify={notify} currentRoles={currentUser}/><CaseStepReopenPanel item={selected} reopen={key=>reopenCaseStep?.(selected.id,key)}/><ShipmentDocuments item={selected} onDelete={(file,scope)=>deleteAttachment?.(selected.id,scope||'shipment',file,(selected.recepciones||[]).find(record=>(record.documentos||[]).some(stored=>sameAttachment(stored,file)))?.ref)}/><div className="detail-columns"><div><h3>Línea temporal real</h3><ActualTimeline item={selected}/></div><aside className="detail-side"><div className={'next-action '+(operationFlow(selected).billingReady?'complete':'')}><span>{operationFlow(selected).billingReady?'Operativa completada':'Próxima acción'}</span><b>{selected.siguiente}</b><p>{operationFlow(selected).billingReady?'El POD está registrado y el expediente ha pasado a facturación.':'Sigue el paso indicado para que todo el equipo trabaje igual.'}</p><button className="button primary full" disabled={operationFlow(selected).billingReady} onClick={()=>setFlowOpen(true)}><ClipboardCheck/> {operationFlow(selected).billingReady?'Listo para facturar':'Registrar siguiente paso'}</button></div><PodDocuments item={selected} notify={notify} onDelete={(file,scope)=>deleteAttachment?.(selected.id,scope,file)}/>{(hasRole(currentUser,'operations')||hasRole(currentUser,'admin'))&&<button className="button danger full" onClick={()=>deleteCase(selected.id)}><Trash2/> Borrar expediente</button>}</aside></div></section>
     <section className="panel case-services-panel"><CaseServicesPanel item={selected} events={calendarEvents} cases={cases} transports={transports} team={team} providers={providers} saveEvent={saveEvent}/></section>
+    <section className="panel client-cost-panel"><ClientCostPanel item={selected} warehouseEntries={warehouseEntries} updateCase={updateCase} notify={notify}/></section>
     <section className="panel case-expenses-panel"><CaseExpensesPanel item={selected} updateCase={updateCase} notify={notify}/></section>
     <section className="panel merchandise-case-panel"><MerchandisePanel item={selected} updateCase={updateCase} deleteAttachment={deleteAttachment}/></section>
     {editOpen&&<CaseEditModal item={selected} clientOptions={clientOptions} vessels={vessels} close={()=>setEditOpen(false)} submit={item=>{updateCase(item);setEditOpen(false)}}/>}
@@ -2357,6 +2395,32 @@ function CaseStepReopenPanel({item,reopen}){
   const completed=operationStepsFor(item).filter(step=>flow[step.key]);
   if(!completed.length)return null;
   return <section className="case-reopen-panel"><div><Undo2/><span><b>Corregir pasos completados</b><small>Reabre un paso para añadir o modificar documentos, fotos, mercancía o POD sin borrar lo ya subido.</small></span></div><div>{completed.map(step=><button type="button" key={step.key} onClick={()=>reopen(step.key)}><Undo2/><span>Reabrir {step.title}</span></button>)}</div></section>;
+}
+function ClientCostPanel({item,warehouseEntries,updateCase,notify}){
+  const [draft,setDraft]=useState(()=>item.clientCostEstimate||defaultClientCostEstimate(item,warehouseEntries));
+  useEffect(()=>{setDraft(item.clientCostEstimate||defaultClientCostEstimate(item,warehouseEntries))},[item.id,item.clientCostEstimate,warehouseEntries.length]);
+  const cargo=invoiceCargoSummary(item,warehouseEntries);
+  const weight=invoiceCargoWeight(item,warehouseEntries);
+  const storageDays=invoiceStorageDays(item,warehouseEntries);
+  const total=clientCostTotal(draft);
+  const updateLine=(index,key,value)=>setDraft(current=>({...current,lines:current.lines.map((line,lineIndex)=>lineIndex===index?{...line,[key]:value}:line)}));
+  const addLine=()=>setDraft(current=>({...current,lines:[...(current.lines||[]),{id:'manual-'+Date.now(),item:'TRANSPORT',detail:cargo,price:0,units:1}]}));
+  const removeLine=index=>setDraft(current=>({...current,lines:current.lines.filter((_,lineIndex)=>lineIndex!==index)}));
+  const recalc=()=>setDraft(defaultClientCostEstimate(item,warehouseEntries));
+  const save=()=>{updateCase({...item,clientCostEstimate:{...draft,updatedAt:new Date().toISOString()}});notify?.('Previsión de costes guardada en el expediente')};
+  const copy=async()=>{
+    const text=[
+      `*${String(item.buque||item.id).toUpperCase()}*`,
+      `${item.id} · ${String(item.puerto||'PUERTO PENDIENTE').toUpperCase()}`,
+      '',
+      ...(draft.lines||[]).map(line=>`• ${String(line.item||'CONCEPTO').toUpperCase()} - ${line.detail||cargo}: ${moneyExact(clientCostLineTotal(line))}`),
+      '',
+      `*TOTAL: ${moneyExact(total)}*`
+    ].join('\n');
+    try{await navigator.clipboard.writeText(text);notify?.('Costes copiados para enviar al cliente')}
+    catch{notify?.('No se pudo copiar automáticamente. Selecciona el texto manualmente.')}
+  };
+  return <><SectionHeader title="Costes para cliente" subtitle={isAlsCase(item)?'Tarifa ALS Barcelona 2026: UNLOAD, STORAGE y LOAD separados':'Previsión editable para adelantos o costes a informar'} action={<div className="client-cost-actions"><button className="button tertiary" onClick={recalc}><RefreshCw/> Recalcular</button><button className="button secondary" onClick={copy}><ClipboardList/> Copiar para cliente</button></div>}/><div className="client-cost-summary"><article><small>Cliente</small><b>{item.cliente}</b></article><article><small>Mercancía</small><b>{cargo}</b></article><article><small>Peso</small><b>{weight.toLocaleString('es-ES',{maximumFractionDigits:2})} kg</b></article><article><small>Storage real</small><b>{storageDays} días</b></article></div><div className="client-cost-note">{isAlsCase(item)?<><b>Regla ALS:</b> LOAD y UNLOAD se cobran por separado a 0,12 €/kg. Storage tiene 3 días gratis y luego se cobra por día según peso.</>:<><b>Sin tarifa automática:</b> puedes añadir los conceptos manualmente y guardar la previsión.</>}</div><div className="client-cost-lines"><div className="client-cost-lines-head"><b>Conceptos</b><button type="button" className="button secondary compact" onClick={addLine}><Plus/> Añadir concepto</button></div>{(draft.lines||[]).map((line,index)=><article key={line.id||index}><label className="field"><span>Concepto</span><input value={line.item||''} onChange={event=>updateLine(index,'item',event.target.value)}/></label><label className="field line-detail"><span>Detalle</span><input value={line.detail||''} onChange={event=>updateLine(index,'detail',event.target.value)} placeholder={cargo}/></label><label className="field"><span>Precio</span><input type="number" min="0" step="0.01" value={line.price} onChange={event=>updateLine(index,'price',event.target.value)}/></label><label className="field"><span>Uds.</span><input type="number" min="0" step="0.01" value={line.units} onChange={event=>updateLine(index,'units',event.target.value)}/></label><strong>{moneyExact(clientCostLineTotal(line))}</strong>{(draft.lines||[]).length>1&&<button type="button" className="icon-button danger" onClick={()=>removeLine(index)} aria-label="Eliminar concepto"><Trash2/></button>}</article>)}</div><div className="client-cost-footer"><span><small>Total previsto para informar</small><b>{moneyExact(total)}</b></span><button className="button primary" onClick={save}><Save/> Guardar costes</button></div></>;
 }
 function CaseExpensesPanel({item,updateCase,notify}){
   const today=new Date().toISOString().slice(0,10);
