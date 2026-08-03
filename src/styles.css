@@ -449,29 +449,32 @@
     min-width:0;
   }
 }
-.client-cost-panel{grid-column:1/-1;overflow:hidden}
-.client-cost-actions{display:flex;gap:8px;flex-wrap:wrap}
-.client-cost-summary{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;padding:0 20px 14px}
-.client-cost-summary article{border:1px solid var(--line);border-radius:12px;background:#f8fbff;padding:12px;min-width:0}
+.client-cost-panel{grid-column:1/-1;overflow:hidden;width:100%;max-width:100%}
+.client-cost-panel .section-header{align-items:center}
+.client-cost-actions{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}
+.client-cost-summary{display:grid;grid-template-columns:repeat(4,minmax(170px,1fr));gap:10px;padding:0 20px 14px;min-width:0}
+.client-cost-summary article{border:1px solid var(--line);border-radius:12px;background:#f8fbff;padding:12px;min-width:0;overflow:hidden}
 .client-cost-summary small,.client-cost-summary b{display:block}
 .client-cost-summary small{font-size:8px;color:#7890a8;text-transform:uppercase;font-weight:900;letter-spacing:.06em}
 .client-cost-summary b{font-size:11px;margin-top:5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .client-cost-summary .client-cost-weight{border-color:#b7d4ff;background:linear-gradient(135deg,#eff6ff,#ffffff)}
 .client-cost-summary .client-cost-weight b{font-size:18px;color:#0b63ce;font-family:Manrope,sans-serif;letter-spacing:-.03em}
 .client-cost-note{margin:0 20px 14px;border:1px solid #efd6a4;background:#fff9ec;border-radius:10px;padding:11px 12px;font-size:10px;line-height:1.5;color:#73531c}
-.client-cost-lines{margin:0 20px 14px;border:1px solid var(--line);border-radius:13px;overflow:hidden;background:#fff}
+.client-cost-lines{margin:0 20px 14px;border:1px solid var(--line);border-radius:13px;overflow:hidden;background:#fff;max-width:calc(100% - 40px)}
 .client-cost-lines-head{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:12px 14px;background:#f7fafc;border-bottom:1px solid var(--line)}
 .client-cost-lines-head b{font-size:12px}
-.client-cost-lines article{display:grid;grid-template-columns:1fr 1.25fr .55fr .45fr 90px auto;gap:10px;align-items:end;padding:12px 14px;border-bottom:1px solid var(--line)}
+.client-cost-lines article{display:grid;grid-template-columns:minmax(150px,1.05fr) minmax(220px,1.35fr) minmax(92px,.45fr) minmax(78px,.32fr) minmax(82px,.28fr) 38px;gap:10px;align-items:end;padding:12px 14px;border-bottom:1px solid var(--line);min-width:0}
 .client-cost-lines article:last-child{border-bottom:0}
-.client-cost-lines article .field input{height:38px;background:#fbfdff}
-.client-cost-lines article strong{font-size:12px;text-align:right;padding-bottom:10px}
+.client-cost-lines article .field{min-width:0}
+.client-cost-lines article .field input{height:38px;background:#fbfdff;min-width:0;width:100%;overflow:hidden;text-overflow:ellipsis}
+.client-cost-lines article strong{font-size:12px;text-align:right;padding-bottom:10px;white-space:nowrap}
 .client-cost-footer{display:flex;align-items:center;justify-content:flex-end;gap:14px;padding:0 20px 20px}
 .client-cost-footer span{min-width:210px;border:1px solid #d8e6f5;background:#f8fbff;border-radius:12px;padding:12px}
 .client-cost-footer small,.client-cost-footer b{display:block}
 .client-cost-footer small{font-size:8px;color:#7890a8;text-transform:uppercase;font-weight:900;letter-spacing:.06em}
 .client-cost-footer b{font-family:Manrope,sans-serif;font-size:18px;margin-top:4px}
-@media(max-width:900px){.client-cost-summary{grid-template-columns:1fr 1fr}.client-cost-lines article{grid-template-columns:1fr}.client-cost-lines article strong{text-align:left;padding-bottom:0}.client-cost-footer{align-items:stretch;flex-direction:column}.client-cost-footer span{min-width:0}.client-cost-actions{width:100%}.client-cost-actions .button{flex:1}}
+@media(max-width:1180px){.client-cost-summary{grid-template-columns:repeat(2,minmax(0,1fr))}.client-cost-lines article{grid-template-columns:minmax(160px,1fr) minmax(220px,1.2fr) minmax(86px,.45fr) minmax(70px,.34fr) minmax(80px,.32fr) 38px}}
+@media(max-width:900px){.client-cost-panel .section-header{align-items:flex-start}.client-cost-summary{grid-template-columns:1fr}.client-cost-lines{max-width:none}.client-cost-lines article{grid-template-columns:1fr}.client-cost-lines article strong{text-align:left;padding-bottom:0}.client-cost-footer{align-items:stretch;flex-direction:column}.client-cost-footer span{min-width:0}.client-cost-actions{width:100%;justify-content:stretch}.client-cost-actions .button{flex:1}.client-cost-lines-head{align-items:stretch;flex-direction:column}.client-cost-lines-head .button{width:100%}}
 /* Modal operativo: necesita respirar porque combina mapa, AIS, flujo y evidencias */
 .operation-modal{
   width:min(1080px,calc(100vw - 36px));
