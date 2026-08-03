@@ -18,15 +18,20 @@ import './fixes.css';
 const LOCAL_DESIGN_MODE=import.meta.env.DEV&&['localhost','127.0.0.1'].includes(window.location.hostname);
 const DEMO_USER={id:'local-demo',fullName:'Javier Fernández',email:'demo@swiftport.local',roles:['admin','operations','finance','driver']};
 const DEMO_TEAM=[
-  {id:'local-admin',fullName:'Javier Fernández',email:'javier@swiftport.local',roles:['admin','operations','finance']},
-  {id:'local-driver',fullName:'Moisés Rodriguez',email:'moises@swiftport.local',roles:['driver','operations']}
+  {id:'local-admin',fullName:'Javier Fern\u00e1ndez',email:'javier@swiftport.local',roles:['admin','operations','finance']},
+  {id:'local-driver',fullName:'Mois\u00e9s Rodriguez',email:'moises@swiftport.local',roles:['driver','operations']}
 ];
 const clientCodeFromName=name=>'CLI-'+String(name||'CLIENTE').toUpperCase().replace(/[^A-Z0-9]+/g,'-').replace(/^-|-$/g,'').slice(0,24);
 const normalizeClientProfile=client=>{
   const name=client?.nombre||client?.name||'CLIENTE SIN NOMBRE';
   const isLimani=/limani/i.test(name);
-  const isAls=/\bals\b|algeciras logistics solution/i.test(name);
-  const isUme=/\bume\b/i.test(name);
+  const isAls=/als|algeciras logistics solution/i.test(name);
+  const isUme=/ume/i.test(name);
+  const tarifaActiva=client?.tarifaActiva&&!/sin tarifa|pendiente/i.test(String(client.tarifaActiva))?client.tarifaActiva:(isLimani?'LIMANI Barcelona 2026':isAls?'ALS Barcelona 2026':isUme?'UME Algeciras 2026':'Sin tarifa autom?tica');
+  const recepcion=client?.recepcion&&!/sin tarifa|pendiente/i.test(String(client.recepcion))?client.recepcion:(isLimani?'0-35 kg 15? - 35-250 kg 60? - 251-500 kg 130? - 501-2500 kg 245?':isAls?'LOAD / UNLOAD: 0,12 ?/kg por separado':isUme?'Coordination 66? + handling 0,0363?/kg (min. 19,80? >50 kg)':'Pendiente de tarifa');
+  const storage=client?.storage&&!/sin tarifa|pendiente/i.test(String(client.storage))?client.storage:(isLimani?'0-35 kg gratis - 36-100 kg 5?/d?a - 101-500 kg 10?/d?a - 500+ kg 15?/d?a':isAls?'3 d?as gratis ? 36-100 kg 2,50?/d?a ? 101-500 kg 3,50?/d?a ? 500+ kg 7,50?/d?a':isUme?'Warehousing 0,715?/kg/d?a ? min. 9,90? ? storage min. 99?':'Pendiente de tarifa');
+  const transporte=client?.transporte&&!/sin tarifa|pendiente/i.test(String(client.transporte))?client.transporte:(isLimani?'Warehouse?Vessel: 45? / 95? / 250? / 350? por peso':isAls?'A?adir manual seg?n servicio: aeropuerto, recogidas o transporte especial':isUme?'Delivery to vessel <50 kg 71,50? ? >50 kg 71,50?/h':'Pendiente de tarifa');
+  const recargo=client?.recargo&&!/sin tarifa|pendiente/i.test(String(client.recargo))?client.recargo:(isLimani||isAls||isUme?'+30% overtime / holidays':'Pendiente');
   return {
     codigo:client?.codigo||client?.id||clientCodeFromName(name),
     nombre:name,
@@ -34,26 +39,16 @@ const normalizeClientProfile=client=>{
     telefono:client?.telefono||'',
     fiscalName:client?.fiscalName||client?.razonSocial||(isLimani?'LIMANI SUPPLY GROUP S.L.':name),
     taxId:client?.taxId||client?.nif||(isLimani?'ESB01785120':''),
-    direccion:client?.direccion||(isLimani?'Calle Juan de la Cierva 11, Villalbilla (28810), Madrid, España':''),
-    condicionesPago:client?.condicionesPago||client?.terms||'30 días',
+    direccion:client?.direccion||(isLimani?'Calle Juan de la Cierva 11, Villalbilla (28810), Madrid, Espa?a':''),
+    condicionesPago:client?.condicionesPago||client?.terms||'30 d?as',
     moneda:client?.moneda||'EUR',
-    tarifaActiva:client?.tarifaActiva||(isLimani?'LIMANI Barcelona 2026':isAls?'ALS Barcelona 2026':'Sin tarifa automática'),
+    tarifaActiva,
     notas:client?.notas||'',
     expedientes:Number(client?.expedientes??client?.activeCases??0),
-    recepcion:client?.recepcion||(isLimani?'0-35 kg 15€  -  35-250 kg 60€  -  251-500 kg 130€  -  501-2500 kg 245€':isAls?'LOAD / UNLOAD: 0,12 €/kg por separado':'Pendiente de tarifa'),
-    storage:client?.storage||(isLimani?'0-35 kg gratis  -  36-100 kg 5€/día  -  101-500 kg 10€/día  -  500+ kg 15€/día':isAls?'3 días gratis · 36-100 kg 2,50€/día · 101-500 kg 3,50€/día · 500+ kg 7,50€/día':'Pendiente de tarifa'),
-    transporte:client?.transporte||(isLimani?'Warehouse→Vessel: 45€ / 95€ / 250€ / 350€ por peso':isAls?'Añadir manual según servicio: aeropuerto, recogidas o transporte especial':'Pendiente de tarifa'),
-    recargo:client?.recargo||(isLimani||isAls?'+30% overtime / holidays':'Pendiente'),
-    tarifaActiva:client?.tarifaActiva||(isLimani?'LIMANI Barcelona 2026':isAls?'ALS Barcelona 2026':isUme?'UME Algeciras 2026':'Sin tarifa automÃ¡tica'),
-    recepcion:client?.recepcion||(isLimani?'0-35 kg 15â‚¬  -  35-250 kg 60â‚¬  -  251-500 kg 130â‚¬  -  501-2500 kg 245â‚¬':isAls?'LOAD / UNLOAD: 0,12 â‚¬/kg por separado':isUme?'Coordination 66â‚¬ + handling 0,0363â‚¬/kg (min. 19,80â‚¬ >50 kg)':'Pendiente de tarifa'),
-    storage:client?.storage||(isLimani?'0-35 kg gratis  -  36-100 kg 5â‚¬/dÃ­a  -  101-500 kg 10â‚¬/dÃ­a  -  500+ kg 15â‚¬/dÃ­a':isAls?'3 dÃ­as gratis Â· 36-100 kg 2,50â‚¬/dÃ­a Â· 101-500 kg 3,50â‚¬/dÃ­a Â· 500+ kg 7,50â‚¬/dÃ­a':isUme?'Warehousing 0,715â‚¬/kg/dÃ­a Â· min. 9,90â‚¬ Â· storage min. 99â‚¬':'Pendiente de tarifa'),
-    transporte:client?.transporte||(isLimani?'Warehouseâ†’Vessel: 45â‚¬ / 95â‚¬ / 250â‚¬ / 350â‚¬ por peso':isAls?'AÃ±adir manual segÃºn servicio: aeropuerto, recogidas o transporte especial':isUme?'Delivery to vessel <50 kg 71,50â‚¬ Â· >50 kg 71,50â‚¬/h':'Pendiente de tarifa'),
-    recargo:client?.recargo||(isLimani||isAls||isUme?'+30% overtime / holidays':'Pendiente'),
-    tarifaActiva:client?.tarifaActiva&&!/sin tarifa|pendiente/i.test(String(client.tarifaActiva))?client.tarifaActiva:(isLimani?'LIMANI Barcelona 2026':isAls?'ALS Barcelona 2026':isUme?'UME Algeciras 2026':'Sin tarifa automÃ¡tica'),
-    recepcion:client?.recepcion&&!/sin tarifa|pendiente/i.test(String(client.recepcion))?client.recepcion:(isLimani?'0-35 kg 15â‚¬  -  35-250 kg 60â‚¬  -  251-500 kg 130â‚¬  -  501-2500 kg 245â‚¬':isAls?'LOAD / UNLOAD: 0,12 â‚¬/kg por separado':isUme?'Coordination 66â‚¬ + handling 0,0363â‚¬/kg (min. 19,80â‚¬ >50 kg)':'Pendiente de tarifa'),
-    storage:client?.storage&&!/sin tarifa|pendiente/i.test(String(client.storage))?client.storage:(isLimani?'0-35 kg gratis  -  36-100 kg 5â‚¬/dÃ­a  -  101-500 kg 10â‚¬/dÃ­a  -  500+ kg 15â‚¬/dÃ­a':isAls?'3 dÃ­as gratis Â· 36-100 kg 2,50â‚¬/dÃ­a Â· 101-500 kg 3,50â‚¬/dÃ­a Â· 500+ kg 7,50â‚¬/dÃ­a':isUme?'Warehousing 0,715â‚¬/kg/dÃ­a Â· min. 9,90â‚¬ Â· storage min. 99â‚¬':'Pendiente de tarifa'),
-    transporte:client?.transporte&&!/sin tarifa|pendiente/i.test(String(client.transporte))?client.transporte:(isLimani?'Warehouseâ†’Vessel: 45â‚¬ / 95â‚¬ / 250â‚¬ / 350â‚¬ por peso':isAls?'AÃ±adir manual segÃºn servicio: aeropuerto, recogidas o transporte especial':isUme?'Delivery to vessel <50 kg 71,50â‚¬ Â· >50 kg 71,50â‚¬/h':'Pendiente de tarifa'),
-    recargo:client?.recargo&&!/sin tarifa|pendiente/i.test(String(client.recargo))?client.recargo:(isLimani||isAls||isUme?'+30% overtime / holidays':'Pendiente'),
+    recepcion,
+    storage,
+    transporte,
+    recargo,
     activo:client?.activo!==false
   };
 };
@@ -359,7 +354,7 @@ const isSurveyService=item=>serviceTypeOf(item)==='survey_samples';
 const operationStepsFor=item=>isSurveyService(item)?SURVEY_OPERATION_STEPS:isStorageOnly(item)?STORAGE_OPERATION_STEPS:OPERATION_STEPS;
 const canCompleteOperationStep=()=>true;
 const operationFlow=item=>{
-  if(item.operationalFlow){const stored=item.operationalFlow;const delivery=Boolean(stored.delivery||stored.pod);const assigned=Boolean(item.conductor&&item.conductor!=='Sin asignar');return {review:false,cargo:false,documents:false,assignment:false,delivery:false,billingReady:false,...stored,assignment:stored.assignment??Boolean(delivery||(stored.documents&&assigned)),delivery,billingReady:Boolean(stored.billingReady||delivery),review:stored.review??Boolean(stored.cargo||stored.documents||stored.delivered||stored.pod||stored.delivery)}};
+  if(item.operationalFlow){const stored=item.operationalFlow;const delivery=Boolean(stored.delivery||stored.pod);const assigned=Boolean(item.conductor&&item.conductor!=='Sin asignar');return {review:Boolean(stored.review),cargo:Boolean(stored.cargo),documents:Boolean(stored.documents),assignment:Boolean(stored.assignment||assigned),delivery,billingReady:Boolean(stored.billingReady||delivery),...stored,review:Boolean(stored.review||stored.cargo||stored.documents||stored.delivered||stored.pod||stored.delivery),assignment:Boolean(stored.assignment||assigned),delivery,billingReady:Boolean(stored.billingReady||delivery)}};
   const progress=Number(item.progreso)||0;
   const completed=item.estado==='Completado'||progress>=100;
   return {review:progress>=25,cargo:progress>=50,documents:progress>=75,assignment:completed||Boolean(progress>=75&&item.conductor&&item.conductor!=='Sin asignar'),delivery:completed,billingReady:completed};
@@ -487,7 +482,7 @@ const parseWarehouseMoment=value=>{
     return Number.isNaN(date.getTime())?null:date;
   }
   const months={ene:0,jan:0,feb:1,mar:2,abr:3,apr:3,may:4,jun:5,jul:6,ago:7,aug:7,sep:8,oct:9,nov:10,dic:11,dec:11};
-  const match=normalized.toLowerCase().match(/(\d{1,2})\s+([a-záéíóú]{3,})\s*(\d{1,2}:\d{2})?/i);
+  const match=normalized.toLowerCase().match(/(\d{1,2})\s+([a-z\u00e1\u00e9\u00ed\u00f3\u00fa]{3,})\s*(\d{1,2}:\d{2})?/i);
   if(!match)return null;
   const date=new Date(new Date().getFullYear(),months[match[2].slice(0,3)]??0,Number(match[1]),0,0,0,0);
   if(match[3]){const [hour,minute]=match[3].split(':').map(Number);date.setHours(hour||0,minute||0,0,0)}
@@ -640,8 +635,8 @@ const defaultClientCostEstimate=(item,warehouseEntries=[])=>{
     const storageDaily=priceByWeight(weight,ALS_BARCELONA_RATES.storage);
     return {
       id:`COST-${item.id}`,
-      title:`PREVISIÓN COSTES ${item.buque||item.id}`.toUpperCase(),
-      note:'Tarifa ALS Barcelona 2026. Storage con 3 días gratis.',
+      title:`PREVISI\u00d3N COSTES ${item.buque||item.id}`.toUpperCase(),
+      note:'Tarifa ALS Barcelona 2026. Storage con 3 d\u00edas gratis.',
       lines:[
         {id:'unload',item:'UNLOAD (RECEPTION)',detail:cargo,price:loadUnload,units:1},
         {id:'storage',item:'STORAGE',detail:`${storageDays} DAYS (${chargeableStorageDays} BILLABLE + ${Math.min(storageDays,ALS_BARCELONA_RATES.freeStorageDays)} FREE) - ${cargo}`,price:storageDaily,units:chargeableStorageDays},
@@ -653,15 +648,15 @@ const defaultClientCostEstimate=(item,warehouseEntries=[])=>{
     const lines=umeAlgecirasLines(item,warehouseEntries,[],[],{includeRef:false}).map(line=>({...line,tax:undefined}));
     return {
       id:`COST-${item.id}`,
-      title:`PREVISIÃ“N COSTES ${item.buque||item.id}`.toUpperCase(),
-      note:'Tarifa UME Algeciras 2026. Base automática desde peso, storage y entrega a buque.',
+      title:`PREVISI\u00d3N COSTES ${item.buque||item.id}`.toUpperCase(),
+      note:'Tarifa UME Algeciras 2026. Base autom\u00e1tica desde peso, storage y entrega a buque.',
       lines
     };
   }
   return {
     id:`COST-${item.id}`,
-    title:`PREVISIÓN COSTES ${item.buque||item.id}`.toUpperCase(),
-    note:'Sin tarifa automática para este cliente. Añade conceptos manuales.',
+      title:`PREVISI\u00d3N COSTES ${item.buque||item.id}`.toUpperCase(),
+    note:'Sin tarifa autom\u00e1tica para este cliente. A\u00f1ade conceptos manuales.',
     lines:[{id:'manual-'+Date.now(),item:'CONCEPTO MANUAL',detail:cargo,price:0,units:1}]
   };
 };
@@ -710,7 +705,7 @@ const draftInvoiceFromCase=(item,warehouseEntries=[],transports=[],calendarEvent
       {id:'survey',item:'SURVEY / BALLAST WATER SAMPLES',detail,price:surveyPrice,units:1,tax:'0%'}
     ];
     const due=new Date(Date.now()+30*86400000).toISOString().slice(0,10);
-    const invoice={id:'BOR-'+item.id.replace('SW-',''),expediente:item.id,cliente:item.cliente,concepto:invoiceHeaderTitle(item),importe:0,estado:'Borrador',vencimiento:due,buque:item.buque,puerto:item.puerto,proforma:`PRO${String(260000+numericRef(item.id)).slice(-6)}`,observaciones:'Exención de IVA según ART 22 de la ley 37/1992 y 10.2 del real decreto ley 1624/92 de Diciembre',payment:'BANK ACCOUNT: ES06 0182 4775 5102 0174 1635\\nSWIFT: BBVAESMMXXX',lines};
+    const invoice={id:'BOR-'+item.id.replace('SW-',''),expediente:item.id,cliente:item.cliente,concepto:invoiceHeaderTitle(item),importe:0,estado:'Borrador',vencimiento:due,buque:item.buque,puerto:item.puerto,proforma:`PRO${String(260000+numericRef(item.id)).slice(-6)}`,observaciones:'Exenci\u00f3n de IVA seg\u00fan ART 22 de la ley 37/1992 y 10.2 del real decreto ley 1624/92 de Diciembre',payment:'BANK ACCOUNT: ES06 0182 4775 5102 0174 1635\\nSWIFT: BBVAESMMXXX',lines};
     const importe=invoiceTotal(invoice);
     const coste=caseExpenseTotal(item);
     return {...invoice,importe,coste,margen:importe-coste};
@@ -718,7 +713,7 @@ const draftInvoiceFromCase=(item,warehouseEntries=[],transports=[],calendarEvent
   if(isUmeAlgecirasCase(item)){
     const lines=umeAlgecirasLines(item,warehouseEntries,transports,calendarEvents,{includeRef:true});
     const due=new Date(Date.now()+30*86400000).toISOString().slice(0,10);
-    const invoice={id:'BOR-'+item.id.replace('SW-',''),expediente:item.id,cliente:item.cliente,concepto:invoiceHeaderTitle(item),importe:0,estado:'Borrador',vencimiento:due,buque:item.buque,puerto:item.puerto,proforma:`PRO${String(260000+numericRef(item.id)).slice(-6)}`,observaciones:'ExenciÃ³n de IVA segÃºn ART 22 de la ley 37/1992 y 10.2 del real decreto ley 1624/92 de Diciembre',payment:'BANK ACCOUNT: ES06 0182 4775 5102 0174 1635\\nSWIFT: BBVAESMMXXX',lines};
+    const invoice={id:'BOR-'+item.id.replace('SW-',''),expediente:item.id,cliente:item.cliente,concepto:invoiceHeaderTitle(item),importe:0,estado:'Borrador',vencimiento:due,buque:item.buque,puerto:item.puerto,proforma:`PRO${String(260000+numericRef(item.id)).slice(-6)}`,observaciones:'Exenci\u00f3n de IVA seg\u00fan ART 22 de la ley 37/1992 y 10.2 del real decreto ley 1624/92 de Diciembre',payment:'BANK ACCOUNT: ES06 0182 4775 5102 0174 1635\\nSWIFT: BBVAESMMXXX',lines};
     const importe=invoiceTotal(invoice);
     const coste=caseExpenseTotal(item);
     return {...invoice,importe,coste,margen:importe-coste};
@@ -740,7 +735,7 @@ const draftInvoiceFromCase=(item,warehouseEntries=[],transports=[],calendarEvent
   }
   if(Number(item.billing?.waitingHours||0)>0)lines.push({id:'waiting',item:'WAITING TIME',detail:`${item.billing.waitingHours} HOURS WAITING FOR ARRIVE`,price:suggestedWaitingPrice(item),units:Number(item.billing.waitingHours),tax:'0%'});
   const due=new Date(Date.now()+30*86400000).toISOString().slice(0,10);
-  const invoice={id:'BOR-'+item.id.replace('SW-',''),expediente:item.id,cliente:item.cliente,concepto:invoiceHeaderTitle(item),importe:0,estado:'Borrador',vencimiento:due,buque:item.buque,puerto:item.puerto,proforma:`PRO${String(260000+numericRef(item.id)).slice(-6)}`,observaciones:'Exención de IVA según ART 22 de la ley 37/1992 y 10.2 del real decreto ley 1624/92 de Diciembre',payment:'BANK ACCOUNT: ES06 0182 4775 5102 0174 1635\\nSWIFT: BBVAESMMXXX',lines};
+  const invoice={id:'BOR-'+item.id.replace('SW-',''),expediente:item.id,cliente:item.cliente,concepto:invoiceHeaderTitle(item),importe:0,estado:'Borrador',vencimiento:due,buque:item.buque,puerto:item.puerto,proforma:`PRO${String(260000+numericRef(item.id)).slice(-6)}`,observaciones:'Exenci\u00f3n de IVA seg\u00fan ART 22 de la ley 37/1992 y 10.2 del real decreto ley 1624/92 de Diciembre',payment:'BANK ACCOUNT: ES06 0182 4775 5102 0174 1635\\nSWIFT: BBVAESMMXXX',lines};
   const importe=invoiceTotal(invoice);
   const coste=caseExpenseTotal(item);
   return {...invoice,importe,coste,margen:importe-coste};
