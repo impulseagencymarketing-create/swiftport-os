@@ -1178,7 +1178,7 @@ function App({auth,finance,onFinanceChange,onLogout}){
     try{await persistOperational(nextCases,nextTransports,warehouseEntries,customs,nextCalendar,providers,nextVessels,deletedVesselKeys,{action:'case.create',details:{caseRef:item.id,vessel:item.buque,client:item.cliente,port:item.puerto,serviceType:serviceTypeOf(item),transportCreated:Boolean(transport)}});setCases(nextCases);setTransports(nextTransports);setCalendarEvents(nextCalendar);setVessels(nextVessels);setSelectedId(item.id);setNewOpen(false);setTab('expedientes');notify(`Expediente ${item.id} creado y guardado`)}
     catch(reason){notify('No se pudo guardar el expediente: '+reason.message)}
   };
-  const updateTransport=updated=>{const parts=routeParts(updated);const normalized={...updated,...parts,ruta:`${parts.origen} → ${parts.destino}`,hora:formatSchedule(updated.fecha,updated.inicio,updated.fin),observacion:updated.observacion||'',scheduleSource:'manual',scheduleStatus:updated.inicio?'confirmed':'missing_time',scheduleNote:updated.inicio?'':'Falta hora ETB; pendiente de confirmar horario'};const nextTransports=transports.map(item=>item.id===updated.id?normalized:item);const nextCases=cases.map(item=>{if(item.id!==updated.expediente)return item;const flow=operationFlow(item);const assigned=Boolean(updated.conductor&&updated.conductor!=='Sin asignar');const changed=assigned&&item.conductor!==updated.conductor;const now=new Date();return normalizeMerchandise({...item,autoTransportDisabled:false,conductor:updated.conductor,operationalFlow:{...flow,assignment:flow.delivery||assigned},timelineCustom:changed?[{id:`ASSIGN-${item.id}-${Date.now()}`,fecha:now.toLocaleDateString('es-ES'),hora:now.toLocaleTimeString('es-ES',{hour:'2-digit',minute:'2-digit'}),titulo:'Conductor asignado',detalle:`${updated.conductor}  -  ${normalized.ruta}`,actor:visibleUser.fullName,estado:'done'},...(item.timelineCustom||[])]:item.timelineCustom})});const linkedEvent=calendarEvents.find(item=>item.transporte===updated.id);const synchronized={titulo:normalized.ruta,origen:normalized.origen,destino:normalized.destino,tipoServicio:'Transporte',fecha:updated.fecha,inicio:updated.inicio,fin:updated.fin,asignado:updated.conductor,proveedorId:updated.proveedorId||'',expediente:updated.expediente,transporte:updated.id,observacion:normalized.observacion,color:calendarTone({...updated,...normalized},nextCases),scheduleSource:'manual',scheduleStatus:normalized.scheduleStatus,scheduleNote:normalized.scheduleNote};const nextCalendar=(linkedEvent?calendarEvents.map(item=>item.transporte===updated.id?{...item,...synchronized}:item):[...calendarEvents,{id:'EV-'+Date.now(),...synchronized}]).filter(isTransportCalendarEvent);setTransports(nextTransports);setCases(nextCases);setCalendarEvents(nextCalendar);saveOperational(nextCases,nextTransports,warehouseEntries,customs,nextCalendar);notify('Ruta, transporte y calendario actualizados')};
+  const updateTransport=updated=>{const parts=routeParts(updated);const normalized={...updated,...parts,ruta:`${parts.origen} → ${parts.destino}`,hora:formatSchedule(updated.fecha,updated.inicio,updated.fin),observacion:updated.observacion||'',scheduleSource:'manual',scheduleStatus:updated.inicio?'confirmed':'missing_time',scheduleNote:updated.inicio?'':'Falta hora ETB; pendiente de confirmar horario'};const nextTransports=transports.map(item=>item.id===updated.id?normalized:item);const nextCases=cases.map(item=>{if(item.id!==updated.expediente)return item;const flow=operationFlow(item);const assigned=Boolean(updated.conductor&&updated.conductor!=='Sin asignar');const changed=assigned&&item.conductor!==updated.conductor;const now=new Date();return normalizeMerchandise({...item,autoTransportDisabled:false,conductor:updated.conductor,operationalFlow:{...flow,assignment:flow.delivery||assigned},timelineCustom:changed?[{id:`ASSIGN-${item.id}-${Date.now()}`,fecha:now.toLocaleDateString('es-ES'),hora:now.toLocaleTimeString('es-ES',{hour:'2-digit',minute:'2-digit'}),titulo:'Conductor asignado',detalle:`${updated.conductor}  -  ${normalized.ruta}`,actor:visibleUser.fullName,estado:'done'},...(item.timelineCustom||[])]:item.timelineCustom})});const linkedEvent=calendarEvents.find(item=>item.transporte===updated.id);const synchronized={titulo:normalized.ruta,origen:normalized.origen,destino:normalized.destino,tipoServicio:'Transporte',fecha:updated.fecha,inicio:updated.inicio,fin:updated.fin,asignado:updated.conductor,proveedorId:updated.proveedorId||'',expediente:updated.expediente,transporte:updated.id,observacion:normalized.observacion,color:calendarTone({...updated,...normalized},nextCases),scheduleSource:'manual',scheduleStatus:normalized.scheduleStatus,scheduleNote:normalized.scheduleNote};const nextCalendar=(linkedEvent?calendarEvents.map(item=>item.transporte===updated.id?{...item,...synchronized}:item):[...calendarEvents,{id:'EV-'+Date.now(),...synchronized}]).filter(isTransportCalendarEvent);setTransports(nextTransports);setCases(nextCases);setCalendarEvents(nextCalendar);saveOperational(nextCases,nextTransports,warehouseEntries,customs,nextCalendar,providers,vessels,deletedVesselKeys,{action:'calendar.update',details:{caseRef:updated.expediente||'',transportId:updated.id,service:'Transporte',route:normalized.ruta,date:updated.fecha,start:updated.inicio,end:updated.fin,driver:updated.conductor||'Sin asignar',provider:updated.proveedorId||'',note:normalized.observacion||''}});notify('Ruta, transporte y calendario actualizados')};
   const updateCase=updated=>{
     const {importe,...rawCase}=updated;
     const previousCase=cases.find(item=>item.id===rawCase.id)||{};
@@ -2842,11 +2842,46 @@ const AUDIT_LABELS={
   'step.reopen':'Paso operativo reabierto'
 };
 const auditLabel=action=>AUDIT_LABELS[action]||String(action||'Movimiento');
-const auditDetailsText=details=>{
+const rawAuditDetailsText=details=>{
   if(!details||typeof details!=='object')return '—';
   const entries=Object.entries(details).filter(([,value])=>value!==''&&value!==null&&value!==undefined);
   if(!entries.length)return '—';
   return entries.map(([key,value])=>`${key}: ${Array.isArray(value)?value.join(', '):typeof value==='object'?JSON.stringify(value):value}`).join(' · ');
+};
+const cleanAuditValue=value=>Array.isArray(value)?value.filter(Boolean).join(', '):typeof value==='object'&&value?JSON.stringify(value):String(value??'').trim();
+const auditJoin=(parts=[])=>parts.filter(Boolean).join(' - ');
+const auditDetailsText=(details,action='')=>{
+  if(!details||typeof details!=='object'){
+    if(action==='auth.login')return 'Entro en la aplicacion';
+    if(action==='auth.logout')return 'Cerro sesion';
+    if(action==='operational.update')return 'Sincronizacion general de datos operativos';
+    if(action==='finance.update')return 'Guardo cambios en facturacion';
+    return 'Sin detalle guardado';
+  }
+  const caseText=details.caseRef?`Expediente ${details.caseRef}`:'';
+  const vesselText=details.vessel?`Buque ${details.vessel}`:'';
+  const routeText=details.route?`Ruta ${details.route}`:'';
+  const scheduleText=auditJoin([details.date&&`Fecha ${details.date}`,details.start&&`Inicio ${details.start}`,details.end&&`Fin ${details.end}`]);
+  if(action==='case.create')return auditJoin([`Creo ${caseText||'expediente'}`,vesselText,details.client&&`Cliente ${details.client}`,details.port&&`Puerto ${details.port}`,details.serviceType&&`Tipo ${details.serviceType}`,details.transportCreated!==undefined&&`Transporte ${details.transportCreated?'creado':'no creado'}`]);
+  if(action==='case.update')return auditJoin([`Edito ${caseText||'expediente'}`,vesselText,details.client&&`Cliente ${details.client}`,details.port&&`Puerto ${details.port}`,details.eta&&`ETA ${details.eta}`,details.etb&&`ETB ${details.etb}`,details.etd&&`ETD ${details.etd}`]);
+  if(action==='case.delete')return auditJoin([`Borro ${caseText||'expediente'}`,vesselText,details.client&&`Cliente ${details.client}`,details.port&&`Puerto ${details.port}`,details.linkedWarehouse!==undefined&&`Mercancias desvinculadas ${details.linkedWarehouse}`,details.linkedTransports!==undefined&&`Transportes eliminados ${details.linkedTransports}`]);
+  if(action==='calendar.update')return auditJoin([`Actualizo transporte ${details.transportId||''}`.trim(),caseText,details.service&&`Servicio ${details.service}`,routeText,scheduleText,details.driver&&`Conductor ${details.driver}`,details.provider&&`Proveedor ${details.provider}`,details.note&&`Obs. ${details.note}`]);
+  if(action==='calendar.delete')return auditJoin([`Elimino servicio ${details.transportId||''}`.trim(),caseText,vesselText,details.service&&`Servicio ${details.service}`,scheduleText]);
+  if(action==='warehouse.create')return auditJoin([`Registro entrada ${details.warehouseRef||''}`.trim(),caseText,vesselText,details.packages&&`${details.packages} bultos`,details.weight&&`${details.weight}`,details.zone&&`Zona ${details.zone}`,details.photos!==undefined&&`${details.photos} fotos`,details.documents!==undefined&&`${details.documents} documentos`]);
+  if(action==='warehouse.update')return auditJoin([`Edito almacen ${details.warehouseRef||''}`.trim(),caseText,vesselText,details.packages&&`${details.packages} bultos`,details.weight&&`${details.weight}`]);
+  if(action==='warehouse.delete')return auditJoin([`Elimino almacen ${details.warehouseRef||''}`.trim(),caseText,vesselText,details.packages&&`${details.packages} bultos`,details.weight&&`${details.weight}`]);
+  if(action==='step.complete')return auditJoin([`Completo paso ${details.title||details.step||''}`.trim(),caseText,vesselText,details.readyForBilling&&'Listo para facturar',details.podException&&'POD no sellado justificado']);
+  if(action==='step.reopen')return auditJoin([`Reabrio paso ${details.title||details.step||''}`.trim(),caseText,vesselText,details.method==='undo'?'Vuelta atras':'Reapertura manual']);
+  if(action==='attachment.upload')return auditJoin([`Subio archivo ${details.id||''}`.trim(),details.category&&`Categoria ${details.category}`]);
+  if(action==='holded.proform.create')return auditJoin(['Envio proforma a Holded',caseText,details.clientName&&`Cliente ${details.clientName}`,details.total!==undefined&&`Total ${details.total} EUR`,details.holdedId&&`Holded ${details.holdedId}`]);
+  if(action==='users.create')return auditJoin([`Creo usuario ${details.created_user_id||''}`.trim(),details.roles&&`Roles ${cleanAuditValue(details.roles)}`]);
+  if(action==='users.roles_update')return auditJoin([`Actualizo roles del usuario ${details.updated_user_id||''}`.trim(),details.roles&&`Roles ${cleanAuditValue(details.roles)}`]);
+  if(action==='clients.create')return 'Creo o importo ficha de cliente';
+  if(action?.startsWith('mail.'))return auditJoin(['Correo procesado',details.mailId&&`Mail ${details.mailId}`,caseText,details.status&&`Estado ${details.status}`]);
+  if(action?.startsWith('ais.'))return auditJoin(['Seguimiento AIS',caseText,details.mmsi&&`MMSI ${details.mmsi}`]);
+  const entries=Object.entries(details).filter(([,value])=>value!==''&&value!==null&&value!==undefined);
+  if(!entries.length)return action==='operational.update'?'Sincronizacion general de datos operativos':'Sin detalle guardado';
+  return entries.map(([key,value])=>`${key}: ${cleanAuditValue(value)}`).join(' - ');
 };
 function Auditoria({notify}){
   const [items,setItems]=useState([]);
@@ -2859,7 +2894,7 @@ function Auditoria({notify}){
   };
   useEffect(load,[]);
   const visible=items.filter(item=>{
-    const haystack=[item.userName,item.email,item.action,auditLabel(item.action),auditDetailsText(item.details),item.ipAddress,item.createdAt].join(' ').toLowerCase();
+    const haystack=[item.userName,item.email,item.action,auditLabel(item.action),auditDetailsText(item.details,item.action),item.ipAddress,item.createdAt].join(' ').toLowerCase();
     return haystack.includes(query.toLowerCase());
   });
   const important=visible.filter(item=>!/operational\.update/.test(item.action)).length;
@@ -2873,7 +2908,7 @@ function Auditoria({notify}){
         <time>{item.createdAt?new Date(item.createdAt.replace(' ','T')).toLocaleString('es-ES'):'—'}</time>
         <span><b>{item.userName}</b><small>{item.email||'Sistema'}</small></span>
         <span><Badge tone={/delete|borr|ignore|error|logout/.test(item.action)?'danger':/create|upload|login|complete/.test(item.action)?'success':'info'}>{auditLabel(item.action)}</Badge><small>{item.action}</small></span>
-        <p>{auditDetailsText(item.details)}</p>
+        <p>{auditDetailsText(item.details,item.action)}</p>
         <code>{item.ipAddress}</code>
       </article>)}
       {!visible.length&&<Empty text="No hay movimientos con ese filtro."/>}
