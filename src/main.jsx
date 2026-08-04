@@ -1644,6 +1644,7 @@ function App({auth,finance,onFinanceChange,onLogout}){
       if(item.expediente!==operationalCase.id)return item;
       const linked=syncLinkedTransportWithCase(item,previousCase,operationalCase);
       if(['Entregado','Completado','Cancelado'].includes(String(linked.estado||'')))return linked;
+      if(isManualSchedule(linked))return linked;
       return slot.date?{...linked,fecha:slot.date,inicio:slot.start,fin:end,hora:slot.start?formatSchedule(slot.date,slot.start,end):`${slot.date}  -  FALTA HORARIO`,scheduleSource:slot.source,scheduleStatus,scheduleNote}:linked;
     });
     const syncedCalendar=calendarEvents.map(event=>{
@@ -1652,6 +1653,7 @@ function App({auth,finance,onFinanceChange,onLogout}){
       const syncedRoute=linkedTransport?transportRoute(linkedTransport):replaceLinkedVesselText(event.titulo,previousCase,operationalCase);
       const base={...event,titulo:syncedRoute,origen:linkedTransport?.origen||event.origen,destino:linkedTransport?.destino||event.destino};
       if(['Entregado','Completado','Cancelado'].includes(String(linkedTransport?.estado||event.estado||'')))return {...base,color:calendarTone(base,next)};
+      if(isManualSchedule(linkedTransport)||isManualSchedule(event))return {...base,color:calendarTone(base,next)};
       return slot.date?{...base,fecha:slot.date,inicio:slot.start,fin:end,color:calendarTone(base,next),scheduleSource:slot.source,scheduleStatus,scheduleNote}:base;
     });
     const existingEventTransports=new Set(syncedCalendar.map(event=>event.transporte).filter(Boolean));
@@ -2147,9 +2149,11 @@ function formatSchedule(date,start,end){if(!date||!start)return 'Por programar';
 const isTransportCalendarEvent=event=>String(event?.tipoServicio||'').toLowerCase().startsWith('transporte')||Boolean(event?.transporte);
 const calendarHasValidStart=event=>/^\d{2}:\d{2}$/.test(String(event?.inicio||''));
 const calendarNeedsTime=event=>!calendarHasValidStart(event)||String(event?.scheduleStatus||'')==='provisional';
+const isManualSchedule=item=>String(item?.scheduleSource||'').toLowerCase()==='manual';
 const calendarEventWithCaseSlot=(event,cases)=>{
   const related=(cases||[]).find(item=>item.id===event?.expediente);
   const color=portTone(related?.puerto||event?.puerto||event?.destino||event?.titulo);
+  if(isManualSchedule(event))return {...event,color};
   const slot=related?transportSlotFromCase(related):null;
   if(!slot?.date)return {...event,color};
   const start=/^\d{2}:\d{2}$/.test(String(slot.start||''))?slot.start:'';
