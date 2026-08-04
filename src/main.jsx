@@ -595,10 +595,25 @@ const umeAlgecirasLines=(item,warehouseEntries=[],transports=[],calendarEvents=[
   return lines;
 };
 
-const invoiceTariffConceptOptions=(item,warehouseEntries=[],transports=[],calendarEvents=[])=>{
+const invoiceLineCargoText=(lines=[])=>{
+  const values=(lines||[]).map(line=>String(line?.detail||'').trim()).filter(Boolean);
+  const preferred=values.find(value=>/\d+(?:[.,]\d+)?\s*KGS?\b/i.test(value)&&/\b(BOX|BOXES|CAJA|CAJAS|PALLET|PALLETS|BULTO|BULTOS|SOBRE|SOBRES)\b/i.test(value));
+  return preferred||values.find(value=>/\b(BOX|BOXES|CAJA|CAJAS|PALLET|PALLETS|BULTO|BULTOS|SOBRE|SOBRES)\b/i.test(value))||'';
+};
+const invoiceLinesWeight=(lines=[])=>{
+  const detail=invoiceLineCargoText(lines).replace(/,/g,'.');
+  if(!detail)return 0;
+  return [...detail.matchAll(/(\d+(?:\.\d+)?)\s*KGS?\b/gi)].reduce((sum,match)=>sum+(Number(match[1])||0),0);
+};
+const invoiceLinesCargoSummary=(lines=[])=>{
+  const detail=invoiceLineCargoText(lines);
+  return detail?detail.toUpperCase():'';
+};
+const invoiceTariffConceptOptions=(item,warehouseEntries=[],transports=[],calendarEvents=[],manual={})=>{
   if(!item)return [];
-  const cargo=invoiceCargoSummary(item,warehouseEntries);
-  const weight=invoiceCargoWeight(item,warehouseEntries);
+  const baseCargo=invoiceCargoSummary(item,warehouseEntries);
+  const cargo=manual.manualCargo||baseCargo;
+  const weight=Number(manual.manualWeight)||invoiceCargoWeight(item,warehouseEntries);
   const storageDays=invoiceStorageDays(item,warehouseEntries);
   const transportServices=invoiceTransportServices(item,transports,calendarEvents);
   const transportUnits=Math.max(1,transportServices.length||invoiceTransportUnits(item,transports,calendarEvents)||1);
@@ -607,7 +622,7 @@ const invoiceTariffConceptOptions=(item,warehouseEntries=[],transports=[],calend
     return [
       make('ume-load-unload','LOAD / UNLOAD','LOAD / UNLOAD',cargo,umeHandlingPrice(weight)),
       make('ume-warehouse','WAREHOUSE / STORAGE','WAREHOUSE',`${Math.max(storageDays,1)} DAYS - ${cargo}`,umeStorageTotal(weight,Math.max(storageDays,1))||UME_ALGECIRAS_RATES.warehousingMin),
-      make('ume-customs','CUSTOMS CLEARANCE','CUSTOMS CLEARANCE',cargo,UME_ALGECIRAS_RATES.customsClearance),
+      make('ume-customs','CUSTOMS CLEARANCE','CUSTOMS CLEARANCE',cargo,umeAlgecirasCustomsPrice(item)),
       make('ume-delivery','DELIVERY VESSEL ALGECIRAS PORT','DELIVERY VESSEL ALGECIRAS PORT',`${transportUnits} TRANSPORTES - ${cargo}`,umeTransportPrice(weight,transportUnits),transportUnits),
       make('ume-extra','EXTRA SERVICE','EXTRA SERVICE',cargo,0)
     ];
@@ -3429,8 +3444,10 @@ function InvoiceEditModal({item,cases=[],warehouseEntries=[],transports=[],calen
   const [supplierNote,setSupplierNote]=useState('');
   const [supplierScanning,setSupplierScanning]=useState(false);
   const [selectedTariffConcept,setSelectedTariffConcept]=useState('');
+  const manualInvoiceWeight=invoiceLinesWeight(form.lines);
+  const manualInvoiceCargo=invoiceLinesCargoSummary(form.lines);
   const billingCase=relatedCase?{...relatedCase,cliente:form.cliente}:null;
-  const tariffConceptOptions=billingCase?invoiceTariffConceptOptions(billingCase,warehouseEntries,transports,calendarEvents):[];
+  const tariffConceptOptions=billingCase?invoiceTariffConceptOptions(billingCase,warehouseEntries,transports,calendarEvents,{manualWeight:manualInvoiceWeight,manualCargo:manualInvoiceCargo}):[];
   const selectedClient=findClientProfile(form.cliente);
   const applyClient=value=>{
     const profile=findClientProfile(value);
