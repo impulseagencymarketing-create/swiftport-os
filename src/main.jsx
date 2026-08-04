@@ -555,6 +555,11 @@ const umeStorageTotal=(weight,days)=>{
   const daily=Math.max(UME_ALGECIRAS_RATES.minWarehousing,Math.round(kilos*UME_ALGECIRAS_RATES.warehousingPerKg*100)/100);
   return Math.max(UME_ALGECIRAS_RATES.storageMinimum,Math.round(daily*storageDays*100)/100);
 };
+const umeStorageDailyPrice=weight=>{
+  const kilos=Number(weight)||0;
+  if(kilos<=0)return UME_ALGECIRAS_RATES.minWarehousing;
+  return Math.max(UME_ALGECIRAS_RATES.minWarehousing,Math.round(kilos*UME_ALGECIRAS_RATES.warehousingPerKg*100)/100);
+};
 const umeTransportPrice=weight=>{
   const kilos=Number(weight)||0;
   if(kilos<=0)return UME_ALGECIRAS_RATES.deliveryToVesselUnder50;
@@ -621,7 +626,7 @@ const invoiceTariffConceptOptions=(item,warehouseEntries=[],transports=[],calend
   if(isUmeAlgecirasCase(item)){
     return [
       make('ume-load-unload','LOAD / UNLOAD','LOAD / UNLOAD',cargo,umeHandlingPrice(weight)),
-      make('ume-warehouse','WAREHOUSE / STORAGE','WAREHOUSE',`${Math.max(storageDays,1)} DAYS - ${cargo}`,umeStorageTotal(weight,Math.max(storageDays,1))||UME_ALGECIRAS_RATES.warehousingMin),
+      make('ume-warehouse','WAREHOUSE / STORAGE','WAREHOUSE',`${Math.max(storageDays,1)} DAYS - ${cargo}`,umeStorageDailyPrice(weight),Math.max(storageDays,1)),
       make('ume-customs','CUSTOMS CLEARANCE','CUSTOMS CLEARANCE',cargo,umeAlgecirasCustomsPrice(item)),
       make('ume-delivery','DELIVERY VESSEL ALGECIRAS PORT','DELIVERY VESSEL ALGECIRAS PORT',`${transportUnits} TRANSPORTES - ${cargo}`,umeTransportPrice(weight,transportUnits),transportUnits),
       make('ume-extra','EXTRA SERVICE','EXTRA SERVICE',cargo,0)
@@ -908,6 +913,37 @@ const repriceLimaniInvoiceLines=(lines,weight,detail)=>{
     if(line.id==='transport')return {...next,price:priceByWeight(kilos,LIMANI_BARCELONA_RATES.warehouseToVessel)};
     return next;
   });
+};
+const invoiceAutoPriceLine=(line,context,warehouseEntries=[],transports=[],calendarEvents=[])=>{
+  const label=supplierConceptLabel(line?.item||line?.label||'');
+  const detail=String(line?.detail||'');
+  const detailWeight=invoiceDetailWeight(detail);
+  const fallbackWeight=invoiceCargoWeight(context,warehouseEntries);
+  const kilos=detailWeight||fallbackWeight;
+  const units=Number(line?.units)||1;
+  if(!context||!label)return null;
+  if(isUmeAlgecirasCase(context)){
+    if(/LOAD|UNLOAD|HANDLING|RECEPTION/.test(label))return umeHandlingPrice(kilos);
+    if(/WAREHOUSE|STORAGE/.test(label))return umeStorageDailyPrice(kilos);
+    if(/CUSTOMS|CLEARANCE|ADUANA|T\s*-?\s*1|EX\s*-?\s*1/.test(label))return umeAlgecirasCustomsPrice(context);
+    if(/DELIVERY|VESSEL|TRANSPORT|TRANSPORTE/.test(label))return umeTransportPrice(kilos);
+    return null;
+  }
+  if(isAlsCase(context)){
+    if(/UNLOAD|RECEPTION|DESCARGA/.test(label))return Number(((kilos||0)*ALS_BARCELONA_RATES.loadUnloadPerKg).toFixed(2));
+    if(/LOAD|SALIDA|CARGA/.test(label))return Number(((kilos||0)*ALS_BARCELONA_RATES.loadUnloadPerKg).toFixed(2));
+    if(/STORAGE|ALMACENAJE/.test(label))return storagePriceByWeight(kilos,ALS_BARCELONA_RATES.storage);
+    return null;
+  }
+  if(isLimaniCase(context)){
+    if(/RECEPTION|RECEPCION/.test(label))return priceByWeight(kilos,LIMANI_BARCELONA_RATES.reception);
+    if(/HANDLING|MANIPULACION/.test(label))return kilos>0?LIMANI_BARCELONA_RATES.handlingHour:0;
+    if(/STORAGE|ALMACENAJE/.test(label))return priceByWeight(kilos,LIMANI_BARCELONA_RATES.storage);
+    if(/TRANSPORT|TRANSPORTE|DELIVERY|VESSEL|BUQUE/.test(label))return priceByWeight(kilos,LIMANI_BARCELONA_RATES.warehouseToVessel);
+    if(/WAITING|ESPERA/.test(label))return LIMANI_BARCELONA_RATES.waitingHour;
+    return null;
+  }
+  return null;
 };
 const invoiceTransportServices=(item,transports=[],calendarEvents=[])=>{
   const caseId=item?.id;
@@ -3470,15 +3506,16 @@ function InvoiceEditModal({item,cases=[],warehouseEntries=[],transports=[],calen
     setForm({...form,[name]:value});
   };
   const updateLine=(index,field,value)=>{
-    const editedLine=form.lines[index];
-    const updatedLines=form.lines.map((line,lineIndex)=>lineIndex===index?{...line,[field]:value}:line);
-    if(field==='detail'&&isLimaniCase({...relatedCase,cliente:form.cliente})&&isStandardInvoiceLine(editedLine)){
-      const weight=invoiceDetailWeight(value);
-      if(weight>0){
-        setForm({...form,lines:repriceLimaniInvoiceLines(updatedLines,weight,value)});
-        return;
+    const billingContext=relatedCase?{...relatedCase,cliente:form.cliente}:null;
+    const updatedLines=form.lines.map((line,lineIndex)=>{
+      if(lineIndex!==index)return line;
+      const next={...line,[field]:value};
+      if(['detail','item','units'].includes(field)){
+        const autoPrice=invoiceAutoPriceLine(next,billingContext,warehouseEntries,transports,calendarEvents);
+        if(autoPrice!==null)return {...next,price:autoPrice};
       }
-    }
+      return next;
+    });
     setForm({...form,lines:updatedLines});
   };
   const addLine=()=>setForm({...form,lines:[...form.lines,{id:`line-${Date.now()}`,item:'WAITING TIME',detail:'',price:0,units:1,tax:'0%'}]});
