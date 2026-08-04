@@ -225,6 +225,22 @@ const money = value => new Intl.NumberFormat('es-ES',{style:'currency',currency:
 const numericRef=value=>Number(String(value||'').match(/(\d+)(?!.*\d)/)?.[1]||0);
 const newestFirst=(left,right)=>numericRef(right.id||right.ref)-numericRef(left.id||left.ref);
 const newestMailFirst=(left,right)=>(Date.parse(right.received_at||right.created_at||'')||0)-(Date.parse(left.received_at||left.created_at||'')||0)||Number(right.id||0)-Number(left.id||0);
+const toIsoDateValue=value=>{
+  const text=String(value||'').trim();
+  if(!text||/confirmar|pendiente/i.test(text))return '';
+  const iso=text.match(/(20\d{2})-(\d{2})-(\d{2})/);
+  if(iso)return `${iso[1]}-${iso[2]}-${iso[3]}`;
+  const numeric=text.match(/(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})/);
+  if(numeric){
+    const year=numeric[3].length===2?`20${numeric[3]}`:numeric[3];
+    return `${year}-${String(numeric[2]).padStart(2,'0')}-${String(numeric[1]).padStart(2,'0')}`;
+  }
+  return '';
+};
+const toClockValue=value=>{
+  const match=String(value||'').match(/\b([01]?\d|2[0-3]):([0-5]\d)\b/);
+  return match?`${String(match[1]).padStart(2,'0')}:${match[2]}`:'';
+};
 const formatEtaDate=value=>{
   if(!value||/confirmar/i.test(value))return 'ETA POR CONFIRMAR';
   const iso=String(value).match(/^(\d{4})-(\d{2})-(\d{2})/);
@@ -257,9 +273,12 @@ const portCallSchedule=item=>{
 };
 const transportSlotFromCase=item=>{
   const call=item?.portCall||{};
-  const etaDate=call.etaDate||(!/confirmar/i.test(item?.eta||'')?String(item?.eta||'').slice(0,10):'');
-  if(call.etbDate)return {date:call.etbDate,start:call.etbTime||'',source:'ETB'};
-  if(etaDate)return {date:etaDate,start:call.etaTime||'',source:'ETA'};
+  const etaDate=toIsoDateValue(call.etaDate)||toIsoDateValue(item?.eta);
+  const etaTime=toClockValue(call.etaTime)||toClockValue(item?.eta);
+  const etbDate=toIsoDateValue(call.etbDate);
+  const etbTime=toClockValue(call.etbTime);
+  if(etbDate)return {date:etbDate,start:etbTime,source:'ETB'};
+  if(etaDate)return {date:etaDate,start:etaTime,source:'ETA'};
   return {date:'',start:'',source:''};
 };
 const disabledDriverScheduleSnapshot=(data,driverName)=>{
@@ -1365,6 +1384,7 @@ function App({auth,finance,onFinanceChange,onLogout}){
   const [clientOptions,setClientOptions]=useState(clientNames);
   const [operationalLoaded,setOperationalLoaded]=useState(false);
   const [toast,setToast]=useState('');
+  const operationalSaveInFlight=useRef(false);
   const aisAlertSnapshotRef=useRef(null);
   const [alertTick,setAlertTick]=useState(Date.now());
   const [notificationOpen,setNotificationOpen]=useState(false);
@@ -1382,7 +1402,7 @@ function App({auth,finance,onFinanceChange,onLogout}){
   useEffect(()=>{try{setAcknowledgedBillingAlerts(JSON.parse(localStorage.getItem(`swiftport-billing-alert-ack-${user.id}`)||'{}')||{})}catch{setAcknowledgedBillingAlerts({})}},[user.id]);
   useEffect(()=>{const timer=window.setInterval(()=>setAlertTick(Date.now()),300000);return()=>window.clearInterval(timer)},[]);
   const loadTeam=()=>api('/api/users/directory.php').then(result=>setTeam(result.users)).catch(reason=>notify(reason.message));
-  const loadOperational=()=>api('/api/operational.php').then(result=>{
+  const loadOperational=()=>operationalSaveInFlight.current?Promise.resolve():api('/api/operational.php').then(result=>{
     if(result.data){
       const loadedCases=result.data.cases.map(normalizeMerchandise);
       const completedCaseIds=new Set(loadedCases.filter(item=>operationFlow(item).billingReady||item.estado==='Completado').map(item=>item.id));
@@ -1498,7 +1518,15 @@ function App({auth,finance,onFinanceChange,onLogout}){
       fresh.forEach(alert=>showDeviceNotification('Swiftport facturación',alert.message,alert.key).catch(()=>{}));
     }
   },[billingAlerts,operationalLoaded,user.id]);
-  const persistOperational=(nextCases=cases,nextTransports=transports,nextWarehouse=warehouseEntries,nextCustoms=customs,nextCalendar=calendarEvents,nextProviders=providers,nextVessels=vessels,nextDeletedVesselKeys=deletedVesselKeys,auditEvent=null)=>auth.demo?Promise.resolve({ok:true}):api('/api/operational.php',{method:'PUT',headers:{'X-CSRF-Token':auth.csrfToken},body:JSON.stringify({data:{cases:nextCases,transports:nextTransports,warehouseEntries:nextWarehouse,customs:nextCustoms,calendarEvents:nextCalendar,providers:nextProviders,vessels:nextVessels,deletedVesselKeys:nextDeletedVesselKeys},audit:auditEvent})});
+  const persistOperational=async(nextCases=cases,nextTransports=transports,nextWarehouse=warehouseEntries,nextCustoms=customs,nextCalendar=calendarEvents,nextProviders=providers,nextVessels=vessels,nextDeletedVesselKeys=deletedVesselKeys,auditEvent=null)=>{
+    operationalSaveInFlight.current=true;
+    try{
+      if(auth.demo)return {ok:true};
+      return await api('/api/operational.php',{method:'PUT',headers:{'X-CSRF-Token':auth.csrfToken},body:JSON.stringify({data:{cases:nextCases,transports:nextTransports,warehouseEntries:nextWarehouse,customs:nextCustoms,calendarEvents:nextCalendar,providers:nextProviders,vessels:nextVessels,deletedVesselKeys:nextDeletedVesselKeys},audit:auditEvent})});
+    }finally{
+      operationalSaveInFlight.current=false;
+    }
+  };
   const saveOperational=(...args)=>persistOperational(...args).catch(reason=>notify(reason.message));
   const operationalTeam=useMemo(()=>team.filter(member=>hasRole(member,'operations')||hasRole(member,'driver')),[team]);
   useEffect(()=>{if(driverOnly&&!['calendario','almacen'].includes(tab))setTab('calendario')},[driverOnly,tab]);
@@ -1584,12 +1612,22 @@ function App({auth,finance,onFinanceChange,onLogout}){
     catch(reason){notify('No se pudo guardar el expediente: '+reason.message)}
   };
   const updateTransport=updated=>{const parts=routeParts(updated);const normalized={...updated,...parts,ruta:`${parts.origen} → ${parts.destino}`,hora:formatSchedule(updated.fecha,updated.inicio,updated.fin),observacion:updated.observacion||'',scheduleSource:'manual',scheduleStatus:updated.inicio?'confirmed':'missing_time',scheduleNote:updated.inicio?'':'Falta hora ETB; pendiente de confirmar horario'};const nextTransports=transports.map(item=>item.id===updated.id?normalized:item);const nextCases=cases.map(item=>{if(item.id!==updated.expediente)return item;const flow=operationFlow(item);const assigned=Boolean(updated.conductor&&updated.conductor!=='Sin asignar');const changed=assigned&&item.conductor!==updated.conductor;const now=new Date();return normalizeMerchandise({...item,autoTransportDisabled:false,conductor:updated.conductor,operationalFlow:{...flow,assignment:flow.delivery||assigned},timelineCustom:changed?[{id:`ASSIGN-${item.id}-${Date.now()}`,fecha:now.toLocaleDateString('es-ES'),hora:now.toLocaleTimeString('es-ES',{hour:'2-digit',minute:'2-digit'}),titulo:'Conductor asignado',detalle:`${updated.conductor}  -  ${normalized.ruta}`,actor:visibleUser.fullName,estado:'done'},...(item.timelineCustom||[])]:item.timelineCustom})});const linkedEvent=calendarEvents.find(item=>item.transporte===updated.id);const synchronized={titulo:normalized.ruta,origen:normalized.origen,destino:normalized.destino,tipoServicio:'Transporte',fecha:updated.fecha,inicio:updated.inicio,fin:updated.fin,asignado:updated.conductor,proveedorId:updated.proveedorId||'',expediente:updated.expediente,transporte:updated.id,observacion:normalized.observacion,color:calendarTone({...updated,...normalized},nextCases),scheduleSource:'manual',scheduleStatus:normalized.scheduleStatus,scheduleNote:normalized.scheduleNote};const nextCalendar=(linkedEvent?calendarEvents.map(item=>item.transporte===updated.id?{...item,...synchronized}:item):[...calendarEvents,{id:'EV-'+Date.now(),...synchronized}]).filter(isTransportCalendarEvent);setTransports(nextTransports);setCases(nextCases);setCalendarEvents(nextCalendar);saveOperational(nextCases,nextTransports,warehouseEntries,customs,nextCalendar,providers,vessels,deletedVesselKeys,{action:'calendar.update',details:{caseRef:updated.expediente||'',transportId:updated.id,service:'Transporte',route:normalized.ruta,date:updated.fecha,start:updated.inicio,end:updated.fin,driver:updated.conductor||'Sin asignar',provider:updated.proveedorId||'',note:normalized.observacion||''}});notify('Ruta, transporte y calendario actualizados')};
-  const updateCase=updated=>{
+  const updateCase=async updated=>{
     const {importe,...rawCase}=updated;
     const previousCase=cases.find(item=>item.id===rawCase.id)||{};
     const known=findKnownVessel(vessels,rawCase.buque)||{};
     const manualVesselName=!sameVessel(previousCase.buque,rawCase.buque)||String(previousCase.buque||'').trim().toUpperCase()!==String(rawCase.buque||'').trim().toUpperCase();
-    const operationalCase=normalizeMerchandise({...rawCase,buque:String(rawCase.buque||'').trim().toUpperCase(),imo:cleanImo(rawCase.imo)||known.imo||'',mmsi:cleanMmsi(rawCase.mmsi)||known.mmsi||'',manualVesselName:manualVesselName?true:rawCase.manualVesselName,manualEditedAt:manualVesselName?new Date().toISOString():rawCase.manualEditedAt});
+    const sourceCall=rawCase.portCall||{};
+    const normalizedPortCall={
+      etaDate:toIsoDateValue(sourceCall.etaDate||rawCase.etaDate||rawCase.eta),
+      etaTime:toClockValue(sourceCall.etaTime||rawCase.etaTime||rawCase.eta),
+      etbDate:toIsoDateValue(sourceCall.etbDate||rawCase.etbDate||rawCase.etb),
+      etbTime:toClockValue(sourceCall.etbTime||rawCase.etbTime||rawCase.etb),
+      etdDate:toIsoDateValue(sourceCall.etdDate||rawCase.etdDate||rawCase.etd),
+      etdTime:toClockValue(sourceCall.etdTime||rawCase.etdTime||rawCase.etd),
+      updatedAt:new Date().toISOString()
+    };
+    const operationalCase=normalizeMerchandise({...rawCase,buque:String(rawCase.buque||'').trim().toUpperCase(),eta:normalizedPortCall.etaDate||'Por confirmar',portCall:normalizedPortCall,imo:cleanImo(rawCase.imo)||known.imo||'',mmsi:cleanMmsi(rawCase.mmsi)||known.mmsi||'',manualVesselName:manualVesselName?true:rawCase.manualVesselName,manualEditedAt:manualVesselName?new Date().toISOString():rawCase.manualEditedAt});
     const next=cases.map(item=>item.id===operationalCase.id?operationalCase:item);
     const nextVessels=upsertVesselFromCase(vessels,operationalCase);
     const activeEntries=warehouseEntries.filter(entry=>entry.expediente===operationalCase.id&&!entry.archivado);
@@ -1638,8 +1676,12 @@ function App({auth,finance,onFinanceChange,onLogout}){
     }));
     const nextCalendar=[...syncedCalendar,...missingCalendarEvents].filter(isTransportCalendarEvent);
     setCases(next);setVessels(nextVessels);setWarehouseEntries(nextWarehouse);setTransports(nextTransports);setCalendarEvents(nextCalendar);
-    saveOperational(next,nextTransports,nextWarehouse,customs,nextCalendar,providers,nextVessels,deletedVesselKeys,{action:'case.update',details:{caseRef:operationalCase.id,vessel:operationalCase.buque,client:operationalCase.cliente,port:operationalCase.puerto,eta:operationalCase.eta,etb:operationalCase.etb,etd:operationalCase.etd}});
-    notify(slot.date?'Expediente, buque, almacén y calendario actualizados':(activeEntries.length===1?'Expediente, buque y almacén actualizados':'Expediente y buque actualizados'));
+    try{
+      await persistOperational(next,nextTransports,nextWarehouse,customs,nextCalendar,providers,nextVessels,deletedVesselKeys,{action:'case.update',details:{caseRef:operationalCase.id,vessel:operationalCase.buque,client:operationalCase.cliente,port:operationalCase.puerto,eta:operationalCase.eta,etb:portCallMoment(normalizedPortCall.etbDate,normalizedPortCall.etbTime),etd:portCallMoment(normalizedPortCall.etdDate,normalizedPortCall.etdTime)}});
+      notify(slot.date?'Expediente, buque, almacén y calendario actualizados':(activeEntries.length===1?'Expediente, buque y almacén actualizados':'Expediente y buque actualizados'));
+    }catch(reason){
+      notify('No se pudo guardar el expediente: '+reason.message);
+    }
   };
   const deleteCaseAttachment=(caseId,scope,file,receptionRef='')=>{
     const target=cases.find(item=>item.id===caseId);
