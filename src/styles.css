@@ -1238,3 +1238,14 @@
 
 
 
+
+
+/* Evidencias y adjuntos post-cierre */
+.shipment-documents-head{display:flex;align-items:center;justify-content:space-between;gap:1rem;flex-wrap:wrap}
+.shipment-documents-title{display:flex;align-items:center;gap:.75rem}
+.attachment-upload{position:relative;overflow:hidden;cursor:pointer;display:inline-flex;align-items:center;gap:.45rem}
+.attachment-upload input{position:absolute;inset:0;opacity:0;cursor:pointer}
+.attachment-upload.disabled{opacity:.65;pointer-events:none}
+.pod-upload-actions{display:grid;grid-template-columns:1fr;gap:.6rem;margin:.75rem 0}
+.button.small{padding:.55rem .8rem;font-size:.78rem}
+@media (min-width:760px){.pod-upload-actions{grid-template-columns:1fr 1fr}}
