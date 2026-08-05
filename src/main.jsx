@@ -2347,7 +2347,7 @@ function CalendarMonthView({days,monthDate,events,cases,setEditing,openCase}){
 }
 function Calendario({events,team,cases,transports,providers,warehouseEntries,saveEvent,deleteEvent,completeCaseStep,undoCaseStep,openCase,currentUser,csrfToken,reloadOperational,notify}){
   const [weekStart,setWeekStart]=useState(startOfWeek(new Date()));
-  const [viewMode,setViewMode]=useState('month');
+  const [viewMode,setViewMode]=useState('week');
   const [editing,setEditing]=useState(null);
   const [mineOnly,setMineOnly]=useState(false);
   const [draggingId,setDraggingId]=useState('');
