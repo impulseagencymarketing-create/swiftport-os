@@ -1843,13 +1843,14 @@ function App({auth,finance,onFinanceChange,onLogout}){
     const podException=Boolean(evidencePayload?.podException);
     const podExceptionReason=String(evidencePayload?.podExceptionReason||note||'').trim();
     const selectedWarehouseRefs=Array.isArray(evidencePayload?.warehouseRefs)?evidencePayload.warehouseRefs:[];
-    const selectedWarehouseEntries=stepKey==='cargo'?warehouseEntries.filter(entry=>selectedWarehouseRefs.includes(entry.ref)):[];
+    const cargoStepCreatesWarehouse=stepKey==='cargo'&&!surveyService;
+    const selectedWarehouseEntries=cargoStepCreatesWarehouse?warehouseEntries.filter(entry=>selectedWarehouseRefs.includes(entry.ref)):[];
     const cargoEvidence=stepKey==='cargo'?evidenceFiles:[];
-    const cargoHasWarehouse=stepKey==='cargo'&&selectedWarehouseEntries.length>0;
+    const cargoHasWarehouse=cargoStepCreatesWarehouse&&selectedWarehouseEntries.length>0;
     const documentEvidence=stepKey==='documents'?evidenceFiles:[];
     const deliveryPhotos=stepKey==='delivery'?evidenceFiles.filter(file=>file.evidenceType==='delivery-photo'):[];
     const podFiles=stepKey==='delivery'?evidenceFiles.filter(file=>file.evidenceType==='pod'||(!file.evidenceType&&file)):[];
-    if(stepKey==='cargo'&&!cargoEvidence.length&&!cargoHasWarehouse){notify('Añade una foto o selecciona una mercancía existente en almacén');return false}
+    if(stepKey==='cargo'&&!surveyService&&!cargoEvidence.length&&!cargoHasWarehouse){notify('Añade una foto o selecciona una mercancía existente en almacén');return false}
     if(stepKey==='delivery'&&!deliveryPhotos.length&&!surveyService){notify('Añade al menos una foto de la mercancía entregada');return false}
     if(stepKey==='delivery'&&surveyService&&!deliveryPhotos.length&&!podFiles.length){notify('Añade una foto, documento o informe del survey realizado');return false}
     if(stepKey==='delivery'&&!storageOnly&&!surveyService&&!podFiles.length&&!podException){notify('Escanea o adjunta el POD firmado, o marca POD no sellado con observación');return false}
@@ -1869,7 +1870,7 @@ function App({auth,finance,onFinanceChange,onLogout}){
     const cargoMerchandise=warehouseMerchandise.length?warehouseMerchandise:(target.mercancias||[]).length?target.mercancias:[{id:`${id}-AUTO-${Date.now()}`,tipo:'CAJA',cantidad:Math.max(1,Number(target.bultos)||1),seguimiento:'',peso:target.peso&&!/registrar|pendiente/i.test(target.peso)?target.peso:'PESO PENDIENTE',documentos:[]}];
     const cargoPhotos=cargoEvidence.map((file,index)=>({...file,tipo:index===0?'VISTA GENERAL':'ESTADO DE EMBALAJE',mercancia:cargoMerchandise.map(line=>`${line.cantidad} ${line.tipo}${line.cantidad===1?'':'S'}  -  ${line.peso||'PESO PENDIENTE'}`).join('  -  '),nota:`Registrado por ${visibleUser.fullName}`}));
     const cargoReference=`ALM-${Date.now()}`;
-    const cargoReceptions=stepKey==='cargo'?(cargoHasWarehouse?selectedWarehouseEntries.map(entry=>({ref:entry.ref,source:'warehouse-linked',fecha:entry.fechaRecepcion||entry.entrada||now.toISOString(),zona:entry.zona||'ALMACÉN',peso:entry.peso||merchandiseWeightLabel(entry.mercancias||[]),mercancias:entry.mercancias||[],fotos:entry.fotos||[],documentos:entry.documentosRecepcion||[]})):[{ref:cargoReference,source:'driver-flow',fecha:now.toISOString(),zona:linkedTransport?.origen||'PENDIENTE DE UBICAR',peso:merchandiseWeightLabel(cargoMerchandise),mercancias:cargoMerchandise,fotos:cargoPhotos,documentos:[]}]):[];
+    const cargoReceptions=cargoStepCreatesWarehouse?(cargoHasWarehouse?selectedWarehouseEntries.map(entry=>({ref:entry.ref,source:'warehouse-linked',fecha:entry.fechaRecepcion||entry.entrada||now.toISOString(),zona:entry.zona||'ALMACÉN',peso:entry.peso||merchandiseWeightLabel(entry.mercancias||[]),mercancias:entry.mercancias||[],fotos:entry.fotos||[],documentos:entry.documentosRecepcion||[]})):[{ref:cargoReference,source:'driver-flow',fecha:now.toISOString(),zona:linkedTransport?.origen||'PENDIENTE DE UBICAR',peso:merchandiseWeightLabel(cargoMerchandise),mercancias:cargoMerchandise,fotos:cargoPhotos,documentos:[]}]):[];
     const nextCases=cases.map(item=>item.id===id?normalizeMerchandise({...item,mercancias:stepKey==='cargo'&&!surveyService?cargoMerchandise:item.mercancias,operationalFlow:flow,progreso:ready?100:Math.round(steps.filter(step=>flow[step.key]).length/steps.length*100),siguiente:ready?'Listo para facturar':nextStep?.next||'',estado:ready?'Completado':'En curso',recepciones:cargoReceptions.length?[...cargoReceptions,...(item.recepciones||[])]:item.recepciones,documentacionMercancia:stepKey==='documents'?{...item.documentacionMercancia,archivosEnvio:[...(item.documentacionMercancia?.archivosEnvio||[]),...documentEvidence],revisada:true}:ready?{...item.documentacionMercancia,podDisponible:storageOnly||surveyService?Boolean(podFiles.length):true,podNoSellado:podException,podObservacion:podException?podExceptionReason:'',podArchivo:podFiles[0]||item.documentacionMercancia?.podArchivo||null,podArchivos:podFiles,fotosEntrega:deliveryPhotos}:item.documentacionMercancia,timelineCustom:[timelineEntry,...(item.timelineCustom||[])]}):item);
     const nextTransports=ready?transports.map(item=>item.expediente===id?{...item,estado:'Entregado'}:item):transports;
     const alreadyInWarehouse=warehouseEntries.some(item=>item.expediente===id&&!item.archivado&&item.estado!=='Expedido');
