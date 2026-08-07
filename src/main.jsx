@@ -2105,7 +2105,7 @@ function MobileNav({tab,navigate,more,nav}){
 function Badge({children,tone}){return <span className={'badge '+(tone||statusTone(children))}><i/>{children}</span>}
 function SectionHeader({title,subtitle,action}){return <div className="section-header"><div><h2>{title}</h2>{subtitle&&<p>{subtitle}</p>}</div>{action}</div>}
 function Empty({text}){return <div className="empty"><Search/><b>Sin resultados</b><p>{text}</p></div>}
-function PortCallPanel({item}){const schedule=portCallSchedule(item);const destination=item.deliveryMode==='barge'?'TRANSPORTE A GABARRA':item.deliveryMode==='vessel'?'TRANSPORTE A BUQUE':'';return <section className="port-call-panel"><div><Ship/><span><small>LLEGADA  -  ETA</small><b>{schedule.eta}</b></span></div><div><MapPin/><span><small>ATRAQUE  -  ETB</small><b>{schedule.etb}</b></span></div><div><Clock3/><span><small>SALIDA  -  ETD</small><b>{schedule.etd}</b></span></div><div><Timer/><span><small>ESTANCIA EN PUERTO</small><b>{item.portStay||'POR CONFIRMAR'}</b></span></div>{destination&&<footer><Truck/><span><small>DESTINO OPERATIVO</small><b>{destination}{item.operationLocation?`  -  ${item.operationLocation}`:''}</b></span></footer>}</section>}
+function PortCallPanel({item}){const schedule=portCallSchedule(item);const destination=item.deliveryMode==='barge'?'TRANSPORTE A GABARRA':item.deliveryMode==='vessel'?'TRANSPORTE A BUQUE':'';return <section className="port-call-panel"><div><Ship/><span><small>LLEGADA  -  ETA</small><b>{cleanCalendarText(schedule.eta)}</b></span></div><div><MapPin/><span><small>ATRAQUE  -  ETB</small><b>{schedule.etb}</b></span></div><div><Clock3/><span><small>SALIDA  -  ETD</small><b>{schedule.etd}</b></span></div><div><Timer/><span><small>ESTANCIA EN PUERTO</small><b>{item.portStay||'POR CONFIRMAR'}</b></span></div>{destination&&<footer><Truck/><span><small>DESTINO OPERATIVO</small><b>{destination}{item.operationLocation?`  -  ${item.operationLocation}`:''}</b></span></footer>}</section>}
 function VesselFinderMap({item}){
   const imo=String(item.imo||'').replace(/\D/g,'');
   const mmsi=String(item.mmsi||'').replace(/\D/g,'');
@@ -2299,7 +2299,13 @@ const calendarServiceStatus=(event,cases=[])=>{
   return done?{className:'done',label:'Terminado',icon:<CheckCircle2/>}:{className:'pending',label:'Pendiente',icon:<CircleAlert/>};
 };
 function DriverLegend({events=[],cases=[]}){const ports=[...new Set((events||[]).filter(isTransportCalendarEvent).map(event=>cases.find(item=>item.id===event.expediente)?.puerto||event.puerto).filter(Boolean).map(port=>String(port).trim().toUpperCase()))].sort();return <div className="driver-legend port-legend"><span><i className="gray"/>Puerto sin indicar</span>{ports.map(port=><span key={port}><i className={portTone(port)}/>{port}</span>)}</div>}
-function CalendarEventContent({event,cases}){const related=cases.find(item=>item.id===event.expediente);const schedule=related?portCallSchedule(related):null;const missingTime=calendarNeedsTime(event);const port=related?.puerto||event.puerto||'';const status=calendarServiceStatus(event,cases);const route=routeParts(event);const routeLabel=[route.origen,route.destino].filter(Boolean).join(' → ');return <><span className={`calendar-status-pill ${status.className}`} title={status.label}>{status.icon}<em>{status.label}</em></span><time>{missingTime?'FALTA HORARIO':`${event.inicio}${event.fin?`–${event.fin}`:''}`}</time><b className="calendar-vessel-name">{related?.buque||event.titulo||'Buque sin indicar'}</b>{port&&<b className="calendar-port-name">{port}</b>}<small className="calendar-service">{event.tipoServicio||'Transporte'}</small>{routeLabel&&<small className="calendar-route">{routeLabel}</small>}{missingTime&&<small className="calendar-provisional">PENDIENTE ETB / HORA</small>}<small>{event.asignado||'Sin asignar'}</small>{schedule&&<small className="calendar-port-call">LLEGADA  -  ETA {schedule.eta}</small>}</>}
+const calendarTextFixes=[
+  [String.fromCharCode(0x00C3,0x0081),'Á'],[String.fromCharCode(0x00C3,0x2030),'É'],[String.fromCharCode(0x00C3,0x0089),'É'],[String.fromCharCode(0x00C3,0x008D),'Í'],[String.fromCharCode(0x00C3,0x201C),'Ó'],[String.fromCharCode(0x00C3,0x0093),'Ó'],[String.fromCharCode(0x00C3,0x0161),'Ú'],[String.fromCharCode(0x00C3,0x009A),'Ú'],[String.fromCharCode(0x00C3,0x0091),'Ñ'],[String.fromCharCode(0x00C3,0x009C),'Ü'],
+  [String.fromCharCode(0x00C3,0x00A1),'á'],[String.fromCharCode(0x00C3,0x00A9),'é'],[String.fromCharCode(0x00C3,0x00AD),'í'],[String.fromCharCode(0x00C3,0x00B3),'ó'],[String.fromCharCode(0x00C3,0x00BA),'ú'],[String.fromCharCode(0x00C3,0x00B1),'ñ'],[String.fromCharCode(0x00C3,0x00BC),'ü'],
+  [String.fromCharCode(0x00E2,0x20AC,0x00B9),'‹'],[String.fromCharCode(0x00E2,0x20AC,0x00BA),'›'],[String.fromCharCode(0x00E2,0x20AC,0x201C),'—'],[String.fromCharCode(0x00E2,0x20AC,0x201D),'–'],[String.fromCharCode(0x00E2,0x20AC,0x2122),'’'],[String.fromCharCode(0x00E2,0x20AC,0x0153),'“'],[String.fromCharCode(0x00E2,0x20AC,0x009D),'”'],[String.fromCharCode(0x00E2,0x2020,0x2019),'→'],[String.fromCharCode(0x00C2),'']
+];
+const cleanCalendarText=value=>calendarTextFixes.reduce((result,[bad,good])=>result.split(bad).join(good),String(value||''));
+function CalendarEventContent({event,cases}){const related=cases.find(item=>item.id===event.expediente);const schedule=related?portCallSchedule(related):null;const missingTime=calendarNeedsTime(event);const port=cleanCalendarText(related?.puerto||event.puerto||'');const status=calendarServiceStatus(event,cases);const route=routeParts(event);const routeLabel=cleanCalendarText([route.origen,route.destino].filter(Boolean).join(' → '));const vessel=cleanCalendarText(related?.buque||event.titulo||'Buque sin indicar');const service=cleanCalendarText(event.tipoServicio||'Transporte');const assigned=cleanCalendarText(event.asignado||'Sin asignar');return <><span className={`calendar-status-pill ${status.className}`} title={cleanCalendarText(status.label)}>{status.icon}<em>{cleanCalendarText(status.label)}</em></span><time>{missingTime?'FALTA HORARIO':`${event.inicio}${event.fin?`–${event.fin}`:''}`}</time><b className="calendar-vessel-name">{vessel}</b>{port&&<b className="calendar-port-name">{port}</b>}<small className="calendar-service">{service}</small>{routeLabel&&<small className="calendar-route">{routeLabel}</small>}{missingTime&&<small className="calendar-provisional">PENDIENTE ETB / HORA</small>}<small>{assigned}</small>{schedule&&<small className="calendar-port-call">LLEGADA  -  ETA {cleanCalendarText(schedule.eta)}</small>}</>}
 function CalendarDriverSelect({event,team,saveEvent}){const drivers=team.filter(member=>hasRole(member,'operations')||hasRole(member,'driver'));const assign=change=>{change.stopPropagation();saveEvent({...withoutCalendarLayout(event),asignado:change.target.value})};return <label className="calendar-driver-quick" onPointerDown={event=>event.stopPropagation()} onClick={event=>event.stopPropagation()}><span>Conductor</span><select value={event.asignado||'Sin asignar'} onChange={assign} aria-label="Asignar conductor"><option>Sin asignar</option>{drivers.map(member=><option key={member.id} value={member.fullName}>{member.fullName}</option>)}</select></label>}
 const calendarMinutes=value=>{const [hour,minute]=String(value||'').split(':').map(Number);return Number.isFinite(hour)?hour*60+(minute||0):0};
 const layoutOverlappingEvents=events=>{
@@ -2324,7 +2330,7 @@ const layoutOverlappingEvents=events=>{
   finishCluster();
   return result;
 };
-const CALENDAR_HOUR_HEIGHT=96;
+const CALENDAR_HOUR_HEIGHT=72;
 const calendarEventStyle=event=>{
   const start=calendarMinutes(event.inicio),end=Math.max(start+30,calendarMinutes(event.fin)||start+60);
   const visibleStart=Math.max(0,Math.min(1439,start));
@@ -2332,7 +2338,7 @@ const calendarEventStyle=event=>{
   const columns=event._columns||1,lane=event._lane||0;
   return {
     top:visibleStart/60*CALENDAR_HOUR_HEIGHT,
-    height:Math.max(96,(visibleEnd-visibleStart)/60*CALENDAR_HOUR_HEIGHT),
+    height:Math.max(72,(visibleEnd-visibleStart)/60*CALENDAR_HOUR_HEIGHT),
     left:`calc(4px + (100% - 8px) * ${lane}/${columns})`,
     width:`calc((100% - 8px) / ${columns} - ${columns>1?2:0}px)`,
     right:'auto'
