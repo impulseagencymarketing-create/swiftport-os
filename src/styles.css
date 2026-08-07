@@ -1131,12 +1131,9 @@
 
 
 
-.calendar-nav-icon{display:inline-grid!important;place-items:center;line-height:1;font-size:0!important;color:transparent!important;position:relative!important;overflow:hidden!important}
-.calendar-nav-icon svg{display:none!important}
-.calendar-nav-icon::before{content:''!important;width:9px;height:9px;border-left:2px solid var(--ink);border-bottom:2px solid var(--ink);display:block}
-.calendar-nav .calendar-nav-icon:first-child::before{transform:rotate(45deg)}
-.calendar-nav .calendar-nav-icon:nth-child(3)::before{transform:rotate(225deg)}
-.calendar-nav-icon::after{content:none!important}
+.calendar-nav-icon{display:inline-grid!important;place-items:center;line-height:1;font-size:0!important;color:var(--ink)!important;position:relative!important;overflow:hidden!important}
+.calendar-nav-icon svg{display:block!important;width:16px!important;height:16px!important;color:var(--ink)!important;stroke:currentColor!important}
+.calendar-nav-icon::before,.calendar-nav-icon::after{content:none!important;display:none!important}
 
 /* Calendario compacto tipo Google Calendar */
 .calendar-month-shell{

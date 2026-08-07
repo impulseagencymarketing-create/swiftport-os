@@ -2329,9 +2329,9 @@ const calendarEventStyle=event=>{
   const start=calendarMinutes(event.inicio),end=Math.max(start+30,calendarMinutes(event.fin)||start+60);
   const visibleStart=Math.max(0,Math.min(1439,start));
   const visibleEnd=Math.max(visibleStart+30,Math.min(1440,end));
-  const columns=event._columns||1,lane=event._lane||0,stackOffset=event._stackOffset||0;
+  const columns=event._columns||1,lane=event._lane||0;
   return {
-    top:visibleStart/60*CALENDAR_HOUR_HEIGHT+stackOffset*58,
+    top:visibleStart/60*CALENDAR_HOUR_HEIGHT,
     height:Math.max(96,(visibleEnd-visibleStart)/60*CALENDAR_HOUR_HEIGHT),
     left:`calc(4px + (100% - 8px) * ${lane}/${columns})`,
     width:`calc((100% - 8px) / ${columns} - ${columns>1?2:0}px)`,
@@ -3890,3 +3890,4 @@ function WarehouseEditModal({item,cases,close,submit,deleteItem}){
 }
 if('serviceWorker' in navigator)window.addEventListener('load',()=>navigator.serviceWorker.register('/sw.js').catch(()=>{}));
 createRoot(document.getElementById('root')).render(<AuthRoot/>);
+
