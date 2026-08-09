@@ -1726,6 +1726,55 @@ function App({auth,finance,onFinanceChange,onLogout}){
     }:entry):warehouseEntries;
     setCases(nextCases);setWarehouseEntries(nextWarehouse);saveOperational(nextCases,transports,nextWarehouse,customs,calendarEvents,providers,vessels);notify('Archivo eliminado del expediente');
   };  const deleteCase=id=>{const target=cases.find(item=>item.id===id);if(!target)return;const linkedWarehouse=warehouseEntries.filter(entry=>entry.expediente===id&&!entry.archivado);const warning=linkedWarehouse.length?`\n\nTiene ${linkedWarehouse.length} entrada(s) de almacén vinculada(s). No se borrará la mercancía: quedará sin expediente para no perder evidencias.`:'';if(!window.confirm(`¿Borrar el expediente ${target.id} - ${target.buque}?${warning}\n\nSe quitarán sus trabajos del calendario y transportes.`))return;const nextCases=cases.filter(item=>item.id!==id);const nextTransports=transports.filter(item=>item.expediente!==id);const nextCalendar=calendarEvents.filter(item=>item.expediente!==id);const nextCustoms=customs.filter(item=>item.expediente!==id);const nextWarehouse=warehouseEntries.map(entry=>entry.expediente===id?{...entry,expediente:''}:entry);setCases(nextCases);setTransports(nextTransports);setCalendarEvents(nextCalendar);setCustoms(nextCustoms);setWarehouseEntries(nextWarehouse);saveOperational(nextCases,nextTransports,nextWarehouse,nextCustoms,nextCalendar,providers,vessels,deletedVesselKeys,{action:'case.delete',details:{caseRef:target.id,vessel:target.buque,client:target.cliente,port:target.puerto,linkedWarehouse:linkedWarehouse.length,linkedTransports:transports.filter(item=>item.expediente===id).length}});setSelectedId(nextCases[0]?.id||'');notify('Expediente borrado y calendario limpiado')};
+  const persistCaseEvidenceOnUpload=async(caseId,files=[],evidenceType='document')=>{
+    const uploaded=(files||[]).filter(Boolean);
+    if(!caseId||!uploaded.length)return;
+    const target=cases.find(item=>item.id===caseId);
+    if(!target)return;
+    const normalizedFiles=uploaded.map(file=>({...file,evidenceType:file.evidenceType||evidenceType}));
+    const now=new Date();
+    const typeLabels={
+      'shipment-document':'Documentacion del envio vinculada',
+      'reception-document':'Documentacion de recepcion vinculada',
+      'cargo-photo':'Fotos de mercancia vinculadas',
+      'reception-photo':'Fotos de recepcion vinculadas',
+      'delivery-photo':'Fotos de entrega vinculadas',
+      'pod':'POD vinculado'
+    };
+    const nextCases=cases.map(item=>{
+      if(item.id!==caseId)return item;
+      const docs={...item.documentacionMercancia};
+      if(evidenceType==='pod'){
+        docs.podArchivos=mergeAttachments(docs.podArchivos,normalizedFiles);
+        docs.podDisponible=true;
+        docs.podArchivo=docs.podArchivo||normalizedFiles[0]?.name||'';
+      }else if(evidenceType==='delivery-photo'){
+        docs.fotosEntrega=mergeAttachments(docs.fotosEntrega,normalizedFiles);
+      }else{
+        docs.archivosEnvio=mergeAttachments(docs.archivosEnvio,normalizedFiles);
+      }
+      return normalizeMerchandise({
+        ...item,
+        documentacionMercancia:docs,
+        timelineCustom:[
+          ...(item.timelineCustom||[]),
+          {
+            id:`ATTACH-${caseId}-${Date.now()}`,
+            fecha:now.toLocaleDateString('es-ES'),
+            hora:now.toLocaleTimeString('es-ES',{hour:'2-digit',minute:'2-digit'}),
+            titulo:typeLabels[evidenceType]||'Archivo vinculado al expediente',
+            detalle:`${normalizedFiles.length} archivo(s) subido(s) por ${visibleUser.fullName}`,
+            actor:visibleUser.fullName,
+            archivos:normalizedFiles,
+            estado:'done'
+          }
+        ]
+      });
+    });
+    setCases(nextCases);
+    await persistOperational(nextCases,transports,warehouseEntries,customs,calendarEvents,providers,vessels,deletedVesselKeys,{action:'case.attachment.link',details:{caseRef:caseId,vessel:target.buque,category:evidenceType,files:normalizedFiles.length}});
+    notify?.(`${normalizedFiles.length} archivo(s) vinculado(s) al expediente`);
+  };
   const rebuildCalendarServices=async()=>{const activeCaseIds=new Set(cases.filter(item=>item.estado!=='Completado').map(item=>item.id));const affected=calendarEvents.filter(event=>activeCaseIds.has(event.expediente)).length;const affectedTransports=transports.filter(item=>activeCaseIds.has(item.expediente)).length;if(!affected&&!affectedTransports){notify('No hay servicios activos que limpiar');return}if(!window.confirm(`¿Limpiar y reconstruir el calendario?\n\nSe quitarán ${affected} tarjetas del calendario y ${affectedTransports} transportes planificados de expedientes activos. No se borran expedientes, mercancía ni documentos. Después se reconstruirá SOLO con transportes usando ETB/fecha del buque.`))return;const nextCalendar=calendarEvents.filter(event=>!activeCaseIds.has(event.expediente));const nextTransports=transports.filter(item=>!activeCaseIds.has(item.expediente));setCalendarEvents(nextCalendar);setTransports(nextTransports);await saveOperational(cases,nextTransports,warehouseEntries,customs,nextCalendar);notify('Calendario limpiado; reconstruyendo solo transportes');await loadOperational()};
   const updateClient=updated=>{const normalized=normalizeClientProfile(updated);const key=normalized.codigo;const exists=finance.clients.some(item=>(item.codigo||item.id)===key);const next={...finance,clients:exists?finance.clients.map(item=>(item.codigo||item.id)===key?normalized:item):[normalized,...finance.clients]};onFinanceChange(next).then(()=>notify('Ficha de cliente actualizada')).catch(reason=>notify(reason.message))};
   const updateInvoice=updated=>{const exists=finance.invoices.some(item=>item.id===updated.id);const next={...finance,invoices:exists?finance.invoices.map(item=>item.id===updated.id?updated:item):[updated,...finance.invoices]};onFinanceChange(next).then(()=>notify(exists?'Documento actualizado':'Borrador de factura creado')).catch(reason=>notify(reason.message))};
@@ -2022,8 +2071,8 @@ No se borrarán documentos ni fotos. El expediente volverá a este punto para co
       <div className="content">
         {previewUser&&<div className="preview-banner"><Eye/><span>Estás viendo la aplicación como <b>{previewUser.fullName}</b> ({roleLabel(previewUser)}). Tu cuenta sigue siendo administrador.</span><button onClick={()=>setPreviewUser(null)}>Salir de la vista previa</button></div>}
         {tab==='dashboard'&&<Dashboard cases={casesWithFinance} warehouseEntries={warehouseEntries} calendarEvents={calendarEvents} openCase={openCase} navigate={navigate} showFinance={showFinance} user={visibleUser}/>}
-        {tab==='calendario'&&<>{!driverOnly&&<DriverLegend events={calendarEvents} cases={cases}/>}<Calendario events={calendarEvents} team={operationalTeam} cases={cases} transports={transports} providers={providers} warehouseEntries={warehouseEntries} saveEvent={saveCalendarEvent} deleteEvent={deleteCalendarService} completeCaseStep={completeCaseStep} undoCaseStep={undoCaseStep} openCase={openCase} currentUser={visibleUser} csrfToken={auth.csrfToken} reloadOperational={loadOperational} notify={notify}/></>}
-        {tab==='expedientes'&&<Expedientes cases={casesWithFinance} selected={selected} select={setSelectedId} search={search} setSearch={setSearch} completeCaseStep={completeCaseStep} notify={notify} showFinance={showFinance} updateCase={updateCase} deleteCase={deleteCase} deleteAttachment={deleteCaseAttachment} reopenCaseStep={reopenCaseStep} clientOptions={clientOptions} warehouseEntries={warehouseEntries} transports={transports} calendarEvents={calendarEvents} team={operationalTeam} providers={providers} vessels={vessels} saveEvent={saveCalendarEvent} csrfToken={auth.csrfToken} reloadOperational={loadOperational} currentUser={visibleUser}/>}
+        {tab==='calendario'&&<>{!driverOnly&&<DriverLegend events={calendarEvents} cases={cases}/>}<Calendario events={calendarEvents} team={operationalTeam} cases={cases} transports={transports} providers={providers} warehouseEntries={warehouseEntries} saveEvent={saveCalendarEvent} deleteEvent={deleteCalendarService} completeCaseStep={completeCaseStep} undoCaseStep={undoCaseStep} openCase={openCase} currentUser={visibleUser} csrfToken={auth.csrfToken} reloadOperational={loadOperational} notify={notify} onEvidenceUploaded={persistCaseEvidenceOnUpload}/></>}
+        {tab==='expedientes'&&<Expedientes cases={casesWithFinance} selected={selected} select={setSelectedId} search={search} setSearch={setSearch} completeCaseStep={completeCaseStep} notify={notify} showFinance={showFinance} updateCase={updateCase} deleteCase={deleteCase} deleteAttachment={deleteCaseAttachment} reopenCaseStep={reopenCaseStep} clientOptions={clientOptions} warehouseEntries={warehouseEntries} transports={transports} calendarEvents={calendarEvents} team={operationalTeam} providers={providers} vessels={vessels} saveEvent={saveCalendarEvent} csrfToken={auth.csrfToken} reloadOperational={loadOperational} currentUser={visibleUser} onEvidenceUploaded={persistCaseEvidenceOnUpload}/>}
         {tab==='almacen'&&<Almacen items={warehouseEntries} cases={casesWithFinance} openCase={openCase} registerEntry={registerWarehouseEntry} updateEntry={updateWarehouseEntry} deleteEntry={deleteWarehouseEntry} showFinance={showFinance} storageTotal={finance.warehouseStorageTotal} csrfToken={auth.csrfToken} notify={notify}/>}
         {tab==='buques'&&<Buques vessels={vessels} cases={casesWithFinance} warehouseEntries={warehouseEntries} saveVessel={saveVessel} deleteVessel={deleteVessel} openCase={openCase}/>}
         {tab==='transportes'&&<Transportes items={transports} update={updateTransport} openCase={openCase} team={operationalTeam} providers={providers} saveProvider={saveProvider}/>}
@@ -2366,7 +2415,7 @@ function CalendarMonthView({days,monthDate,events,cases,setEditing,openCase}){
   const eventsByDay=days.reduce((acc,day)=>({...acc,[isoDate(day)]:events.filter(event=>event.fecha===isoDate(day)).sort((a,b)=>driverEventSort(a,b))}),{});
   return <section className="calendar-shell panel calendar-month-shell"><div className="calendar-month-head">{days.slice(0,7).map(day=><b key={weekday.format(day)}>{weekday.format(day).replace('.','')}</b>)}</div><div className="calendar-month-grid">{days.map(day=>{const fecha=isoDate(day);const dayEvents=eventsByDay[fecha]||[];return <div key={fecha} className={`calendar-month-day ${day.getMonth()!==activeMonth?'muted':''} ${fecha===today?'today':''}`}><span>{day.getDate()}</span>{dayEvents.slice(0,5).map(event=>{const related=cases.find(item=>item.id===event.expediente);const route=routeParts(event);return <button key={event.id} className={`calendar-month-event ${event.color||'gray'}`} onClick={()=>event.expediente?openCase(event.expediente):setEditing(event)}><time>{calendarNeedsTime(event)?'Falta hora':event.inicio}</time><b>{[related?.buque||event.titulo,related?.puerto||event.puerto].filter(Boolean).join(' - ')}</b><small>{related?.puerto||event.puerto||'Puerto pendiente'}</small><em>{route.origen} → {route.destino}</em></button>})}{dayEvents.length>5&&<small className="calendar-month-more">+{dayEvents.length-5} servicios más</small>}</div>})}</div></section>;
 }
-function Calendario({events,team,cases,transports,providers,warehouseEntries,saveEvent,deleteEvent,completeCaseStep,undoCaseStep,openCase,currentUser,csrfToken,reloadOperational,notify}){
+function Calendario({events,team,cases,transports,providers,warehouseEntries,saveEvent,deleteEvent,completeCaseStep,undoCaseStep,openCase,currentUser,csrfToken,reloadOperational,notify,onEvidenceUploaded}){
   const [weekStart,setWeekStart]=useState(startOfWeek(new Date()));
   const [viewMode,setViewMode]=useState('week');
   const [editing,setEditing]=useState(null);
@@ -2375,7 +2424,7 @@ function Calendario({events,team,cases,transports,providers,warehouseEntries,sav
   const [dropTarget,setDropTarget]=useState('');
   const pointerDrag=useRef(null);
   const suppressCalendarClick=useRef(false);
-  if(isDriverOnly(currentUser))return <DriverCalendarV2 events={events} cases={cases} transports={transports} warehouseEntries={warehouseEntries} currentUser={currentUser} saveEvent={saveEvent} completeCaseStep={completeCaseStep} undoCaseStep={undoCaseStep} csrfToken={csrfToken} reloadOperational={reloadOperational} notify={notify}/>;
+  if(isDriverOnly(currentUser))return <DriverCalendarV2 events={events} cases={cases} transports={transports} warehouseEntries={warehouseEntries} currentUser={currentUser} saveEvent={saveEvent} completeCaseStep={completeCaseStep} undoCaseStep={undoCaseStep} csrfToken={csrfToken} reloadOperational={reloadOperational} notify={notify} onEvidenceUploaded={onEvidenceUploaded}/>;
   const periodStart=viewMode==='week'?startOfWeek(weekStart):viewMode==='month'?startOfMonth(weekStart):localDay(weekStart);
   const days=viewMode==='month'?monthCalendarDays(periodStart):Array.from({length:viewMode==='day'?1:7},(_,index)=>addDays(periodStart,index));
   const hours=Array.from({length:24},(_,index)=>index);
@@ -2494,7 +2543,7 @@ function DriverCalendar({events,cases,transports,warehouseEntries,currentUser,sa
   const visible=sorted.filter(event=>scope==='mine'?samePerson(event.asignado,currentUser.fullName):scope==='unassigned'?(!event.asignado||event.asignado==='Sin asignar'):true);
   const pending=visible.filter(event=>cases.find(item=>item.id===event.expediente)?.estado!=='Completado').length;
   const claim=event=>{const updated={...event,asignado:currentUser.fullName};saveEvent(updated);setSelected(updated)};
-  return <><section className="driver-day-hero"><div><span className="overline"><Truck/> Jornada operativa</span><h2>Hola, {currentUser.fullName.split(' ')[0]}</h2><p>Puedes consultar todos los trabajos y asignarte cualquiera cuando sea necesario.</p></div><strong>{pending}<small>trabajos pendientes</small></strong></section><section className="panel driver-jobs"><SectionHeader title="Calendario de trabajos" subtitle="Servicios por fecha, hora y conductor"/><div className="driver-scope-tabs"><button className={scope==='all'?'active':''} onClick={()=>setScope('all')}>Todos <span>{events.length}</span></button><button className={scope==='mine'?'active':''} onClick={()=>setScope('mine')}>Mis trabajos <span>{events.filter(event=>event.asignado===currentUser.fullName).length}</span></button><button className={scope==='unassigned'?'active':''} onClick={()=>setScope('unassigned')}>Sin asignar <span>{events.filter(event=>!event.asignado||event.asignado==='Sin asignar').length}</span></button></div>{visible.length?<div className="driver-job-list">{visible.map(event=>{const related=cases.find(item=>item.id===event.expediente);const completed=related?.estado==='Completado';const next=related&&nextOperationStep(related);const mine=event.asignado===currentUser.fullName;const schedule=related?portCallSchedule(related):null;return <button key={event.id} className={(completed?'completed ':'')+(mine?'mine':'')} onClick={()=>setSelected(event)}><time><b>{event.inicio}</b><small>{new Date(event.fecha+'T12:00:00').toLocaleDateString('es-ES',{weekday:'short',day:'2-digit',month:'short'})}</small></time><span className="driver-job-main"><b>{related?.buque||event.titulo}</b><small>{event.tipoServicio}  -  {related?.puerto||'Puerto pendiente'}</small>{schedule&&<small className="driver-port-call">LLEGADA DEL BUQUE  -  ETA {schedule.eta}</small>}<em>{completed?'Trabajo terminado':next?.title||'Abrir trabajo'}</em><i>{mine?'TU TRABAJO':event.asignado&&event.asignado!=='Sin asignar'?`ASIGNADO A ${event.asignado.toUpperCase()}`:'SIN ASIGNAR'}</i></span><span className={'driver-job-status '+(completed?'done':'')}><CheckCircle2/><small>{completed?'Completo':`${operationProgress(related||{})}%`}</small></span><ChevronRight/></button>})}</div>:<Empty text="No hay trabajos en este filtro."/>}</section>{selected&&<DriverTaskModal event={selected} item={cases.find(entry=>entry.id===selected.expediente)} transport={transports.find(entry=>entry.id===selected.transporte)} warehouseEntries={warehouseEntries} currentUser={currentUser} csrfToken={csrfToken} close={()=>setSelected(null)} claim={()=>claim(selected)} submit={(key,note,evidence)=>completeCaseStep(selected.expediente,key,note,evidence)}/>}</>;
+  return <><section className="driver-day-hero"><div><span className="overline"><Truck/> Jornada operativa</span><h2>Hola, {currentUser.fullName.split(' ')[0]}</h2><p>Puedes consultar todos los trabajos y asignarte cualquiera cuando sea necesario.</p></div><strong>{pending}<small>trabajos pendientes</small></strong></section><section className="panel driver-jobs"><SectionHeader title="Calendario de trabajos" subtitle="Servicios por fecha, hora y conductor"/><div className="driver-scope-tabs"><button className={scope==='all'?'active':''} onClick={()=>setScope('all')}>Todos <span>{events.length}</span></button><button className={scope==='mine'?'active':''} onClick={()=>setScope('mine')}>Mis trabajos <span>{events.filter(event=>event.asignado===currentUser.fullName).length}</span></button><button className={scope==='unassigned'?'active':''} onClick={()=>setScope('unassigned')}>Sin asignar <span>{events.filter(event=>!event.asignado||event.asignado==='Sin asignar').length}</span></button></div>{visible.length?<div className="driver-job-list">{visible.map(event=>{const related=cases.find(item=>item.id===event.expediente);const completed=related?.estado==='Completado';const next=related&&nextOperationStep(related);const mine=event.asignado===currentUser.fullName;const schedule=related?portCallSchedule(related):null;return <button key={event.id} className={(completed?'completed ':'')+(mine?'mine':'')} onClick={()=>setSelected(event)}><time><b>{event.inicio}</b><small>{new Date(event.fecha+'T12:00:00').toLocaleDateString('es-ES',{weekday:'short',day:'2-digit',month:'short'})}</small></time><span className="driver-job-main"><b>{related?.buque||event.titulo}</b><small>{event.tipoServicio}  -  {related?.puerto||'Puerto pendiente'}</small>{schedule&&<small className="driver-port-call">LLEGADA DEL BUQUE  -  ETA {schedule.eta}</small>}<em>{completed?'Trabajo terminado':next?.title||'Abrir trabajo'}</em><i>{mine?'TU TRABAJO':event.asignado&&event.asignado!=='Sin asignar'?`ASIGNADO A ${event.asignado.toUpperCase()}`:'SIN ASIGNAR'}</i></span><span className={'driver-job-status '+(completed?'done':'')}><CheckCircle2/><small>{completed?'Completo':`${operationProgress(related||{})}%`}</small></span><ChevronRight/></button>})}</div>:<Empty text="No hay trabajos en este filtro."/>}</section>{selected&&<DriverTaskModal event={selected} item={cases.find(entry=>entry.id===selected.expediente)} transport={transports.find(entry=>entry.id===selected.transporte)} warehouseEntries={warehouseEntries} currentUser={currentUser} csrfToken={csrfToken} onEvidenceUploaded={onEvidenceUploaded} close={()=>setSelected(null)} claim={()=>claim(selected)} submit={(key,note,evidence)=>completeCaseStep(selected.expediente,key,note,evidence)}/>}</>;
 }
 function DriverJobList({events,cases,transports=[],currentUser,select}){
   const transportEvents=(events||[]).filter(isTransportCalendarEvent).map(event=>calendarEventWithCaseSlot(event,cases)).sort(driverEventSort);
@@ -2551,7 +2600,7 @@ function DriverWeekView({events,cases,transports=[],select,saveEvent,notify}){
   return <><section className="calendar-toolbar driver-week-toolbar"><div className="calendar-nav"><button className="button tertiary calendar-nav-icon" type="button" aria-label="Semana anterior" title="Semana anterior" onClick={()=>setWeekStart(addDays(weekStart,-7))}><ChevronLeft aria-hidden="true" size={18}/></button><button className="button tertiary" type="button" onClick={()=>setWeekStart(startOfWeek(new Date()))}>Hoy</button><button className="button tertiary calendar-nav-icon" type="button" aria-label="Semana siguiente" title="Semana siguiente" onClick={()=>setWeekStart(addDays(weekStart,7))}><ChevronRight aria-hidden="true" size={18}/></button><h2>{days[0].toLocaleDateString('es-ES',{day:'numeric',month:'long'})} – {days[6].toLocaleDateString('es-ES',{day:'numeric',month:'long',year:'numeric'})}</h2></div></section><section className="calendar-shell panel driver-week"><div className="calendar-scroll"><div className="calendar-head"><span className="calendar-zone">GMT+2</span>{days.map(day=><div key={isoDate(day)} className={isoDate(day)===isoDate(new Date())?'today':''}><b>{dayLabel.format(day).replace('.','')}</b></div>)}</div><div className="calendar-unscheduled-row"><span>Falta horario</span>{days.map(day=><div key={isoDate(day)}>{missingTimeEvents.filter(event=>event.fecha===isoDate(day)).map(event=><button key={event.id} className={`calendar-unscheduled-card ${event.color||'gray'} ${isEventCompleted(event)?'completed':''}`} onClick={()=>select(event)}><CalendarEventContent event={event} cases={cases}/>{isEventCompleted(event)&&<small className="driver-week-done">COMPLETADO</small>}</button>)}</div>)}</div><div className="calendar-body"><div className="calendar-hours">{hours.map(hour=><span key={hour}>{String(hour).padStart(2,'0')}:00</span>)}</div>{days.map(day=><div className="calendar-day" key={isoDate(day)}>{hours.map(hour=><i className="calendar-line" key={hour}/>)}{layoutOverlappingEvents(timedEvents.filter(event=>event.fecha===isoDate(day))).map(event=>{const related=cases.find(item=>item.id===event.expediente);const completed=driverTransportDone(event,cases,transports);return <article key={event.id} className={`calendar-event driver-week-event ${event.color} ${event._columns>1?'is-overlap':''} ${completed?'completed':''}`} style={calendarEventStyle(event)}><button className="calendar-event-open" onClick={()=>select(withoutCalendarLayout(event))}><CalendarEventContent event={event} cases={cases}/>{related&&<small className={completed?'driver-week-done':'driver-week-progress'}>{completed?'COMPLETADO':`${operationProgress(related)}% completado`}</small>}</button></article>})}</div>)}</div></div></section></>;
 }
 const plusHourClient=time=>{const [hour,minute]=String(time||'09:00').split(':').map(Number);return `${String((hour+1)%24).padStart(2,'0')}:${String(minute||0).padStart(2,'0')}`};
-function DriverCalendarV2({events,cases,transports,warehouseEntries,currentUser,saveEvent,completeCaseStep,undoCaseStep,csrfToken,reloadOperational,notify}){
+function DriverCalendarV2({events,cases,transports,warehouseEntries,currentUser,saveEvent,completeCaseStep,undoCaseStep,csrfToken,reloadOperational,notify,onEvidenceUploaded}){
   const [selected,setSelected]=useState(null);
   const [scope,setScope]=useState('all');
   const [view,setView]=useState('hub');
@@ -2618,7 +2667,7 @@ function PodDocuments({item,notify,onDelete,onUploadPod,onUploadDeliveryPhoto,up
     <div className="pod-upload-actions">{onUploadDeliveryPhoto&&<label className={'button secondary attachment-upload '+(uploading==='delivery-photo'?'disabled':'')}><Camera/> {uploading==='delivery-photo'?'Subiendo...':'Anadir fotos de entrega'}<input type="file" multiple accept="image/*" disabled={uploading==='delivery-photo'} onChange={event=>{onUploadDeliveryPhoto(event.target.files);event.target.value=''}}/></label>}{onUploadPod&&<label className={'button secondary attachment-upload '+(uploading==='pod'?'disabled':'')}><ScanLine/> {uploading==='pod'?'Subiendo...':'Anadir POD'}<input type="file" multiple accept="application/pdf,image/*" disabled={uploading==='pod'} onChange={event=>{onUploadPod(event.target.files);event.target.value=''}}/></label>}</div>
     {podException&&<div className="pod-exception-note"><CircleAlert/><span><b>POD no sellado / no disponible</b><small>{documentation.podObservacion||'Sin observacion registrada'}</small></span></div>}{pods.length?pods.map((file,index)=><div className="attachment-row compact" key={file.id||file.url||index}><a className="document-link" href={file.url} target="_blank" rel="noreferrer"><FileText/><span><b>POD {index+1}</b><small>{file.name}</small></span><ExternalLink/></a>{onDelete&&<button type="button" className="icon-button danger attachment-delete" aria-label="Eliminar POD" onClick={()=>onDelete(file,'pod')}><Trash2/></button>}</div>):!podException&&<button onClick={()=>notify('POD todavia pendiente')}><Camera/><span><b>POD / fotografias</b><small>Pendiente de entrega</small></span><ChevronRight/></button>}{deliveryPhotos.length>0&&<div className="delivery-photo-list"><b>Fotos de entrega</b>{deliveryPhotos.map((file,index)=><div className="attachment-row compact" key={file.id||file.url||index}><a className="document-link" href={file.url} target="_blank" rel="noreferrer"><Camera/><span><b>Foto entrega {index+1}</b><small>{file.name}</small></span><ExternalLink/></a>{onDelete&&<button type="button" className="icon-button danger attachment-delete" aria-label="Eliminar foto de entrega" onClick={()=>onDelete(file,'delivery-photo')}><Trash2/></button>}</div>)}</div>}</div>;
 }
-function DriverTaskModal({event,item,transport,warehouseEntries,currentUser,csrfToken,reloadOperational,notify,close,claim,submit,undo}){
+function DriverTaskModal({event,item,transport,warehouseEntries,currentUser,csrfToken,reloadOperational,notify,onEvidenceUploaded,close,claim,submit,undo}){
   const [note,setNote]=useState('');
   const [evidenceFiles,setEvidenceFiles]=useState([]);
   const [uploading,setUploading]=useState(false);
@@ -2655,6 +2704,7 @@ function DriverTaskModal({event,item,transport,warehouseEntries,currentUser,csrf
         uploaded.push({...stored,evidenceType});
       }
       setEvidenceFiles(current=>[...current,...uploaded]);
+      await onEvidenceUploaded?.(item.id,uploaded,evidenceType);
       if(evidenceType==='pod'&&selected.some(file=>file.type.startsWith('image/')))notify?.('POD escaneado automáticamente: recortado, corregido y guardado como PDF');
     }catch(reason){setError(reason.message)}finally{setUploading(false)}
   };
@@ -2804,7 +2854,7 @@ function Dashboard({cases,warehouseEntries,calendarEvents,openCase,navigate,show
 function Kpi({icon:Icon,label,value,note,tone}){return <article className="kpi-card"><div className={'kpi-icon '+tone}><Icon/></div><div><span>{label}</span><strong>{value}</strong><small>{note}</small></div></article>}
 function ActionItem({tone,title,meta,action}){return <button className="attention-item" onClick={action}><span className={'attention-dot '+tone}/><span><b>{title}</b><small>{meta}</small></span><ChevronRight/></button>}
 function Schedule({time,title,meta,active,alert}){return <div className={'schedule-item '+(active?'active ':'')+(alert?'alert':'')}><time>{time}</time><span className="schedule-line"><i/></span><span><b>{title}</b><small>{meta}</small></span></div>}
-function Expedientes({cases,selected,select,search,setSearch,completeCaseStep,notify,showFinance,updateCase,deleteCase,deleteAttachment,reopenCaseStep,clientOptions,warehouseEntries,transports,calendarEvents,team,providers,vessels,saveEvent,csrfToken,reloadOperational,currentUser}){
+function Expedientes({cases,selected,select,search,setSearch,completeCaseStep,notify,showFinance,updateCase,deleteCase,deleteAttachment,reopenCaseStep,clientOptions,warehouseEntries,transports,calendarEvents,team,providers,vessels,saveEvent,csrfToken,reloadOperational,currentUser,onEvidenceUploaded}){
   const [filter,setFilter]=useState('Todos');
   const [mobileDetail,setMobileDetail]=useState(false);
   const [editOpen,setEditOpen]=useState(false);
@@ -2848,7 +2898,7 @@ function Expedientes({cases,selected,select,search,setSearch,completeCaseStep,no
     <section className="panel case-expenses-panel"><CaseExpensesPanel item={selected} updateCase={updateCase} notify={notify}/></section>
     <section className="panel merchandise-case-panel"><MerchandisePanel item={selected} updateCase={updateCase} deleteAttachment={deleteAttachment}/></section>
     {editOpen&&<CaseEditModal item={selected} clientOptions={clientOptions} vessels={vessels} close={()=>setEditOpen(false)} submit={item=>{updateCase(item);setEditOpen(false)}}/>}
-    {flowOpen&&<OperationStepModal item={selected} warehouseEntries={warehouseEntries} transports={transports} csrfToken={csrfToken} currentUser={currentUser} initialStepKey={flowStep} close={()=>{setFlowOpen(false);setFlowStep(null)}} submit={(key,note,evidence)=>{if(completeCaseStep(selected.id,key,note,evidence)){setFlowOpen(false);setFlowStep(null)}}}/>}
+    {flowOpen&&<OperationStepModal item={selected} warehouseEntries={warehouseEntries} transports={transports} csrfToken={csrfToken} currentUser={currentUser} onEvidenceUploaded={onEvidenceUploaded} initialStepKey={flowStep} close={()=>{setFlowOpen(false);setFlowStep(null)}} submit={(key,note,evidence)=>{if(completeCaseStep(selected.id,key,note,evidence)){setFlowOpen(false);setFlowStep(null)}}}/>}
   </div>;
 }
 function CaseServicesPanel({item,events,cases,transports,team,providers,warehouseEntries=[],saveEvent}){
@@ -2971,7 +3021,7 @@ function OperationChecklist({item,csrfToken,reloadOperational,notify,currentRole
   };
   return <><AisTrackingPanel item={item} csrfToken={csrfToken} reloadOperational={reloadOperational} notify={notify}/><section className="operation-checklist"><div><b>FLUJO OPERATIVO</b><small>{serviceTypeMeta(item).label}  -  pasos libres para todo el equipo</small></div><ol>{steps.map(renderStep)}<li className={flow.billingReady?'done':''}><span>{flow.billingReady?<CheckCircle2/>:steps.length+1}</span><span><b>Listo para facturar</b><small>LIBRE PARA TODOS</small></span></li></ol></section></>;
 }
-function OperationStepModal({item,warehouseEntries,transports,csrfToken,currentUser,close,submit,initialStepKey=null}){
+function OperationStepModal({item,warehouseEntries,transports,csrfToken,currentUser,onEvidenceUploaded,close,submit,initialStepKey=null}){
   const steps=operationStepsFor(item);
   const step=initialStepKey?steps.find(entry=>entry.key===initialStepKey):nextOperationStep(item);
   const [note,setNote]=useState('');
@@ -3005,6 +3055,7 @@ function OperationStepModal({item,warehouseEntries,transports,csrfToken,currentU
         uploaded.push({...stored,evidenceType});
       }
       setEvidenceFiles(current=>[...current,...uploaded]);
+      await onEvidenceUploaded?.(item.id,uploaded,evidenceType);
     }catch(reason){setError(reason.message)}finally{setUploading(false)}
   };
   const cargoPhotos=evidenceFiles.filter(file=>file.evidenceType==='cargo-photo');
@@ -3434,6 +3485,7 @@ const AUDIT_LABELS={
   'finance.update':'Facturación actualizada',
   'holded.proform.create':'Proforma enviada a Holded',
   'attachment.upload':'Archivo subido',
+  'case.attachment.link':'Archivo vinculado al expediente',
   'operational.update':'Operativa actualizada',
   'case.create':'Expediente creado',
   'case.update':'Expediente editado',
@@ -3478,6 +3530,7 @@ const auditDetailsText=(details,action='')=>{
   if(action==='step.complete')return auditJoin([`Completo paso ${details.title||details.step||''}`.trim(),caseText,vesselText,details.readyForBilling&&'Listo para facturar',details.podException&&'POD no sellado justificado']);
   if(action==='step.reopen')return auditJoin([`Reabrio paso ${details.title||details.step||''}`.trim(),caseText,vesselText,details.method==='undo'?'Vuelta atras':'Reapertura manual']);
   if(action==='attachment.upload')return auditJoin([`Subio archivo ${details.id||''}`.trim(),details.category&&`Categoria ${details.category}`]);
+  if(action==='case.attachment.link')return auditJoin([`Vinculo ${details.files||0} archivo(s) al expediente`,caseText,vesselText,details.category&&`Categoria ${details.category}`]);
   if(action==='holded.proform.create')return auditJoin(['Envio proforma a Holded',caseText,details.clientName&&`Cliente ${details.clientName}`,details.total!==undefined&&`Total ${details.total} EUR`,details.holdedId&&`Holded ${details.holdedId}`]);
   if(action==='users.create')return auditJoin([`Creo usuario ${details.created_user_id||''}`.trim(),details.roles&&`Roles ${cleanAuditValue(details.roles)}`]);
   if(action==='users.roles_update')return auditJoin([`Actualizo roles del usuario ${details.updated_user_id||''}`.trim(),details.roles&&`Roles ${cleanAuditValue(details.roles)}`]);
