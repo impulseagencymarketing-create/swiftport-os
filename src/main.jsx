@@ -476,10 +476,16 @@ const UME_ALGECIRAS_RATES={
   pickup1150:176,
   overtimeSurcharge:0.3
 };
+const OCA_SURVEY_RATES={
+  baseHours:4,
+  basePrice:200,
+  extraHourPrice:30
+};
 const priceByWeight=(weight,table)=>{const kilos=Number(weight)||0;const match=table.find(([max])=>kilos<=max);return match?match[1]:table.at(-1)?.[1]||0};
 const isLimaniCase=item=>/limani/i.test(String(item?.cliente||''));
 const isAlsCase=item=>/\bals\b/i.test(String(item?.cliente||''));
 const isUmeAlgecirasCase=item=>/\bume\b/i.test(String(item?.cliente||''))&&/algeciras/i.test(String(item?.puerto||''));
+const isOcaCase=item=>/\boca\b/i.test(String(item?.cliente||''));
 const invoiceCargoLines=(item,warehouseEntries=[])=>{
   const linkedWarehouse=warehouseEntries.filter(entry=>entry.expediente===item.id);
   const warehouseLines=linkedWarehouse.flatMap(entry=>(entry.mercancias||[]).length?entry.mercancias:[{tipo:'CAJA',cantidad:Number(entry.bultos)||0,peso:entry.peso||''}]).filter(line=>Number(line.cantidad)>0);
@@ -1039,43 +1045,108 @@ async function showDeviceNotification(title,body,tag){
   new Notification(title,options);
   return true;
 }
-async function playAlertSound(){
+const ALERT_SOUND_STORAGE_KEY='swiftport-alert-sound-settings-v1';
+const ALERT_SOUND_MAX_VOLUME=1.4;
+const ALERT_SOUND_OPTIONS=[
+  {id:'ship',label:'Bocina de barco'},
+  {id:'harbor',label:'Sirena de puerto'},
+  {id:'bell',label:'Campana de puerto'},
+  {id:'radio',label:'Radio operativa'},
+  {id:'urgent',label:'Aviso urgente'},
+  {id:'soft',label:'Aviso suave'}
+];
+const DEFAULT_ALERT_SOUND_SETTINGS={enabled:true,sound:'ship',volume:1};
+const normalizeAlertSoundSettings=settings=>{
+  const raw=settings&&typeof settings==='object'?settings:{};
+  const sound=ALERT_SOUND_OPTIONS.some(option=>option.id===raw.sound)?raw.sound:DEFAULT_ALERT_SOUND_SETTINGS.sound;
+  const volume=Math.min(ALERT_SOUND_MAX_VOLUME,Math.max(0,Number.isFinite(Number(raw.volume))?Number(raw.volume):DEFAULT_ALERT_SOUND_SETTINGS.volume));
+  return {enabled:raw.enabled!==false,sound,volume};
+};
+const loadAlertSoundSettings=()=>{
+  try{
+    const stored=localStorage.getItem(ALERT_SOUND_STORAGE_KEY);
+    if(stored)return normalizeAlertSoundSettings(JSON.parse(stored));
+    const legacy=localStorage.getItem('swiftport-alert-sound');
+    if(legacy==='0')return {...DEFAULT_ALERT_SOUND_SETTINGS,enabled:false};
+  }catch{}
+  return {...DEFAULT_ALERT_SOUND_SETTINGS};
+};
+const saveAlertSoundSettings=settings=>{
+  const next=normalizeAlertSoundSettings(settings);
+  try{
+    localStorage.setItem(ALERT_SOUND_STORAGE_KEY,JSON.stringify(next));
+    localStorage.setItem('swiftport-alert-sound',next.enabled?'1':'0');
+  }catch{}
+  return next;
+};
+async function playAlertSound(settings=loadAlertSoundSettings()){
+  const soundSettings=normalizeAlertSoundSettings(settings);
+  if(!soundSettings.enabled||soundSettings.volume<=0)return false;
   const AudioContext=window.AudioContext||window.webkitAudioContext;
   if(!AudioContext)return false;
   const audio=window.__swiftportAudioContext||(window.__swiftportAudioContext=new AudioContext());
   if(audio.state==='suspended')await audio.resume();
   const now=audio.currentTime;
   const master=audio.createGain();
-  const filter=audio.createBiquadFilter();
   const compressor=audio.createDynamicsCompressor();
-  master.gain.setValueAtTime(0.72,now);
-  filter.type='lowpass';
-  filter.frequency.setValueAtTime(520,now);
+  master.gain.setValueAtTime(soundSettings.volume,now);
   compressor.threshold.setValueAtTime(-18,now);
-  compressor.ratio.setValueAtTime(6,now);
+  compressor.ratio.setValueAtTime(5,now);
   compressor.attack.setValueAtTime(.004,now);
   compressor.release.setValueAtTime(.18,now);
-  master.connect(filter);
-  filter.connect(compressor);
+  master.connect(compressor);
   compressor.connect(audio.destination);
-  const horns=[{start:0,duration:.62},{start:.78,duration:.78}];
-  horns.forEach(({start,duration})=>{
-    [{frequency:148,type:'sawtooth',level:.44},{frequency:196,type:'sine',level:.34},{frequency:74,type:'sine',level:.24}].forEach(({frequency,type,level})=>{
-      const oscillator=audio.createOscillator();
-      const gain=audio.createGain();
-      oscillator.type=type;
-      oscillator.frequency.setValueAtTime(frequency,now+start);
-      oscillator.frequency.linearRampToValueAtTime(frequency*.96,now+start+duration);
-      gain.gain.setValueAtTime(0.0001,now+start);
-      gain.gain.exponentialRampToValueAtTime(level,now+start+.06);
-      gain.gain.setValueAtTime(level,now+start+Math.max(.08,duration-.18));
-      gain.gain.exponentialRampToValueAtTime(0.0001,now+start+duration);
-      oscillator.connect(gain);
-      gain.connect(master);
-      oscillator.start(now+start);
-      oscillator.stop(now+start+duration+.04);
+  const tone=({start=0,duration=.25,frequency=440,type='sine',level=.45,endFrequency=frequency})=>{
+    const oscillator=audio.createOscillator();
+    const gain=audio.createGain();
+    oscillator.type=type;
+    oscillator.frequency.setValueAtTime(frequency,now+start);
+    oscillator.frequency.linearRampToValueAtTime(endFrequency,now+start+duration);
+    gain.gain.setValueAtTime(0.0001,now+start);
+    gain.gain.exponentialRampToValueAtTime(level,now+start+.025);
+    gain.gain.setValueAtTime(level,now+start+Math.max(.04,duration-.08));
+    gain.gain.exponentialRampToValueAtTime(0.0001,now+start+duration);
+    oscillator.connect(gain);
+    gain.connect(master);
+    oscillator.start(now+start);
+    oscillator.stop(now+start+duration+.03);
+  };
+  if(soundSettings.sound==='bell'){
+    [0,.28,.56].forEach((start,index)=>{
+      tone({start,duration:.22,frequency:880-index*90,endFrequency:1040-index*90,type:'sine',level:.34});
+      tone({start,duration:.32,frequency:1320-index*120,endFrequency:1180-index*120,type:'triangle',level:.18});
     });
-  });
+  }else if(soundSettings.sound==='radio'){
+    [0,.16,.32,.68].forEach((start,index)=>tone({start,duration:index===3?.42:.1,frequency:index===3?540:1180,endFrequency:index===3?460:1420,type:'square',level:index===3?.18:.24}));
+  }else if(soundSettings.sound==='harbor'){
+    const filter=audio.createBiquadFilter();
+    filter.type='lowpass';
+    filter.frequency.setValueAtTime(480,now);
+    master.disconnect();
+    master.connect(filter);
+    filter.connect(compressor);
+    [{start:0,duration:.9},{start:1.08,duration:.9}].forEach(({start,duration})=>{
+      tone({start,duration,frequency:112,endFrequency:105,type:'sawtooth',level:.5});
+      tone({start,duration,frequency:168,endFrequency:158,type:'triangle',level:.38});
+      tone({start,duration,frequency:56,endFrequency:54,type:'sine',level:.24});
+    });
+  }else if(soundSettings.sound==='urgent'){
+    [0,.18,.36,.72,.9,1.08].forEach((start,index)=>tone({start,duration:index<3?.11:.14,frequency:index<3?1320:980,endFrequency:index<3?1540:1180,type:'square',level:index<3?.24:.28}));
+  }else if(soundSettings.sound==='soft'){
+    [523,659,784].forEach((frequency,index)=>tone({start:index*.18,duration:.26,frequency,endFrequency:frequency*1.04,type:'sine',level:.2}));
+  }else{
+    const filter=audio.createBiquadFilter();
+    filter.type='lowpass';
+    filter.frequency.setValueAtTime(560,now);
+    master.disconnect();
+    master.connect(filter);
+    filter.connect(compressor);
+    [{start:0,duration:.62},{start:.78,duration:.78}].forEach(({start,duration})=>{
+      tone({start,duration,frequency:148,endFrequency:142,type:'sawtooth',level:.42});
+      tone({start,duration,frequency:196,endFrequency:188,type:'sine',level:.32});
+      tone({start,duration,frequency:74,endFrequency:70,type:'sine',level:.2});
+    });
+  }
   return true;
 }
 async function uploadAttachment(file,category,csrfToken){
@@ -1393,6 +1464,10 @@ function App({auth,finance,onFinanceChange,onLogout}){
   const [notificationOpen,setNotificationOpen]=useState(false);
   const [notificationLog,setNotificationLog]=useState([]);
   const [deliveryPopup,setDeliveryPopup]=useState(null);
+  const [alertSoundSettings,setAlertSoundSettings]=useState(()=>loadAlertSoundSettings());
+  const updateAlertSoundSettings=patch=>{
+    setAlertSoundSettings(previous=>saveAlertSoundSettings({...previous,...patch}));
+  };
   const [acknowledgedDeliveryAlerts,setAcknowledgedDeliveryAlerts]=useState({});
   const [acknowledgedBillingAlerts,setAcknowledgedBillingAlerts]=useState({});
   const casesWithFinance=useMemo(()=>cases.map(item=>({...item,importe:finance.caseAmounts[item.id]||0})),[cases,finance.caseAmounts]);
@@ -1492,12 +1567,12 @@ function App({auth,finance,onFinanceChange,onLogout}){
     const entries=fresh.map(alert=>({id:`${alert.key}-${now.getTime()}`,alertKey:alert.key,type:'delivery',title:wasAlreadySent[alert.key]?'Recordatorio pendiente':'Aviso de entrega',message:alert.message,createdAt:now.toISOString(),caseId:alert.case?.id||alert.event?.expediente||'',vessel:alert.case?.buque||alert.event?.titulo||'',rule:alert.rule?.label||''}));
     setNotificationLog(previous=>{const next=[...entries,...previous].slice(0,100);try{localStorage.setItem(`swiftport-notification-log-${user.id}`,JSON.stringify(next))}catch{}return next});
     setDeliveryPopup(fresh[0]);
-    if(localStorage.getItem('swiftport-alert-sound')!=='0')playAlertSound().catch(()=>{});
+    playAlertSound(alertSoundSettings).catch(()=>{});
     notify(fresh.length===1?fresh[0].message:`${fresh.length} avisos de entrega activos. Revisa el calendario.`);
     if(localStorage.getItem('swiftport-device-alerts')==='1'){
       fresh.forEach(alert=>showDeviceNotification('Swiftport entrega',alert.message,alert.key).catch(()=>{}));
     }
-  },[deliveryAlerts,operationalLoaded,user.id]);
+  },[deliveryAlerts,operationalLoaded,user.id,alertSoundSettings]);
   useEffect(()=>{
     if(!operationalLoaded||!billingAlerts.length)return;
     const storageKey=`swiftport-billing-alerts-${user.id}`;
@@ -1515,12 +1590,12 @@ function App({auth,finance,onFinanceChange,onLogout}){
     const entries=fresh.map(alert=>({id:`${alert.key}-${now.getTime()}`,alertKey:alert.key,type:'billing',title:wasAlreadySent[alert.key]?'Recordatorio facturación':'Listo para facturar',message:alert.message,createdAt:now.toISOString(),caseId:alert.case?.id||'',vessel:alert.case?.buque||'',rule:alert.rule?.label||''}));
     setNotificationLog(previous=>{const next=[...entries,...previous].slice(0,100);try{localStorage.setItem(`swiftport-notification-log-${user.id}`,JSON.stringify(next))}catch{}return next});
     setDeliveryPopup(fresh[0]);
-    if(localStorage.getItem('swiftport-alert-sound')!=='0')playAlertSound().catch(()=>{});
+    playAlertSound(alertSoundSettings).catch(()=>{});
     notify(fresh.length===1?fresh[0].message:`${fresh.length} expedientes listos para facturar.`);
     if(localStorage.getItem('swiftport-device-alerts')==='1'){
       fresh.forEach(alert=>showDeviceNotification('Swiftport facturación',alert.message,alert.key).catch(()=>{}));
     }
-  },[billingAlerts,operationalLoaded,user.id]);
+  },[billingAlerts,operationalLoaded,user.id,alertSoundSettings]);
   const persistOperational=async(nextCases=cases,nextTransports=transports,nextWarehouse=warehouseEntries,nextCustoms=customs,nextCalendar=calendarEvents,nextProviders=providers,nextVessels=vessels,nextDeletedVesselKeys=deletedVesselKeys,auditEvent=null)=>{
     operationalSaveInFlight.current=true;
     try{
@@ -2086,14 +2161,25 @@ No se borrarán documentos ni fotos. El expediente volverá a este punto para co
     </main>
     <MobileNav tab={tab} navigate={navigate} more={()=>setMenuOpen(true)} nav={availableNav}/>
     {newOpen&&<NewCaseModal clientOptions={clientOptions} vessels={vessels} team={operationalTeam} close={()=>setNewOpen(false)} submit={createCase}/>}
-    {notificationOpen&&<NotificationDrawer alerts={activeNotifications} history={notificationLog} acknowledge={acknowledgeOperationalAlert} close={()=>setNotificationOpen(false)} clear={clearNotificationLog} openCalendar={()=>{setNotificationOpen(false);navigate('calendario')}} openBilling={()=>{setNotificationOpen(false);navigate('facturacion')}}/>}
-    {deliveryPopup&&<DeliveryPopup alert={deliveryPopup} close={()=>acknowledgeOperationalAlert(deliveryPopup)} openHistory={()=>{setDeliveryPopup(null);setNotificationOpen(true)}}/>}
+    {notificationOpen&&<NotificationDrawer alerts={activeNotifications} history={notificationLog} acknowledge={acknowledgeOperationalAlert} close={()=>setNotificationOpen(false)} clear={clearNotificationLog} openCalendar={()=>{setNotificationOpen(false);navigate('calendario')}} openBilling={()=>{setNotificationOpen(false);navigate('facturacion')}} soundSettings={alertSoundSettings} updateSoundSettings={updateAlertSoundSettings}/>}
+    {deliveryPopup&&<DeliveryPopup alert={deliveryPopup} close={()=>acknowledgeOperationalAlert(deliveryPopup)} openHistory={()=>{setDeliveryPopup(null);setNotificationOpen(true)}} soundSettings={alertSoundSettings} updateSoundSettings={updateAlertSoundSettings}/>}
     {toast&&<div className="toast" role="status"><CheckCircle2/>{toast}</div>}
   </div>;
 }
 const initials=name=>name.split(/\s+/).filter(Boolean).map(word=>word[0]).slice(0,2).join('').toUpperCase();
-function NotificationDrawer({alerts=[],history=[],acknowledge,close,clear,openCalendar,openBilling}){
+function NotificationDrawer({alerts=[],history=[],acknowledge,close,clear,openCalendar,openBilling,soundSettings,updateSoundSettings}){
+  const settings=normalizeAlertSoundSettings(soundSettings);
+const volumeLabel=`Volumen ${Math.round(settings.volume*100)}%${settings.volume>1?' - potenciado':''}`;
   const formatDate=value=>value?new Date(value).toLocaleString('es-ES',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}):'Ahora';
+  const updateSettings=patch=>{
+    const next=saveAlertSoundSettings({...settings,...patch});
+    updateSoundSettings?.(next);
+  };
+  const testSound=()=>{
+    const next=saveAlertSoundSettings({...settings,enabled:true});
+    updateSoundSettings?.(next);
+    playAlertSound(next).catch(()=>{});
+  };
   return <>
     <button className="notification-backdrop" aria-label="Cerrar notificaciones" onClick={close}/>
     <aside className="notification-drawer" aria-label="Centro de notificaciones">
@@ -2104,8 +2190,13 @@ function NotificationDrawer({alerts=[],history=[],acknowledge,close,clear,openCa
       <section className="notification-drawer-actions">
         <button className="button secondary" onClick={openCalendar}><CalendarDays/> Abrir calendario</button>
         <button className="button secondary" onClick={openBilling}><ReceiptText/> Abrir facturación</button>
-        <button className="button secondary" onClick={()=>{try{localStorage.setItem('swiftport-alert-sound','1')}catch{};playAlertSound().catch(()=>{})}}><Bell/> Probar sonido</button>
+        <button className="button secondary" onClick={testSound}><Bell/> Probar sonido</button>
         <button className="button tertiary" onClick={clear}>Limpiar historial</button>
+      </section>
+      <section className="notification-sound-settings" aria-label="Configuracion del sonido de alertas">
+        <label><span>Sonido de alerta</span><select value={settings.sound} onChange={event=>updateSettings({sound:event.target.value})}>{ALERT_SOUND_OPTIONS.map(option=><option key={option.id} value={option.id}>{option.label}</option>)}</select></label>
+        <label><span>{volumeLabel}</span><input type="range" min="0" max={ALERT_SOUND_MAX_VOLUME} step="0.05" value={settings.volume} onChange={event=>updateSettings({volume:Number(event.target.value)})}/></label>
+        <label className="sound-toggle"><input type="checkbox" checked={settings.enabled} onChange={event=>updateSettings({enabled:event.target.checked})}/> Sonido activo</label>
       </section>
       <section>
         <h3>Ahora requiere atención</h3>
@@ -2124,15 +2215,31 @@ function NotificationDrawer({alerts=[],history=[],acknowledge,close,clear,openCa
     </aside>
   </>;
 }
-function DeliveryPopup({alert,close,openHistory}){
+function DeliveryPopup({alert,close,openHistory,soundSettings,updateSoundSettings}){
+  const settings=normalizeAlertSoundSettings(soundSettings);
+const volumeLabel=`Volumen ${Math.round(settings.volume*100)}%${settings.volume>1?' - potenciado':''}`;
+  const updateSettings=patch=>{
+    const next=saveAlertSoundSettings({...settings,...patch});
+    updateSoundSettings?.(next);
+  };
+  const testSound=()=>{
+    const next=saveAlertSoundSettings({...settings,enabled:true});
+    updateSoundSettings?.(next);
+    playAlertSound(next).catch(()=>{});
+  };
   return <div className="delivery-popup" role="alertdialog" aria-label="Aviso de entrega">
     <div className="delivery-popup-icon"><Bell/></div>
     <div>
       <small>{alert.type==='billing'?'Facturación pendiente':alert.rule?.followUp?'Seguimiento operativo':'Aviso de entrega'}</small>
       <b>{alert.case?.buque||alert.event?.titulo||'Entrega programada'}</b>
       <p>{alert.message}</p>
+      <div className="delivery-popup-sound">
+        <label><span>Sonido</span><select value={settings.sound} onChange={event=>updateSettings({sound:event.target.value})}>{ALERT_SOUND_OPTIONS.map(option=><option key={option.id} value={option.id}>{option.label}</option>)}</select></label>
+        <label><span>{volumeLabel}</span><input type="range" min="0" max={ALERT_SOUND_MAX_VOLUME} step="0.05" value={settings.volume} onChange={event=>updateSettings({volume:Number(event.target.value)})}/></label>
+        <label className="sound-toggle"><input type="checkbox" checked={settings.enabled} onChange={event=>updateSettings({enabled:event.target.checked})}/> Sonido activo</label>
+      </div>
       <div className="delivery-popup-actions">
-        <button className="button tertiary" onClick={()=>{try{localStorage.setItem('swiftport-alert-sound','1')}catch{};playAlertSound().catch(()=>{})}}>Activar sonido</button>
+        <button className="button tertiary" onClick={testSound}>Probar sonido</button>
         <button className="button secondary" onClick={openHistory}>Ver historial</button>
         <button className="button primary" onClick={close}>Entendido</button>
       </div>
