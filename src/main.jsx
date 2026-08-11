@@ -2352,7 +2352,12 @@ const billingAlertVisibleToUser=user=>{
   const roles=rolesOf(user);
   return hasRole(roles,'admin')||hasRole(roles,'finance');
 };
-const billingInvoiceClosed=invoice=>invoice&&['Enviado a Holded','Facturado','Cobrado'].includes(invoice.estado);
+const invoiceClosedStatuses=['enviado a holded','enviada a holded','facturado','facturada','cobrado','cobrada','archivado','archivada','cancelado','cancelada'];
+const billingInvoiceClosed=invoice=>{
+  if(!invoice)return false;
+  const status=String(invoice.estado||'').trim().toLowerCase();
+  return invoiceClosedStatuses.includes(status)||Boolean(invoice.holdedId||invoice.holdedNumber||invoice.holdedDocumentId||invoice.archivedAt);
+};
 const billingAlertsForCases=(cases=[],invoices=[],user,now=new Date())=>{
   if(!billingAlertVisibleToUser(user))return[];
   const bucket=Math.floor(now.getTime()/BILLING_ALERT_REPEAT_MS);
@@ -2383,14 +2388,47 @@ const deliveryAlertVisibleToUser=(event,user)=>{
   if(!event?.asignado||event.asignado==='Sin asignar')return true;
   return samePerson(event.asignado,user.fullName);
 };
-const deliveryAlertsForSchedule=(events=[],cases=[],user,now=new Date())=>(events||[])
+const alertClosedStatusWords=['entregado','completado','realizado','finalizado','cancelado','archivado'];
+const deliveryAlertResolved=(event,related)=>{
+  const eventStatus=String(event?.estado||'').toLowerCase();
+  const caseStatus=String(related?.estado||'').toLowerCase();
+  if(alertClosedStatusWords.some(word=>eventStatus.includes(word)||caseStatus.includes(word)))return true;
+  const flow=related?operationFlow(related):{};
+  if(flow.delivery||flow.billingReady)return true;
+  const route=routeParts(event||{});
+  const destination=String(route.destino||'').toUpperCase();
+  const isWarehousePickup=destination.includes('ALMACEN')||destination.includes('ALMACÉN')||destination.includes('BLUESPACE');
+  const eventDay=event?.fecha?localDay(`${event.fecha}T12:00:00`):null;
+  const pickupDatePassed=eventDay?eventDay<=localDay(new Date()):false;
+  return Boolean(isWarehousePickup&&flow.cargo&&pickupDatePassed);
+};
+const uniquePendingAlerts=alerts=>{
+  const seen=new Set();
+  return (alerts||[]).filter(alert=>{
+    const event=alert.event||{};
+    const route=routeParts(event);
+    const uniqueKey=[
+      alert.type||'delivery',
+      alert.case?.id||event.expediente||event.id||'sin-expediente',
+      alert.rule?.key||'rule',
+      event.fecha||'sin-fecha',
+      event.inicio||'sin-hora',
+      route.origen||'sin-origen',
+      route.destino||'sin-destino'
+    ].join('|');
+    if(seen.has(uniqueKey))return false;
+    seen.add(uniqueKey);
+    return true;
+  });
+};
+const deliveryAlertsForSchedule=(events=[],cases=[],user,now=new Date())=>uniquePendingAlerts((events||[])
   .filter(isTransportCalendarEvent)
   .map(event=>calendarEventWithCaseSlot(event,cases))
   .filter(event=>deliveryAlertVisibleToUser(event,user))
   .flatMap(event=>{
     const related=(cases||[]).find(item=>item.id===event.expediente);
     const flow=related?operationFlow(related):{};
-    if(event.estado==='Completado'||flow.delivery||flow.billingReady)return[];
+    if(deliveryAlertResolved(event,related))return[];
     const moment=deliveryEventMoment(event);
     if(!moment)return[];
     const diff=moment.getTime()-now.getTime();
@@ -2413,7 +2451,7 @@ const deliveryAlertsForSchedule=(events=[],cases=[],user,now=new Date())=>(event
       ? `Seguimiento: ${vessel} se entrega en 2 horas (${timeNote}). Revisa con ${driver}.`
       : `${vessel}: ${rule.label} para la entrega (${timeNote}) en ${port}. Conductor: ${driver}.`;
     return [{key:`${event.id||event.transporte||event.expediente}-${rule.key}-${moment.toISOString()}`,event,case:related,rule,message,moment}];
-  });
+  }));
 const localDay=date=>{const value=new Date(date);value.setHours(0,0,0,0);return value};
 const driverTimeLabel=event=>calendarNeedsTime(event)?'Falta hora':event.inicio;
 const driverEventTimestamp=event=>{
