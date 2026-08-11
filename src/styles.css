@@ -1275,3 +1275,48 @@
 .delivery-popup-sound .sound-toggle{display:flex;align-items:center;gap:8px;text-transform:none;letter-spacing:0;font-size:11px;color:var(--ink)}
 .delivery-popup-sound .sound-toggle input{width:15px;height:15px;accent-color:#1d6fe8}
 @media(max-width:720px){.delivery-popup-sound{grid-template-columns:1fr}.notification-sound-settings{margin-inline:12px}}
+/* Corrección estable de la línea temporal real.
+   Evita que entradas largas o estados raros hereden centrado/tamaños de otros bloques. */
+.actual-timeline{
+  font-family:'DM Sans',Arial,sans-serif;
+  text-align:left;
+}
+.actual-timeline .timeline-event{
+  grid-template-columns:18px 66px minmax(0,1fr);
+  align-items:start;
+  text-align:left;
+}
+.actual-timeline .timeline-event>span:last-child{
+  display:block;
+  min-width:0;
+  text-align:left;
+}
+.actual-timeline .timeline-event b{
+  font-family:'Manrope','DM Sans',Arial,sans-serif;
+  font-size:10px;
+  line-height:1.25;
+  font-weight:900;
+  color:var(--ink);
+  text-align:left;
+}
+.actual-timeline .timeline-event small{
+  display:block;
+  font-family:'DM Sans',Arial,sans-serif;
+  font-size:9px;
+  line-height:1.45;
+  color:#8795a7;
+  white-space:normal;
+  overflow-wrap:anywhere;
+  text-align:left;
+}
+.actual-timeline .timeline-event>span:last-child>em{
+  display:block;
+  margin-top:4px;
+  font-family:'DM Sans',Arial,sans-serif;
+  font-size:8px!important;
+  line-height:1.35;
+  font-weight:800;
+  font-style:normal;
+  color:#7890a8;
+  text-align:left;
+}
