@@ -1045,17 +1045,17 @@ async function showDeviceNotification(title,body,tag){
   new Notification(title,options);
   return true;
 }
-const ALERT_SOUND_STORAGE_KEY='swiftport-alert-sound-settings-v1';
-const ALERT_SOUND_MAX_VOLUME=1.4;
+const ALERT_SOUND_STORAGE_KEY='swiftport-alert-sound-settings-v2';
+const ALERT_SOUND_MAX_VOLUME=1;
 const ALERT_SOUND_OPTIONS=[
-  {id:'ship',label:'Bocina de barco'},
-  {id:'harbor',label:'Sirena de puerto'},
-  {id:'bell',label:'Campana de puerto'},
-  {id:'radio',label:'Radio operativa'},
-  {id:'urgent',label:'Aviso urgente'},
-  {id:'soft',label:'Aviso suave'}
+  {id:'message',label:'Mensaje corto'},
+  {id:'double',label:'Doble mensaje'},
+  {id:'soft',label:'Aviso suave'},
+  {id:'bell',label:'Campana suave'},
+  {id:'radio',label:'Radio discreta'},
+  {id:'ship',label:'Bocina de barco suave'}
 ];
-const DEFAULT_ALERT_SOUND_SETTINGS={enabled:true,sound:'ship',volume:1};
+const DEFAULT_ALERT_SOUND_SETTINGS={enabled:true,sound:'message',volume:.45};
 const normalizeAlertSoundSettings=settings=>{
   const raw=settings&&typeof settings==='object'?settings:{};
   const sound=ALERT_SOUND_OPTIONS.some(option=>option.id===raw.sound)?raw.sound:DEFAULT_ALERT_SOUND_SETTINGS.sound;
@@ -1090,62 +1090,55 @@ async function playAlertSound(settings=loadAlertSoundSettings()){
   const master=audio.createGain();
   const compressor=audio.createDynamicsCompressor();
   master.gain.setValueAtTime(soundSettings.volume,now);
-  compressor.threshold.setValueAtTime(-18,now);
-  compressor.ratio.setValueAtTime(5,now);
-  compressor.attack.setValueAtTime(.004,now);
-  compressor.release.setValueAtTime(.18,now);
+  compressor.threshold.setValueAtTime(-20,now);
+  compressor.ratio.setValueAtTime(3,now);
+  compressor.attack.setValueAtTime(.006,now);
+  compressor.release.setValueAtTime(.16,now);
   master.connect(compressor);
   compressor.connect(audio.destination);
-  const tone=({start=0,duration=.25,frequency=440,type='sine',level=.45,endFrequency=frequency})=>{
+  const tone=({start=0,duration=.18,frequency=440,type='sine',level=.14,endFrequency=frequency})=>{
     const oscillator=audio.createOscillator();
     const gain=audio.createGain();
     oscillator.type=type;
     oscillator.frequency.setValueAtTime(frequency,now+start);
     oscillator.frequency.linearRampToValueAtTime(endFrequency,now+start+duration);
     gain.gain.setValueAtTime(0.0001,now+start);
-    gain.gain.exponentialRampToValueAtTime(level,now+start+.025);
-    gain.gain.setValueAtTime(level,now+start+Math.max(.04,duration-.08));
+    gain.gain.exponentialRampToValueAtTime(Math.max(0.0002,level),now+start+.018);
+    gain.gain.setValueAtTime(Math.max(0.0002,level),now+start+Math.max(.04,duration-.06));
     gain.gain.exponentialRampToValueAtTime(0.0001,now+start+duration);
     oscillator.connect(gain);
     gain.connect(master);
     oscillator.start(now+start);
     oscillator.stop(now+start+duration+.03);
   };
-  if(soundSettings.sound==='bell'){
-    [0,.28,.56].forEach((start,index)=>{
-      tone({start,duration:.22,frequency:880-index*90,endFrequency:1040-index*90,type:'sine',level:.34});
-      tone({start,duration:.32,frequency:1320-index*120,endFrequency:1180-index*120,type:'triangle',level:.18});
+  const messagePulse=start=>{
+    tone({start,duration:.09,frequency:930,endFrequency:1030,type:'sine',level:.14});
+    tone({start:start+.11,duration:.13,frequency:1240,endFrequency:1180,type:'triangle',level:.13});
+  };
+  if(soundSettings.sound==='double'){
+    messagePulse(0);
+    messagePulse(.34);
+  }else if(soundSettings.sound==='bell'){
+    [0,.22].forEach((start,index)=>{
+      tone({start,duration:.18,frequency:820-index*60,endFrequency:940-index*60,type:'sine',level:.16});
+      tone({start,duration:.24,frequency:1220-index*80,endFrequency:1080-index*80,type:'triangle',level:.08});
     });
   }else if(soundSettings.sound==='radio'){
-    [0,.16,.32,.68].forEach((start,index)=>tone({start,duration:index===3?.42:.1,frequency:index===3?540:1180,endFrequency:index===3?460:1420,type:'square',level:index===3?.18:.24}));
-  }else if(soundSettings.sound==='harbor'){
-    const filter=audio.createBiquadFilter();
-    filter.type='lowpass';
-    filter.frequency.setValueAtTime(480,now);
-    master.disconnect();
-    master.connect(filter);
-    filter.connect(compressor);
-    [{start:0,duration:.9},{start:1.08,duration:.9}].forEach(({start,duration})=>{
-      tone({start,duration,frequency:112,endFrequency:105,type:'sawtooth',level:.5});
-      tone({start,duration,frequency:168,endFrequency:158,type:'triangle',level:.38});
-      tone({start,duration,frequency:56,endFrequency:54,type:'sine',level:.24});
-    });
-  }else if(soundSettings.sound==='urgent'){
-    [0,.18,.36,.72,.9,1.08].forEach((start,index)=>tone({start,duration:index<3?.11:.14,frequency:index<3?1320:980,endFrequency:index<3?1540:1180,type:'square',level:index<3?.24:.28}));
+    [0,.13,.28].forEach((start,index)=>tone({start,duration:index===2?.22:.07,frequency:index===2?620:1120,endFrequency:index===2?560:1280,type:'square',level:index===2?.08:.1}));
   }else if(soundSettings.sound==='soft'){
-    [523,659,784].forEach((frequency,index)=>tone({start:index*.18,duration:.26,frequency,endFrequency:frequency*1.04,type:'sine',level:.2}));
-  }else{
+    [659,784].forEach((frequency,index)=>tone({start:index*.16,duration:.22,frequency,endFrequency:frequency*1.03,type:'sine',level:.1}));
+  }else if(soundSettings.sound==='ship'){
     const filter=audio.createBiquadFilter();
     filter.type='lowpass';
-    filter.frequency.setValueAtTime(560,now);
+    filter.frequency.setValueAtTime(540,now);
     master.disconnect();
     master.connect(filter);
     filter.connect(compressor);
-    [{start:0,duration:.62},{start:.78,duration:.78}].forEach(({start,duration})=>{
-      tone({start,duration,frequency:148,endFrequency:142,type:'sawtooth',level:.42});
-      tone({start,duration,frequency:196,endFrequency:188,type:'sine',level:.32});
-      tone({start,duration,frequency:74,endFrequency:70,type:'sine',level:.2});
-    });
+    tone({start:0,duration:.42,frequency:148,endFrequency:142,type:'sawtooth',level:.16});
+    tone({start:0,duration:.42,frequency:196,endFrequency:188,type:'sine',level:.12});
+    tone({start:0,duration:.42,frequency:74,endFrequency:70,type:'sine',level:.08});
+  }else{
+    messagePulse(0);
   }
   return true;
 }
