@@ -1037,10 +1037,86 @@ const draftInvoiceFromCase=(item,warehouseEntries=[],transports=[],calendarEvent
   const coste=caseExpenseTotal(item);
   return {...invoice,importe,coste,margen:importe-coste};
 };
+const CP1252_BYTE_MAP={
+  '\u20ac':0x80,'\u201a':0x82,'\u0192':0x83,'\u201e':0x84,'\u2026':0x85,'\u2020':0x86,'\u2021':0x87,'\u02c6':0x88,'\u2030':0x89,'\u0160':0x8a,'\u2039':0x8b,'\u0152':0x8c,'\u017d':0x8e,
+  '\u2018':0x91,'\u2019':0x92,'\u201c':0x93,'\u201d':0x94,'\u2022':0x95,'\u2013':0x96,'\u2014':0x97,'\u02dc':0x98,'\u2122':0x99,'\u0161':0x9a,'\u203a':0x9b,'\u0153':0x9c,'\u017e':0x9e,'\u0178':0x9f
+};
+const COMMON_MOJIBAKE_FIXES=[
+  [String.fromCharCode(0x00C3,0x0081),'\u00C1'],[String.fromCharCode(0x00C3,0x2030),'\u00C9'],[String.fromCharCode(0x00C3,0x008D),'\u00CD'],[String.fromCharCode(0x00C3,0x201C),'\u00D3'],[String.fromCharCode(0x00C3,0x0161),'\u00DA'],[String.fromCharCode(0x00C3,0x2018),'\u00D1'],
+  [String.fromCharCode(0x00C3,0x00A1),'\u00E1'],[String.fromCharCode(0x00C3,0x00A9),'\u00E9'],[String.fromCharCode(0x00C3,0x00AD),'\u00ED'],[String.fromCharCode(0x00C3,0x00B3),'\u00F3'],[String.fromCharCode(0x00C3,0x00BA),'\u00FA'],[String.fromCharCode(0x00C3,0x00B1),'\u00F1'],[String.fromCharCode(0x00C3,0x00BC),'\u00FC'],
+  [String.fromCharCode(0x00C2,0x00A0),' '],[String.fromCharCode(0x00C2,0x00B7),'\u00B7'],[String.fromCharCode(0x00C2,0x00BA),'\u00BA'],[String.fromCharCode(0x00C2,0x00AA),'\u00AA'],[String.fromCharCode(0x00C2),''],
+  [String.fromCharCode(0x00E2,0x20AC,0x02DC),'\u2018'],[String.fromCharCode(0x00E2,0x20AC,0x2122),'\u2019'],[String.fromCharCode(0x00E2,0x20AC,0x0153),'\u201C'],[String.fromCharCode(0x00E2,0x20AC,0x009C),'\u201C'],[String.fromCharCode(0x00E2,0x20AC,0x009D),'\u201D'],[String.fromCharCode(0x00E2,0x20AC,0xFFFD),'\u201D'],
+  [String.fromCharCode(0x00E2,0x20AC,0x201C),'\u2013'],[String.fromCharCode(0x00E2,0x20AC,0x201D),'\u2014'],[String.fromCharCode(0x00E2,0x20AC,0x00A2),'\u2022'],[String.fromCharCode(0x00E2,0x20AC,0x00B9),'\u2039'],[String.fromCharCode(0x00E2,0x20AC,0x00BA),'\u203A'],
+  [String.fromCharCode(0x00E2,0x2020,0x2019),'\u2192'],[String.fromCharCode(0x00E2,0x0153,0x201C),'\u2713'],[String.fromCharCode(0x00E2,0x0153,0x201D),'\u2714'],
+  [String.fromCharCode(0x00E2,0x0080,0x0093),'\u2013'],[String.fromCharCode(0x00E2,0x0080,0x0094),'\u2014'],[String.fromCharCode(0x00E2,0x0086,0x0092),'\u2192'],[String.fromCharCode(0x00E2,0x009C,0x0093),'\u2713'],[String.fromCharCode(0x00E2,0x009C,0x0094),'\u2714']
+];
+const applyCommonMojibakeFixes=value=>COMMON_MOJIBAKE_FIXES.reduce((result,[bad,good])=>result.split(bad).join(good),String(value));
+const decodeMojibakeOnce=value=>{
+  if(mojibakeScore(value)===0||typeof TextDecoder==='undefined')return value;
+  try{
+    const bytes=Uint8Array.from(Array.from(value,char=>{
+      const code=char.charCodeAt(0);
+      return code<=0xff?code:(CP1252_BYTE_MAP[char]??0x3f);
+    }));
+    const decoded=applyCommonMojibakeFixes(new TextDecoder('utf-8',{fatal:false}).decode(bytes));
+    return mojibakeScore(decoded)<mojibakeScore(value)?decoded:value;
+  }catch{
+    return value;
+  }
+};
+const mojibakeScore=value=>{
+  if(typeof value!=='string')return 0;
+  return (value.match(/[\u00c2\u00c3\u00c5\u00e2\u00ef\ufffd]/g)||[]).length+(value.match(/[\u0080-\u009f\u201a-\u201e\u2020-\u2026\u2030\u2039\u203a\u20ac]/g)||[]).length;
+};
+const repairTextEncoding=value=>{
+  if(typeof value!=='string')return value;
+  let current=applyCommonMojibakeFixes(value);
+  for(let index=0;index<4;index+=1){
+    const fixed=applyCommonMojibakeFixes(decodeMojibakeOnce(current));
+    if(fixed===current)break;
+    current=fixed;
+  }
+  return current;
+};
+const isBinaryLike=value=>(typeof Blob!=='undefined'&&value instanceof Blob)||(typeof File!=='undefined'&&value instanceof File)||(typeof FileList!=='undefined'&&value instanceof FileList);
+const normalizeTextEncoding=(value,seen=new WeakSet())=>{
+  if(typeof value==='string')return repairTextEncoding(value);
+  if(!value||typeof value!=='object'||value instanceof Date||isBinaryLike(value))return value;
+  if(seen.has(value))return value;
+  seen.add(value);
+  if(Array.isArray(value))return value.map(item=>normalizeTextEncoding(item,seen));
+  return Object.fromEntries(Object.entries(value).map(([key,item])=>[key,normalizeTextEncoding(item,seen)]));
+};
+const hasVisibleMojibake=value=>typeof value==='string'&&mojibakeScore(value)>0;
+const repairVisibleText=value=>hasVisibleMojibake(value)?repairTextEncoding(value):value;
+const sanitizeVisibleDomEncoding=(root=typeof document!=='undefined'?document.body:null)=>{
+  if(typeof document==='undefined'||!root)return;
+  const domFilter=typeof NodeFilter!=='undefined'?NodeFilter:{SHOW_TEXT:4,FILTER_ACCEPT:1,FILTER_REJECT:2};
+  const shouldSkipTextNode=node=>{
+    const parent=node?.parentElement;
+    return !parent||Boolean(parent.closest('script,style,noscript,textarea,input,[contenteditable="true"]'));
+  };
+  const walker=document.createTreeWalker(root,domFilter.SHOW_TEXT,{acceptNode:node=>shouldSkipTextNode(node)?domFilter.FILTER_REJECT:domFilter.FILTER_ACCEPT});
+  const textNodes=[];
+  while(walker.nextNode())textNodes.push(walker.currentNode);
+  textNodes.forEach(node=>{
+    const fixed=repairVisibleText(node.nodeValue);
+    if(fixed!==node.nodeValue)node.nodeValue=fixed;
+  });
+  root.querySelectorAll?.('[title],[aria-label],[placeholder],[alt]').forEach(element=>{
+    ['title','aria-label','placeholder','alt'].forEach(attribute=>{
+      const value=element.getAttribute(attribute);
+      if(!value)return;
+      const fixed=repairVisibleText(value);
+      if(fixed!==value)element.setAttribute(attribute,fixed);
+    });
+  });
+};
+const jsonBody=value=>JSON.stringify(normalizeTextEncoding(value));
 async function api(path,options={}){
   const response=await fetch(path,{credentials:'same-origin',...options,headers:{'Content-Type':'application/json',...(options.headers||{})}});
-  const body=await response.json().catch(()=>({}));
-  if(!response.ok) throw Object.assign(new Error(body.error||'No se pudo completar la operación.'),{status:response.status,body});
+  const body=normalizeTextEncoding(await response.json().catch(()=>({})));
+  if(!response.ok) throw Object.assign(new Error(body.error||'No se pudo completar la operaci\u00f3n.'),{status:response.status,body});
   return body;
 }
 async function showDeviceNotification(title,body,tag){
@@ -1416,7 +1492,7 @@ function AuthRoot(){
     try{await api('/api/auth/logout.php',{method:'POST',headers:{'X-CSRF-Token':session.csrfToken}})}
     finally{setSession(null);setFinance({caseAmounts:{},warehouseStorageTotal:0,clients:[],invoices:[]})}
   };
-  const updateFinance=async next=>{const protectedNext=protectFinanceHoldedState(financeRef.current,next);financeRef.current=protectedNext;setFinance(protectedNext);if(session?.demo)return;await api('/api/finance.php',{method:'PUT',headers:{'X-CSRF-Token':session.csrfToken},body:JSON.stringify({clients:protectedNext.clients,invoices:protectedNext.invoices})})};
+  const updateFinance=async next=>{const protectedNext=protectFinanceHoldedState(financeRef.current,next);financeRef.current=protectedNext;setFinance(protectedNext);if(session?.demo)return;await api('/api/finance.php',{method:'PUT',headers:{'X-CSRF-Token':session.csrfToken},body:jsonBody({clients:protectedNext.clients,invoices:protectedNext.invoices})})};
   if(loading) return <AuthShell><div className="auth-loading"><span className="auth-spinner"/><b>Preparando Swiftport OS…</b></div></AuthShell>;
   if(!session) return <AuthShell>{setupRequired?<SetupForm onSuccess={authenticated} globalError={error}/>:<LoginForm onSuccess={authenticated} globalError={error} localDesign={LOCAL_DESIGN_MODE} onDesignMode={enterDesignMode}/>}</AuthShell>;
   return <App auth={session} finance={finance} onFinanceChange={updateFinance} onLogout={logout}/>;
@@ -1426,17 +1502,37 @@ function AuthShell({children}){
 }
 function LoginForm({onSuccess,globalError,localDesign=false,onDesignMode}){
   const [form,setForm]=useState({email:'',password:''});const [error,setError]=useState('');const [busy,setBusy]=useState(false);
-  const submit=async event=>{event.preventDefault();setBusy(true);setError('');try{onSuccess(await api('/api/auth/login.php',{method:'POST',body:JSON.stringify(form)}))}catch(reason){setError(reason.message)}finally{setBusy(false)}};
+  const submit=async event=>{event.preventDefault();setBusy(true);setError('');try{onSuccess(await api('/api/auth/login.php',{method:'POST',body:jsonBody(form)}))}catch(reason){setError(reason.message)}finally{setBusy(false)}};
   return <section className="auth-card"><span className="auth-icon"><LockKeyhole/></span><h1>Iniciar sesión</h1><p>Accede con tu cuenta de Swiftport.</p>{(error||globalError)&&<div className="form-error"><CircleAlert/>{error||globalError}</div>}<form onSubmit={submit}><label className="field"><span>Email</span><input type="email" autoComplete="username" value={form.email} onChange={event=>setForm({...form,email:event.target.value})} required autoFocus/></label><label className="field"><span>Contraseña</span><input type="password" autoComplete="current-password" value={form.password} onChange={event=>setForm({...form,password:event.target.value})} required/></label><button className="button primary full" disabled={busy}>{busy?'Comprobando…':'Entrar'}</button></form></section>;
 }
 function SetupForm({onSuccess,globalError}){
   const [form,setForm]=useState({fullName:'',email:'',password:'',setupToken:''});const [error,setError]=useState('');const [busy,setBusy]=useState(false);
   const update=event=>setForm({...form,[event.target.name]:event.target.value});
-  const submit=async event=>{event.preventDefault();setBusy(true);setError('');try{onSuccess(await api('/api/auth/setup.php',{method:'POST',body:JSON.stringify(form)}))}catch(reason){setError(reason.message)}finally{setBusy(false)}};
+  const submit=async event=>{event.preventDefault();setBusy(true);setError('');try{onSuccess(await api('/api/auth/setup.php',{method:'POST',body:jsonBody(form)}))}catch(reason){setError(reason.message)}finally{setBusy(false)}};
   return <section className="auth-card setup-card"><span className="auth-icon"><ShieldCheck/></span><h1>Crear administrador</h1><p>Solo aparece una vez. Crea la primera cuenta con control total.</p>{(error||globalError)&&<div className="form-error"><CircleAlert/>{error||globalError}</div>}<form onSubmit={submit}><label className="field"><span>Nombre completo</span><input name="fullName" value={form.fullName} onChange={update} required autoFocus/></label><label className="field"><span>Email</span><input name="email" type="email" autoComplete="username" value={form.email} onChange={update} required/></label><label className="field"><span>Contraseña (mínimo 4 caracteres)</span><input name="password" type="password" autoComplete="new-password" minLength="4" value={form.password} onChange={update} required/></label><label className="field"><span>Código inicial</span><input name="setupToken" type="password" autoComplete="off" value={form.setupToken} onChange={update} required/></label><button className="button primary full" disabled={busy}>{busy?'Creando cuenta…':'Crear administrador'}</button></form></section>;
 }
 function App({auth,finance,onFinanceChange,onLogout}){
   const user=auth.user;
+  useEffect(()=>{
+    sanitizeVisibleDomEncoding();
+    if(typeof document==='undefined'||typeof MutationObserver==='undefined')return undefined;
+    const queueFrame=typeof requestAnimationFrame==='function'?requestAnimationFrame:callback=>setTimeout(callback,0);
+    const cancelFrame=typeof cancelAnimationFrame==='function'?cancelAnimationFrame:clearTimeout;
+    let frame=null;
+    const scheduleSanitizer=()=>{
+      if(frame!==null)return;
+      frame=queueFrame(()=>{
+        frame=null;
+        sanitizeVisibleDomEncoding();
+      });
+    };
+    const observer=new MutationObserver(scheduleSanitizer);
+    observer.observe(document.body,{childList:true,subtree:true,characterData:true});
+    return ()=>{
+      observer.disconnect();
+      if(frame!==null)cancelFrame(frame);
+    };
+  },[]);
   const [previewUser,setPreviewUser]=useState(null);
   const visibleUser=previewUser||user;
   const actorName=user?.fullName||'Swiftport';
@@ -1501,7 +1597,7 @@ function App({auth,finance,onFinanceChange,onLogout}){
     const exists=clientOptions.some(item=>item.toLowerCase()===client.toLowerCase());
     if(exists)return clientOptions.find(item=>item.toLowerCase()===client.toLowerCase())||client;
     if(auth.demo){const saved=client.toUpperCase();setClientOptions(options=>options.some(item=>item.toLowerCase()===saved.toLowerCase())?options:[...options,saved].sort((a,b)=>a.localeCompare(b,'es')));return saved}
-    const result=await api('/api/clients/directory.php',{method:'POST',headers:{'X-CSRF-Token':auth.csrfToken},body:JSON.stringify({name:client})});
+    const result=await api('/api/clients/directory.php',{method:'POST',headers:{'X-CSRF-Token':auth.csrfToken},body:jsonBody({name:client})});
     const saved=result.client?.name||client.toUpperCase();
     setClientOptions(options=>options.some(item=>item.toLowerCase()===saved.toLowerCase())?options:[...options,saved].sort((a,b)=>a.localeCompare(b,'es')));
     return saved;
@@ -1603,7 +1699,7 @@ function App({auth,finance,onFinanceChange,onLogout}){
     operationalSaveInFlight.current=true;
     try{
       if(auth.demo)return {ok:true};
-      return await api('/api/operational.php',{method:'PUT',headers:{'X-CSRF-Token':auth.csrfToken},body:JSON.stringify({data:{cases:nextCases,transports:nextTransports,warehouseEntries:nextWarehouse,customs:nextCustoms,calendarEvents:nextCalendar,providers:nextProviders,vessels:nextVessels,deletedVesselKeys:nextDeletedVesselKeys},audit:auditEvent})});
+      return await api('/api/operational.php',{method:'PUT',headers:{'X-CSRF-Token':auth.csrfToken},body:jsonBody({data:{cases:nextCases,transports:nextTransports,warehouseEntries:nextWarehouse,customs:nextCustoms,calendarEvents:nextCalendar,providers:nextProviders,vessels:nextVessels,deletedVesselKeys:nextDeletedVesselKeys},audit:auditEvent})});
     }finally{
       operationalSaveInFlight.current=false;
     }
@@ -2283,7 +2379,7 @@ function AisTrackingPanel({item,csrfToken,reloadOperational,notify}){
     if(refreshing||!item.mmsi)return;
     setRefreshing(true);
     try{
-      const result=await api('/api/ais/refresh.php',{method:'POST',headers:{'X-CSRF-Token':csrfToken},body:JSON.stringify({caseRef:item.id})});
+      const result=await api('/api/ais/refresh.php',{method:'POST',headers:{'X-CSRF-Token':csrfToken},body:jsonBody({caseRef:item.id})});
       await reloadOperational();
       notify(result.message||'Seguimiento AIS actualizado');
     }catch(reason){notify(reason.message)}
@@ -2496,12 +2592,7 @@ const calendarServiceStatus=(event,cases=[])=>{
   return done?{className:'done',label:'Terminado',icon:<CheckCircle2/>}:{className:'pending',label:'Pendiente',icon:<CircleAlert/>};
 };
 function DriverLegend({events=[],cases=[]}){const ports=[...new Set((events||[]).filter(isTransportCalendarEvent).map(event=>cases.find(item=>item.id===event.expediente)?.puerto||event.puerto).filter(Boolean).map(port=>String(port).trim().toUpperCase()))].sort();return <div className="driver-legend port-legend"><span><i className="gray"/>Puerto sin indicar</span>{ports.map(port=><span key={port}><i className={portTone(port)}/>{port}</span>)}</div>}
-const calendarTextFixes=[
-  [String.fromCharCode(0x00C3,0x0081),'Á'],[String.fromCharCode(0x00C3,0x2030),'É'],[String.fromCharCode(0x00C3,0x0089),'É'],[String.fromCharCode(0x00C3,0x008D),'Í'],[String.fromCharCode(0x00C3,0x201C),'Ó'],[String.fromCharCode(0x00C3,0x0093),'Ó'],[String.fromCharCode(0x00C3,0x0161),'Ú'],[String.fromCharCode(0x00C3,0x009A),'Ú'],[String.fromCharCode(0x00C3,0x0091),'Ñ'],[String.fromCharCode(0x00C3,0x009C),'Ü'],
-  [String.fromCharCode(0x00C3,0x00A1),'á'],[String.fromCharCode(0x00C3,0x00A9),'é'],[String.fromCharCode(0x00C3,0x00AD),'í'],[String.fromCharCode(0x00C3,0x00B3),'ó'],[String.fromCharCode(0x00C3,0x00BA),'ú'],[String.fromCharCode(0x00C3,0x00B1),'ñ'],[String.fromCharCode(0x00C3,0x00BC),'ü'],
-  [String.fromCharCode(0x00E2,0x20AC,0x00B9),'‹'],[String.fromCharCode(0x00E2,0x20AC,0x00BA),'›'],[String.fromCharCode(0x00E2,0x20AC,0x201C),'—'],[String.fromCharCode(0x00E2,0x20AC,0x201D),'–'],[String.fromCharCode(0x00E2,0x20AC,0x2122),'’'],[String.fromCharCode(0x00E2,0x20AC,0x0153),'“'],[String.fromCharCode(0x00E2,0x20AC,0x009D),'”'],[String.fromCharCode(0x00E2,0x2020,0x2019),'→'],[String.fromCharCode(0x00C2),'']
-];
-const cleanCalendarText=value=>calendarTextFixes.reduce((result,[bad,good])=>result.split(bad).join(good),String(value||''));
+const cleanCalendarText=value=>normalizeTextEncoding(String(value||''));
 function CalendarEventContent({event,cases}){const related=cases.find(item=>item.id===event.expediente);const schedule=related?portCallSchedule(related):null;const missingTime=calendarNeedsTime(event);const port=cleanCalendarText(related?.puerto||event.puerto||'');const status=calendarServiceStatus(event,cases);const route=routeParts(event);const routeLabel=cleanCalendarText([route.origen,route.destino].filter(Boolean).join(' → '));const vessel=cleanCalendarText(related?.buque||event.titulo||'Buque sin indicar');const service=cleanCalendarText(event.tipoServicio||'Transporte');const assigned=cleanCalendarText(event.asignado||'Sin asignar');return <><span className={`calendar-status-pill ${status.className}`} title={cleanCalendarText(status.label)}>{status.icon}<em>{cleanCalendarText(status.label)}</em></span><time>{missingTime?'FALTA HORARIO':`${event.inicio}${event.fin?`–${event.fin}`:''}`}</time><b className="calendar-vessel-name">{vessel}</b>{port&&<b className="calendar-port-name">{port}</b>}<small className="calendar-service">{service}</small>{routeLabel&&<small className="calendar-route">{routeLabel}</small>}{missingTime&&<small className="calendar-provisional">PENDIENTE ETB / HORA</small>}<small>{assigned}</small>{schedule&&<small className="calendar-port-call">LLEGADA  -  ETA {cleanCalendarText(schedule.eta)}</small>}</>}
 function CalendarDriverSelect({event,team,saveEvent}){const drivers=team.filter(member=>hasRole(member,'operations')||hasRole(member,'driver'));const assign=change=>{change.stopPropagation();saveEvent({...withoutCalendarLayout(event),asignado:change.target.value})};return <label className="calendar-driver-quick" onPointerDown={event=>event.stopPropagation()} onClick={event=>event.stopPropagation()}><span>Conductor</span><select value={event.asignado||'Sin asignar'} onChange={assign} aria-label="Asignar conductor"><option>Sin asignar</option>{drivers.map(member=><option key={member.id} value={member.fullName}>{member.fullName}</option>)}</select></label>}
 const calendarMinutes=value=>{const [hour,minute]=String(value||'').split(':').map(Number);return Number.isFinite(hour)?hour*60+(minute||0):0};
@@ -3491,7 +3582,7 @@ function Facturacion({openCase,notify,invoices,cases,warehouseEntries=[],transpo
     const templateLines=related?asArray(draftInvoiceFromCase(related,warehouseEntries,transports,calendarEvents).lines):[];
     const prepared={...item,clientProfile:holdedClientProfile(item.cliente),importe:item.importe||invoiceTotal(item),coste:related?caseExpenseTotal(related):Number(item.coste)||0,margen:related?invoiceRevenue(item)-caseExpenseTotal(related):Number(item.margen)||0,lines:itemLines.length?itemLines:templateLines};
     setSendingHolded(item.id);
-    api('/api/holded/create.php',{method:'POST',headers:{'X-CSRF-Token':csrfToken},body:JSON.stringify({invoice:prepared})})
+    api('/api/holded/create.php',{method:'POST',headers:{'X-CSRF-Token':csrfToken},body:jsonBody({invoice:prepared})})
       .then(result=>{
       updateInvoice({...prepared,estado:'Enviado a Holded',holdedStatus:result.holdedStatus||'Proforma creada',holdedDocType:result.docType||'proform',holdedId:result.holdedId||'',holdedNumber:result.holdedNumber||'',holdedAt:new Date().toISOString()});
       notify(result.holdedNumber?`Proforma creada en Holded: ${result.holdedNumber}`:'Proforma creada en Holded');
@@ -3551,18 +3642,18 @@ function Correos({csrfToken,notify,openCase,reloadOperational,canRebuild}){
       const markerKey='swiftport-email-rebuild';
       const canResume=localStorage.getItem(markerKey)===JSON.stringify(period);
       let reset;
-      const preview=await api('/api/admin/rebuild.php',{method:'POST',headers:{'X-CSRF-Token':csrfToken},body:JSON.stringify({action:'preview_period',...period})});
+      const preview=await api('/api/admin/rebuild.php',{method:'POST',headers:{'X-CSRF-Token':csrfToken},body:jsonBody({action:'preview_period',...period})});
       if(canResume){
         reset={pendingEmails:Number(preview.pendingEmails||0),removedCases:0};
       }else{
       if(!window.confirm(`Se borrarán ${preview.caseCount} expedientes, incluidos los completados, y toda su operativa. Se guardará una copia de seguridad y se reinterpretarán ${preview.mailCount} correos de junio. ¿Continuar?`)){setRebuildProgress('');return}
-      reset=await api('/api/admin/rebuild.php',{method:'POST',headers:{'X-CSRF-Token':csrfToken},body:JSON.stringify({action:'reset_period',...period})});
+      reset=await api('/api/admin/rebuild.php',{method:'POST',headers:{'X-CSRF-Token':csrfToken},body:jsonBody({action:'reset_period',...period})});
       }
       localStorage.setItem(markerKey,JSON.stringify(period));
       let remaining=Number(reset.pendingEmails||0),interpreted=0,created=0,ignored=0;
       while(remaining>0){
         setRebuildProgress(`Interpretando junio con IA  -  ${remaining} pendientes`);
-        const batch=await api('/api/admin/rebuild.php',{method:'POST',headers:{'X-CSRF-Token':csrfToken},body:JSON.stringify({action:'process_period_batch',...period})});
+        const batch=await api('/api/admin/rebuild.php',{method:'POST',headers:{'X-CSRF-Token':csrfToken},body:jsonBody({action:'process_period_batch',...period})});
         interpreted+=Number(batch.summary?.processed||0)+Number(batch.summary?.review||0)+Number(batch.summary?.ignored||0);
         created+=Number(batch.summary?.processed||0);ignored+=Number(batch.summary?.ignored||0);
         const next=Number(batch.remaining||0);
@@ -3591,15 +3682,15 @@ function Correos({csrfToken,notify,openCase,reloadOperational,canRebuild}){
     return()=>button.remove();
   },[canRebuild,processing,rebuilding,rebuildProgress]);
   const ignore=async item=>{
-    try{await api('/api/mail/review.php',{method:'PUT',headers:{'X-CSRF-Token':csrfToken},body:JSON.stringify({id:item.id,action:'ignore'})});notify('Correo descartado');load(filter)}
+    try{await api('/api/mail/review.php',{method:'PUT',headers:{'X-CSRF-Token':csrfToken},body:jsonBody({id:item.id,action:'ignore'})});notify('Correo descartado');load(filter)}
     catch(reason){setError(reason.message)}
   };
   const reprocess=async item=>{
-    try{const result=await api('/api/mail/review.php',{method:'PUT',headers:{'X-CSRF-Token':csrfToken},body:JSON.stringify({id:item.id,action:'reprocess'})});notify(result.status==='processed'?`Trabajo creado automáticamente: ${result.caseRef}`:result.status==='review'?'Servicio detectado, pero faltan datos en el correo':'El correo sigue sin datos operativos suficientes');if(result.status==='processed')await reloadOperational();setFilter(result.status);load(result.status)}
+    try{const result=await api('/api/mail/review.php',{method:'PUT',headers:{'X-CSRF-Token':csrfToken},body:jsonBody({id:item.id,action:'reprocess'})});notify(result.status==='processed'?`Trabajo creado automáticamente: ${result.caseRef}`:result.status==='review'?'Servicio detectado, pero faltan datos en el correo':'El correo sigue sin datos operativos suficientes');if(result.status==='processed')await reloadOperational();setFilter(result.status);load(result.status)}
     catch(reason){setError(reason.message)}
   };
   const approve=async(item,extracted)=>{
-    const result=await api('/api/mail/review.php',{method:'PUT',headers:{'X-CSRF-Token':csrfToken},body:JSON.stringify({id:item.id,action:'approve',extracted})});
+    const result=await api('/api/mail/review.php',{method:'PUT',headers:{'X-CSRF-Token':csrfToken},body:jsonBody({id:item.id,action:'approve',extracted})});
     setEditing(null);notify('Expediente '+result.caseRef+' creado desde el correo');
     await Promise.all([load(filter),reloadOperational()]);
   };
@@ -3735,14 +3826,14 @@ function Usuarios({csrfToken,notify,onPreview,onUsersChanged}){
     if(!roles.length){setError('Cada usuario debe conservar al menos un rol.');return}
     setError('');
     try{
-      await api('/api/admin/users.php',{method:'PUT',headers:{'X-CSRF-Token':csrfToken},body:JSON.stringify({id:item.id,roles})});
+      await api('/api/admin/users.php',{method:'PUT',headers:{'X-CSRF-Token':csrfToken},body:jsonBody({id:item.id,roles})});
       setUsers(users.map(user=>user.id===item.id?{...user,roles,role:primaryRole(roles)}:user));
       notify(`Permisos de ${item.fullName} actualizados`);
       onUsersChanged();
     }catch(reason){setError(reason.message)}
   };
   const toggleFormRole=role=>setForm(current=>{const roles=current.roles.includes(role)?current.roles.filter(value=>value!==role):[...current.roles,role];return {...current,roles:roles.length?roles:current.roles}});
-  const submit=async event=>{event.preventDefault();setBusy(true);setError('');try{await api('/api/admin/users.php',{method:'POST',headers:{'X-CSRF-Token':csrfToken},body:JSON.stringify(form)});setForm({fullName:'',email:'',password:'',roles:['operations']});notify('Usuario creado correctamente');load();onUsersChanged()}catch(reason){setError(reason.message)}finally{setBusy(false)}};
+  const submit=async event=>{event.preventDefault();setBusy(true);setError('');try{await api('/api/admin/users.php',{method:'POST',headers:{'X-CSRF-Token':csrfToken},body:jsonBody(form)});setForm({fullName:'',email:'',password:'',roles:['operations']});notify('Usuario creado correctamente');load();onUsersChanged()}catch(reason){setError(reason.message)}finally{setBusy(false)}};
   const RoleChecks=({roles,toggle})=><div className="multi-role-selector">{Object.entries(ROLE_LABELS).map(([value,label])=><label className={roles.includes(value)?'checked':''} key={value}><input type="checkbox" checked={roles.includes(value)} onChange={()=>toggle(value)}/><CheckCircle2/><span><b>{label}</b><small>{value==='driver'?'Calendario, almacén y entregas':value==='operations'?'Expedientes, correos y planificación':value==='finance'?'Importes, tarifas y facturación':'Control total y usuarios'}</small></span></label>)}</div>;
   return <div className="users-layout">
     <section className="panel"><SectionHeader title="Equipo con acceso" subtitle="Una persona puede combinar varios roles y permisos"/>{error&&<div className="form-error users-error"><CircleAlert/>{error}</div>}{loading?<div className="users-loading">Cargando usuarios…</div>:<div className="user-list">{users.map(item=><article key={item.id}><div className="avatar">{initials(item.fullName)}</div><div className="user-identity"><b>{item.fullName}</b><small>{item.email}</small><em>{roleLabel(item)}</em></div><RoleChecks roles={rolesOf(item)} toggle={role=>toggleUserRole(item,role)}/><button className="button tertiary preview-user" onClick={()=>onPreview(item)}><Eye/> Ver como</button></article>)}</div>}</section>
@@ -4102,4 +4193,5 @@ function WarehouseEditModal({item,cases,close,submit,deleteItem}){
 }
 if('serviceWorker' in navigator)window.addEventListener('load',()=>navigator.serviceWorker.register('/sw.js').catch(()=>{}));
 createRoot(document.getElementById('root')).render(<AuthRoot/>);
+
 
