@@ -425,7 +425,8 @@ const merchandiseCount=lines=>(lines||[]).reduce((sum,line)=>sum+(Number(line.ca
 const merchandiseWeightLabel=lines=>`${merchandiseWeight(lines).toLocaleString('es-ES',{maximumFractionDigits:2})} kg`;
 const moneyExact=value=>new Intl.NumberFormat('es-ES',{style:'currency',currency:'EUR',minimumFractionDigits:2,maximumFractionDigits:2}).format(Number(value)||0);
 const invoiceLineTotal=line=>(Number(line.price)||0)*(Number(line.units)||0);
-const invoiceTotal=invoice=>(invoice.lines||[]).reduce((sum,line)=>sum+invoiceLineTotal(line),0);
+const asArray=value=>Array.isArray(value)?value:(value&&typeof value==='object'?Object.values(value):[]);
+const invoiceTotal=invoice=>asArray(invoice?.lines).reduce((sum,line)=>sum+invoiceLineTotal(line),0);
 const expenseAmount=value=>{const clean=String(value??'').replace(/\s/g,'').replace(/[^\d,.-]/g,'');if(clean.includes(',')&&clean.includes('.'))return Number(clean.replace(/\./g,'').replace(',','.'))||0;if(clean.includes(','))return Number(clean.replace(',','.'))||0;return Number(clean)||0};
 const caseExpenses=item=>Array.isArray(item?.gastos)?item.gastos:[];
 const caseExpenseTotal=item=>caseExpenses(item).reduce((sum,expense)=>sum+expenseAmount(expense.importe),0);
@@ -3486,7 +3487,9 @@ function Facturacion({openCase,notify,invoices,cases,warehouseEntries=[],transpo
   const sendHolded=item=>{
     if(!csrfToken){notify('Inicia sesión en la web publicada para enviar a Holded.');return}
     const related=cases.find(entry=>entry.id===item.expediente);
-    const prepared={...item,clientProfile:holdedClientProfile(item.cliente),importe:item.importe||invoiceTotal(item),coste:related?caseExpenseTotal(related):Number(item.coste)||0,margen:related?invoiceRevenue(item)-caseExpenseTotal(related):Number(item.margen)||0,lines:(item.lines&&item.lines.length?item.lines:(related?draftInvoiceFromCase(related,warehouseEntries,transports,calendarEvents).lines:[]))};
+    const itemLines=asArray(item.lines);
+    const templateLines=related?asArray(draftInvoiceFromCase(related,warehouseEntries,transports,calendarEvents).lines):[];
+    const prepared={...item,clientProfile:holdedClientProfile(item.cliente),importe:item.importe||invoiceTotal(item),coste:related?caseExpenseTotal(related):Number(item.coste)||0,margen:related?invoiceRevenue(item)-caseExpenseTotal(related):Number(item.margen)||0,lines:itemLines.length?itemLines:templateLines};
     setSendingHolded(item.id);
     api('/api/holded/create.php',{method:'POST',headers:{'X-CSRF-Token':csrfToken},body:JSON.stringify({invoice:prepared})})
       .then(result=>{
@@ -3793,26 +3796,29 @@ function ClientEditModal({item,close,submit}){
   return <div className="modal-backdrop" onMouseDown={event=>{if(event.target===event.currentTarget)close()}}><section className="modal client-profile-modal" role="dialog" aria-modal="true"><div className="modal-head"><div><span className="overline">{form.codigo}</span><h2>Ficha de cliente</h2><p>Datos que se reutilizan en facturación y tarifas automáticas.</p></div><button className="icon-button" onClick={close}><X/></button></div><form onSubmit={event=>{event.preventDefault();submit({...form,expedientes:Number(form.expedientes)||0})}}><div className="client-form-section wide"><b>Datos fiscales</b></div><label className="field"><span>Nombre comercial *</span><input name="nombre" value={form.nombre} onChange={update} required autoFocus/></label><label className="field"><span>Razón social</span><input name="fiscalName" value={form.fiscalName} onChange={update}/></label><label className="field"><span>NIF / VAT</span><input name="taxId" value={form.taxId} onChange={update}/></label><label className="field"><span>Expedientes activos</span><input name="expedientes" type="number" min="0" value={form.expedientes} onChange={update}/></label><label className="field wide"><span>Dirección fiscal</span><input name="direccion" value={form.direccion} onChange={update}/></label><div className="client-form-section wide"><b>Contacto y pago</b></div><label className="field"><span>Email de contacto</span><input name="contacto" type="email" value={form.contacto} onChange={update}/></label><label className="field"><span>Teléfono</span><input name="telefono" value={form.telefono} onChange={update}/></label><label className="field"><span>Condiciones de pago</span><input name="condicionesPago" value={form.condicionesPago} onChange={update}/></label><label className="field"><span>Moneda</span><input name="moneda" value={form.moneda} onChange={update}/></label><div className="client-form-section wide"><b>Tarifa de facturación</b><small>Por ahora la tarifa automática real está activa para LIMANI.</small></div><label className="field wide"><span>Tarifa activa</span><input name="tarifaActiva" value={form.tarifaActiva} onChange={update}/></label><label className="field wide"><span>Recepción</span><input name="recepcion" value={form.recepcion} onChange={update}/></label><label className="field wide"><span>Storage</span><input name="storage" value={form.storage} onChange={update}/></label><label className="field wide"><span>Transporte</span><input name="transporte" value={form.transporte} onChange={update}/></label><label className="field wide"><span>Recargo fuera de horario / festivos</span><input name="recargo" value={form.recargo} onChange={update}/></label><label className="field wide"><span>Notas internas</span><input name="notas" value={form.notas} onChange={update} placeholder="Preferencias, emails habituales, excepciones…"/></label><div className="modal-actions wide"><button type="button" className="button tertiary" onClick={close}>Cancelar</button><button className="button primary"><Save/> Guardar ficha</button></div></form></section></div>;
 }
 function InvoiceEditModal({item,cases=[],warehouseEntries=[],transports=[],calendarEvents=[],clients=[],close,submit,simulateHolded}){
-  const relatedCase=cases.find(entry=>entry.id===item.expediente);
+  const safeItem=item&&typeof item==='object'?item:{};
+  const relatedCase=cases.find(entry=>entry.id===safeItem.expediente);
   const clientProfiles=mergeClientProfiles(clients);
   const findClientProfile=value=>{
     const key=clientProfileKey({nombre:value});
     return clientProfiles.find(profile=>clientProfileKey(profile)===key)||clientProfiles.find(profile=>String(profile.nombre||'').toLowerCase().includes(String(value||'').toLowerCase())&&String(value||'').trim().length>=3);
   };
   const currentCargo=relatedCase?invoiceCargoSummary(relatedCase,warehouseEntries):'';
-  const currentHeader=relatedCase?invoiceHeaderTitle(relatedCase):item.concepto;
+  const currentHeader=relatedCase?invoiceHeaderTitle(relatedCase):safeItem.concepto;
   const template=relatedCase?draftInvoiceFromCase(relatedCase,warehouseEntries,transports,calendarEvents):null;
-  const storedLines=item.lines&&item.lines.length?item.lines:[{id:'line-1',item:item.concepto||'TRANSPORT FROM WAREHOUSE TO VESSEL',detail:'',price:Number(item.importe)||0,units:1,tax:'0%'}];
+  const templateLines=asArray(template?.lines);
+  const storedItemLines=asArray(safeItem.lines);
+  const storedLines=storedItemLines.length?storedItemLines:[{id:'line-1',item:safeItem.concepto||'TRANSPORT FROM WAREHOUSE TO VESSEL',detail:'',price:Number(safeItem.importe)||0,units:1,tax:'0%'}];
   const standardIds=new Set(['ref','reception','handling','storage','transport','waiting']);
-  const comparableLines=lines=>['ref','reception','handling','storage','transport','waiting'].map(id=>{const line=(lines||[]).find(entry=>entry.id===id);return line?[id,line.item,line.detail,Number(line.price)||0,Number(line.units)||0,line.tax||'0%']:null}).filter(Boolean);
+  const comparableLines=lines=>['ref','reception','handling','storage','transport','waiting'].map(id=>{const line=asArray(lines).find(entry=>entry.id===id);return line?[id,line.item,line.detail,Number(line.price)||0,Number(line.units)||0,line.tax||'0%']:null}).filter(Boolean);
   const storedLineIds=storedLines.map(line=>line.id||String(line.item||'').toLowerCase());
-  const missingTemplateLine=Boolean(template)&&template.lines.some(line=>!storedLineIds.includes(line.id));
-  const changedTemplateLine=Boolean(template)&&JSON.stringify(comparableLines(storedLines))!==JSON.stringify(comparableLines(template.lines));
-  const shouldUseTemplate=Boolean(template)&&(storedLines.length<4||missingTemplateLine||changedTemplateLine||/^SPL/i.test(String(storedLines[0]?.item||'')));
+  const missingTemplateLine=templateLines.length>0&&templateLines.some(line=>!storedLineIds.includes(line.id));
+  const changedTemplateLine=templateLines.length>0&&JSON.stringify(comparableLines(storedLines))!==JSON.stringify(comparableLines(templateLines));
+  const shouldUseTemplate=templateLines.length>0&&(storedLines.length<4||missingTemplateLine||changedTemplateLine||/^SPL/i.test(String(storedLines[0]?.item||'')));
   const customLines=storedLines.filter(line=>!standardIds.has(line.id));
-  const initialLines=(shouldUseTemplate?[...template.lines,...customLines]:storedLines).map((line,index)=>currentCargo?{...line,item:index===0?currentHeader:line.item,detail:line.detail||currentCargo}:line);
-  const [form,setForm]=useState({...item,...template,id:item.id,expediente:item.expediente||template?.expediente,cliente:template?.cliente||item.cliente,buque:template?.buque||item.buque,puerto:template?.puerto||item.puerto,concepto:currentHeader||template?.concepto||item.concepto,estado:item.estado||template?.estado||'Borrador',vencimiento:item.vencimiento||template?.vencimiento||'',observaciones:item.observaciones||template?.observaciones||'',proforma:item.proforma||template?.proforma||'',payment:item.payment||template?.payment||'',supplierInvoices:item.supplierInvoices||[],supplierText:item.supplierText||'',lines:initialLines});
-  const [supplierText,setSupplierText]=useState(item.supplierText||'');
+  const initialLines=(shouldUseTemplate?[...templateLines,...customLines]:storedLines).map((line,index)=>currentCargo?{...line,item:index===0?currentHeader:line.item,detail:line.detail||currentCargo}:line);
+  const [form,setForm]=useState({...safeItem,...template,id:safeItem.id,expediente:safeItem.expediente||template?.expediente,cliente:template?.cliente||safeItem.cliente,buque:template?.buque||safeItem.buque,puerto:template?.puerto||safeItem.puerto,concepto:currentHeader||template?.concepto||safeItem.concepto,estado:safeItem.estado||template?.estado||'Borrador',vencimiento:safeItem.vencimiento||template?.vencimiento||'',observaciones:safeItem.observaciones||template?.observaciones||'',proforma:safeItem.proforma||template?.proforma||'',payment:safeItem.payment||template?.payment||'',supplierInvoices:asArray(safeItem.supplierInvoices),supplierText:safeItem.supplierText||'',lines:initialLines});
+  const [supplierText,setSupplierText]=useState(safeItem.supplierText||'');
   const [supplierNote,setSupplierNote]=useState('');
   const [supplierScanning,setSupplierScanning]=useState(false);
   const [selectedTariffConcept,setSelectedTariffConcept]=useState('');
