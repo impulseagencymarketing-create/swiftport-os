@@ -381,6 +381,7 @@ const SURVEY_OPERATION_STEPS=[
 ];
 const isStorageOnly=item=>serviceTypeOf(item)==='storage_other';
 const isSurveyService=item=>serviceTypeOf(item)==='survey_samples';
+const isSurveyWarehouseEntry=(entry,cases=[])=>Boolean(entry?.hiddenFromWarehouse||cases.some(item=>item.id===entry?.expediente&&isSurveyService(item)));
 const operationStepsFor=item=>isSurveyService(item)?SURVEY_OPERATION_STEPS:isStorageOnly(item)?STORAGE_OPERATION_STEPS:OPERATION_STEPS;
 const canCompleteOperationStep=()=>true;
 const operationFlow=item=>{
@@ -1709,8 +1710,17 @@ function App({auth,finance,onFinanceChange,onLogout}){
   useEffect(()=>{if(driverOnly&&!['calendario','almacen'].includes(tab))setTab('calendario')},[driverOnly,tab]);
   useEffect(()=>{
     if(!operationalLoaded)return;
+    const cleanupMoment=new Date().toISOString();
+    let archivedSurveyEntries=0;
+    const cleanedWarehouse=warehouseEntries.map(entry=>{
+      if(!isSurveyWarehouseEntry(entry,cases))return entry;
+      if(entry.hiddenFromWarehouse&&entry.archivado&&entry.estado==='Expedido')return entry;
+      archivedSurveyEntries+=1;
+      return {...entry,archivado:true,estado:'Expedido',hiddenFromWarehouse:true,archiveReason:'survey_samples',salida:entry.salida||cleanupMoment};
+    });
     const missing=cases.flatMap((item,index)=>{
-      if(warehouseEntries.some(entry=>entry.expediente===item.id))return[];
+      if(isSurveyService(item))return[];
+      if(cleanedWarehouse.some(entry=>entry.expediente===item.id))return[];
       const reception=(item.recepciones||[])[0];
       if(!reception)return[];
       const merchandise=(reception.mercancias||[]).length?reception.mercancias:(item.mercancias||[]);
@@ -1734,11 +1744,12 @@ function App({auth,finance,onFinanceChange,onLogout}){
         archivado:completed
       }];
     });
-    if(!missing.length)return;
-    const next=[...missing,...warehouseEntries];
+    if(!missing.length&&!archivedSurveyEntries)return;
+    const next=[...missing,...cleanedWarehouse];
     setWarehouseEntries(next);
     saveOperational(cases,transports,next);
-    notify(`${missing.length} ${missing.length===1?'recepción sincronizada':'recepciones sincronizadas'} con Almacén`);
+    if(missing.length)notify(`${missing.length} ${missing.length===1?'recepción sincronizada':'recepciones sincronizadas'} con Almacén`);
+    else notify(`${archivedSurveyEntries} ${archivedSurveyEntries===1?'entrada antigua de SURVEY / MUESTRAS archivada':'entradas antiguas de SURVEY / MUESTRAS archivadas'}`);
   },[operationalLoaded]);
   useEffect(()=>{
     if(!operationalLoaded||!team.length)return;
@@ -1811,6 +1822,7 @@ function App({auth,finance,onFinanceChange,onLogout}){
     const nextWarehouse=warehouseEntries.map(entry=>{
       if(entry.expediente!==operationalCase.id)return entry;
       const renamed={...entry,buque:operationalCase.buque};
+      if(isSurveyService(operationalCase))return {...renamed,archivado:true,estado:'Expedido',hiddenFromWarehouse:true,archiveReason:'survey_samples',salida:entry.salida||new Date().toISOString()};
       return activeEntries.length===1&&entry.ref===activeEntries[0].ref?{...renamed,mercancias:operationalCase.mercancias,bultos:merchandiseCount(operationalCase.mercancias),peso:merchandiseWeightLabel(operationalCase.mercancias)}:renamed;
     });
     const slot=transportSlotFromCase(operationalCase);
@@ -2164,6 +2176,7 @@ No se borrarán documentos ni fotos. El expediente volverá a este punto para co
     notify(`${reopened.title} reabierto`);
   };  const registerWarehouseEntry=form=>{
     const relatedCase=cases.find(item=>item.id===form.expediente);
+    if(relatedCase&&isSurveyService(relatedCase)){notify('SURVEY / MUESTRAS no admite mercancía ni entradas de almacén');return}
     const nextReference=319+warehouseEntries.length-movimientosAlmacen.length;
     const reference='ALM-'+nextReference;
     const vesselName=relatedCase?.buque||form.identificacion?.trim()||'Mercancía sin identificar';
@@ -3379,17 +3392,19 @@ function Almacen({items,cases,openCase,registerEntry,updateEntry,deleteEntry,sho
   const [view,setView]=useState('Activos');
   const [copyStatus,setCopyStatus]=useState('');
   const [selectedRefs,setSelectedRefs]=useState([]);
-  const visibleItems=items.filter(item=>view==='Archivados'?item.archivado||item.estado==='Expedido':!item.archivado&&item.estado!=='Expedido');
+  const warehouseCases=cases.filter(item=>!isSurveyService(item));
+  const warehouseItems=items.filter(item=>!isSurveyWarehouseEntry(item,cases));
+  const visibleItems=warehouseItems.filter(item=>view==='Archivados'?item.archivado||item.estado==='Expedido':!item.archivado&&item.estado!=='Expedido');
   const activeVisibleItems=visibleItems.filter(activeWarehouseEntry);
   const allVisibleSelected=activeVisibleItems.length>0&&activeVisibleItems.every(item=>selectedRefs.includes(item.ref));
-  useEffect(()=>{setSelectedRefs(current=>current.filter(ref=>items.some(item=>item.ref===ref&&activeWarehouseEntry(item))))},[items.map(item=>`${item.ref}:${item.estado}:${item.archivado}`).join('|')]);
-  const totalPackages=items.filter(item=>item.estado!=='Expedido').reduce((sum,item)=>sum+(Number(item.bultos)||0),0);
-  const totalWeight=items.filter(item=>item.estado!=='Expedido').reduce((sum,item)=>sum+(Number(String(item.peso).replace(/\./g,'').replace(',','.').replace(/[^\d.]/g,''))||0),0);
+  useEffect(()=>{setSelectedRefs(current=>current.filter(ref=>warehouseItems.some(item=>item.ref===ref&&activeWarehouseEntry(item))))},[warehouseItems.map(item=>`${item.ref}:${item.estado}:${item.archivado}`).join('|')]);
+  const totalPackages=warehouseItems.filter(item=>item.estado!=='Expedido').reduce((sum,item)=>sum+(Number(item.bultos)||0),0);
+  const totalWeight=warehouseItems.filter(item=>item.estado!=='Expedido').reduce((sum,item)=>sum+(Number(String(item.peso).replace(/\./g,'').replace(',','.').replace(/[^\d.]/g,''))||0),0);
   const submit=form=>{registerEntry(form);setEntryOpen(false)};
   const toggleWarehouseSelection=(ref,checked)=>setSelectedRefs(current=>checked?[...new Set([...current,ref])]:current.filter(item=>item!==ref));
   const toggleVisibleSelection=()=>setSelectedRefs(current=>allVisibleSelected?current.filter(ref=>!activeVisibleItems.some(item=>item.ref===ref)):[...new Set([...current,...activeVisibleItems.map(item=>item.ref)])]);
   const copyWhatsappSummary=async()=>{
-    const selectedItems=items.filter(item=>selectedRefs.includes(item.ref)&&activeWarehouseEntry(item));
+    const selectedItems=warehouseItems.filter(item=>selectedRefs.includes(item.ref)&&activeWarehouseEntry(item));
     if(!selectedItems.length){const message='Selecciona primero la mercancia que quieres copiar';setCopyStatus(message);notify?.(message);setTimeout(()=>setCopyStatus(''),3000);return}
     const text=warehouseWhatsappSummary(selectedItems,cases);
     let copied=false;
@@ -3409,8 +3424,8 @@ function Almacen({items,cases,openCase,registerEntry,updateEntry,deleteEntry,sho
       <SectionHeader title="Mercancia y ubicaciones" subtitle="Selecciona las entradas que quieres copiar para avisar al cliente" action={<div className="warehouse-actions"><button className="button secondary" onClick={copyWhatsappSummary}><ClipboardCheck/> Copiar seleccion WhatsApp</button><button className="button secondary" onClick={()=>setEntryOpen(true)}><Plus/> Registrar entrada</button></div>}/>
       {copyStatus&&<p className="warehouse-copy-status"><ClipboardCheck/>{copyStatus}</p>}
       <div className="warehouse-view-tabs">
-        <button className={view==='Activos'?'active':''} onClick={()=>setView('Activos')}>En almacen <span>{items.filter(item=>!item.archivado&&item.estado!=='Expedido').length}</span></button>
-        <button className={view==='Archivados'?'active':''} onClick={()=>setView('Archivados')}>Archivados <span>{items.filter(item=>item.archivado||item.estado==='Expedido').length}</span></button>
+        <button className={view==='Activos'?'active':''} onClick={()=>setView('Activos')}>En almacen <span>{warehouseItems.filter(item=>!item.archivado&&item.estado!=='Expedido').length}</span></button>
+        <button className={view==='Archivados'?'active':''} onClick={()=>setView('Archivados')}>Archivados <span>{warehouseItems.filter(item=>item.archivado||item.estado==='Expedido').length}</span></button>
       </div>
       {view==='Activos'&&<div className="warehouse-selection-bar"><label><input type="checkbox" checked={allVisibleSelected} onChange={toggleVisibleSelection}/> Seleccionar visibles</label><span>{selectedRefs.length} seleccionada{selectedRefs.length===1?'':'s'}</span></div>}
       <div className="responsive-table warehouse-table">
@@ -3425,8 +3440,8 @@ function Almacen({items,cases,openCase,registerEntry,updateEntry,deleteEntry,sho
         </button>)}
       </div>
     </section>
-    {entryOpen&&<WarehouseEntryModal cases={cases} csrfToken={csrfToken} close={()=>setEntryOpen(false)} submit={submit}/>}
-    {editing&&<WarehouseEditModal item={editing} cases={cases} close={()=>setEditing(null)} submit={item=>{updateEntry(item);setEditing(null)}} deleteItem={item=>{deleteEntry(item);setEditing(null)}}/>}
+    {entryOpen&&<WarehouseEntryModal cases={warehouseCases} csrfToken={csrfToken} close={()=>setEntryOpen(false)} submit={submit}/>}
+    {editing&&<WarehouseEditModal item={editing} cases={warehouseCases} close={()=>setEditing(null)} submit={item=>{updateEntry(item);setEditing(null)}} deleteItem={item=>{deleteEntry(item);setEditing(null)}}/>}
   </>;
 }
 function Summary({icon:Icon,label,value}){return <article><span><Icon/></span><div><small>{label}</small><b>{value}</b></div></article>}
