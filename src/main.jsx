@@ -427,7 +427,8 @@ const merchandiseWeightLabel=lines=>`${merchandiseWeight(lines).toLocaleString('
 const moneyExact=value=>new Intl.NumberFormat('es-ES',{style:'currency',currency:'EUR',minimumFractionDigits:2,maximumFractionDigits:2}).format(Number(value)||0);
 const invoiceLineTotal=line=>(Number(line.price)||0)*(Number(line.units)||0);
 const asArray=value=>Array.isArray(value)?value:(value&&typeof value==='object'?Object.values(value):[]);
-const invoiceTotal=invoice=>asArray(invoice?.lines).reduce((sum,line)=>sum+invoiceLineTotal(line),0);
+const invoiceLinesOf=value=>asArray(value).flatMap(line=>Array.isArray(line)?line:[line]).filter(line=>line&&typeof line==='object');
+const invoiceTotal=invoice=>invoiceLinesOf(invoice?.lines).reduce((sum,line)=>sum+invoiceLineTotal(line),0);
 const expenseAmount=value=>{const clean=String(value??'').replace(/\s/g,'').replace(/[^\d,.-]/g,'');if(clean.includes(',')&&clean.includes('.'))return Number(clean.replace(/\./g,'').replace(',','.'))||0;if(clean.includes(','))return Number(clean.replace(',','.'))||0;return Number(clean)||0};
 const caseExpenses=item=>Array.isArray(item?.gastos)?item.gastos:[];
 const caseExpenseTotal=item=>caseExpenses(item).reduce((sum,expense)=>sum+expenseAmount(expense.importe),0);
@@ -3514,7 +3515,7 @@ function Facturacion({openCase,notify,invoices,cases,warehouseEntries=[],transpo
         return;
       }
       const currentStandard=standardIds.map(id=>{
-        const line=(existing.lines||[]).find(entry=>entry.id===id);
+        const line=invoiceLinesOf(existing.lines).find(entry=>entry.id===id);
         return line?[id,line.item,line.detail,Number(line.price)||0,Number(line.units)||0,line.tax||'0%']:null;
       }).filter(Boolean);
       const draftStandard=standardIds.map(id=>{
@@ -3529,7 +3530,7 @@ function Facturacion({openCase,notify,invoices,cases,warehouseEntries=[],transpo
         Number(existing.coste||0)!==Number(draft.coste||0)||
         JSON.stringify(currentStandard)!==JSON.stringify(draftStandard);
       if(!needsRefresh)return;
-      const customLines=(existing.lines||[]).filter(line=>!standardSet.has(line.id));
+      const customLines=invoiceLinesOf(existing.lines).filter(line=>!standardSet.has(line.id));
       const refreshed={
         ...draft,
         id:existing.id,
@@ -3549,7 +3550,7 @@ function Facturacion({openCase,notify,invoices,cases,warehouseEntries=[],transpo
       changed=true;
     });
     if(changed)syncInvoices(nextInvoices);
-  },[billableCases.map(item=>`${item.id}:${serviceTypeOf(item)}:${item.buque}:${item.puerto}:${item.eta}:${item.etb}:${item.etd}:${item.cliente}:${item.updatedAt||''}:${caseExpenseTotal(item)}:${caseExpenses(item).map(expense=>[expense.id,expense.fecha,expense.proveedor,expense.concepto,expense.importe].join(':')).join(',')}`).join('|'),invoices.map(item=>`${item.id}:${item.expediente}:${item.estado}:${item.cliente}:${item.concepto}:${item.buque}:${item.puerto}:${item.coste||0}:${(item.lines||[]).map(line=>[line.id,line.item,line.detail,line.price,line.units,line.tax].join(':')).join('|')}`).join('||'),warehouseEntries.map(item=>`${item.ref}:${item.expediente}:${item.dias}:${item.estado}:${item.archivado}:${item.salida||''}:${item.updatedAt||''}`).join('|'),transports.map(item=>`${item.id}:${item.expediente}:${item.fecha}:${item.inicio}:${item.fin}:${item.estado||''}`).join('|'),calendarEvents.map(item=>`${item.id}:${item.expediente}:${item.transporte}:${item.tipoServicio}:${item.fecha}:${item.inicio}:${item.fin}`).join('|')]);
+  },[billableCases.map(item=>`${item.id}:${serviceTypeOf(item)}:${item.buque}:${item.puerto}:${item.eta}:${item.etb}:${item.etd}:${item.cliente}:${item.updatedAt||''}:${caseExpenseTotal(item)}:${caseExpenses(item).map(expense=>[expense.id,expense.fecha,expense.proveedor,expense.concepto,expense.importe].join(':')).join(',')}`).join('|'),invoices.map(item=>`${item.id}:${item.expediente}:${item.estado}:${item.cliente}:${item.concepto}:${item.buque}:${item.puerto}:${item.coste||0}:${invoiceLinesOf(item.lines).map(line=>[line.id,line.item,line.detail,line.price,line.units,line.tax].join(':')).join('|')}`).join('||'),warehouseEntries.map(item=>`${item.ref}:${item.expediente}:${item.dias}:${item.estado}:${item.archivado}:${item.salida||''}:${item.updatedAt||''}`).join('|'),transports.map(item=>`${item.id}:${item.expediente}:${item.fecha}:${item.inicio}:${item.fin}:${item.estado||''}`).join('|'),calendarEvents.map(item=>`${item.id}:${item.expediente}:${item.transporte}:${item.tipoServicio}:${item.fecha}:${item.inicio}:${item.fin}`).join('|')]);
   const draftFromCase=item=>draftInvoiceFromCase(item,warehouseEntries,transports,calendarEvents);
   const createDraft=item=>setEditing(draftFromCase(item));
   const archiveInvoice=item=>{
@@ -3912,11 +3913,11 @@ function InvoiceEditModal({item,cases=[],warehouseEntries=[],transports=[],calen
   const currentCargo=relatedCase?invoiceCargoSummary(relatedCase,warehouseEntries):'';
   const currentHeader=relatedCase?invoiceHeaderTitle(relatedCase):safeItem.concepto;
   const template=relatedCase?draftInvoiceFromCase(relatedCase,warehouseEntries,transports,calendarEvents):null;
-  const templateLines=asArray(template?.lines);
-  const storedItemLines=asArray(safeItem.lines);
+  const templateLines=invoiceLinesOf(template?.lines);
+  const storedItemLines=invoiceLinesOf(safeItem.lines);
   const storedLines=storedItemLines.length?storedItemLines:[{id:'line-1',item:safeItem.concepto||'TRANSPORT FROM WAREHOUSE TO VESSEL',detail:'',price:Number(safeItem.importe)||0,units:1,tax:'0%'}];
   const standardIds=new Set(['ref','reception','handling','storage','transport','waiting']);
-  const comparableLines=lines=>['ref','reception','handling','storage','transport','waiting'].map(id=>{const line=asArray(lines).find(entry=>entry.id===id);return line?[id,line.item,line.detail,Number(line.price)||0,Number(line.units)||0,line.tax||'0%']:null}).filter(Boolean);
+  const comparableLines=lines=>['ref','reception','handling','storage','transport','waiting'].map(id=>{const line=invoiceLinesOf(lines).find(entry=>entry.id===id);return line?[id,line.item,line.detail,Number(line.price)||0,Number(line.units)||0,line.tax||'0%']:null}).filter(Boolean);
   const storedLineIds=storedLines.map(line=>line.id||String(line.item||'').toLowerCase());
   const missingTemplateLine=templateLines.length>0&&templateLines.some(line=>!storedLineIds.includes(line.id));
   const changedTemplateLine=templateLines.length>0&&JSON.stringify(comparableLines(storedLines))!==JSON.stringify(comparableLines(templateLines));
