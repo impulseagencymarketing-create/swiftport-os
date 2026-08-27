@@ -428,6 +428,8 @@ const moneyExact=value=>new Intl.NumberFormat('es-ES',{style:'currency',currency
 const invoiceLineTotal=line=>(Number(line.price)||0)*(Number(line.units)||0);
 const asArray=value=>Array.isArray(value)?value:(value&&typeof value==='object'?Object.values(value):[]);
 const invoiceLinesOf=value=>asArray(value).flatMap(line=>Array.isArray(line)?line:[line]).filter(line=>line&&typeof line==='object');
+const invoiceText=value=>['string','number'].includes(typeof value)?String(value):'';
+const invoiceLineForEditor=(line,index=0)=>({...(line&&typeof line==='object'?line:{}),id:invoiceText(line?.id)||`line-${index+1}`,item:invoiceText(line?.item||line?.concepto)||'SERVICIO',detail:invoiceText(line?.detail||line?.detalle),price:Number(line?.price??line?.precio)||0,units:Number(line?.units??line?.unidades)||1,tax:invoiceText(line?.tax||line?.iva)||'0%'});
 const invoiceTotal=invoice=>invoiceLinesOf(invoice?.lines).reduce((sum,line)=>sum+invoiceLineTotal(line),0);
 const expenseAmount=value=>{const clean=String(value??'').replace(/\s/g,'').replace(/[^\d,.-]/g,'');if(clean.includes(',')&&clean.includes('.'))return Number(clean.replace(/\./g,'').replace(',','.'))||0;if(clean.includes(','))return Number(clean.replace(',','.'))||0;return Number(clean)||0};
 const caseExpenses=item=>Array.isArray(item?.gastos)?item.gastos:[];
@@ -3612,7 +3614,7 @@ function Facturacion({openCase,notify,invoices,cases,warehouseEntries=[],transpo
     {notReadyInvoices.length>0&&<section className="billing-hold-panel panel"><SectionHeader title="No listos / revisar" subtitle="Borradores guardados de expedientes que aún no están cerrados al 100%. No entran en el importe pendiente."/><div className="billing-ready-list">{notReadyInvoices.map(item=>{const related=relatedCaseForInvoice(item);return <article key={item.id} className="billing-ready-card warning"><span className="invoice-icon"><CircleAlert/></span><div><b>{item.expediente}  -  {related?.buque||item.buque||'BUQUE PENDIENTE'}</b><small>{item.cliente}  -  progreso {related?operationProgress(related):0}%  -  {related?.siguiente||'Expediente pendiente de completar'}</small><em>Este borrador queda reservado, pero no se considera listo para enviar.</em></div><div className="billing-ready-actions"><button className="button tertiary" onClick={()=>openCase(item.expediente)}>Ver expediente</button><button className="button secondary" onClick={()=>setEditing(item)}>Editar borrador</button>{canAdmin&&<button className="button secondary danger compact" onClick={()=>archiveInvoice(item)}><Archive/> Archivar</button>}</div></article>})}</div></section>}
     <section className="billing-hero"><div><span>Importe pendiente de gestión</span><strong>{money(total)}</strong><small>{activeInvoices.length} pendientes/enviados sin cerrar · facturados {invoicedInvoices.length} · costes {moneyExact(totalCosts)} · margen {moneyExact(total-totalCosts)}</small></div><div><span className="holded-mark">H</span><div><b>Holded conectado</b><small>El botón crea una proforma real. La factura final se hará cuando confirmemos el flujo.</small></div></div><button className="button primary" onClick={()=>notify('Holded listo: revisa un borrador y pulsa Enviar a Holded.')}><Download/> Proformas reales</button></section>
     <section className="panel"><SectionHeader title="Documentos de facturación" subtitle="Separa lo pendiente de lo enviado, facturado y archivado para cerrar el mes sin saltarte nada." action={<label className="billing-sort-control"><span>Ordenar por</span><select value={billingSort} onChange={event=>setBillingSort(event.target.value)}><option value="exp_desc">Expediente mayor → menor</option><option value="exp_asc">Expediente menor → mayor</option><option value="doc_desc">Documento mayor → menor</option><option value="doc_asc">Documento menor → mayor</option></select></label>}/><div className="billing-status-tabs">{billingBuckets.map(([value,label,count])=><button key={value} className={billingView===value?'active':''} onClick={()=>setBillingView(value)}>{label}<span>{count}</span></button>)}</div><div className="responsive-table billing-table"><div className="table-head"><span>Documento / expediente</span><span>Cliente</span><span>Concepto</span><span>Importe</span><span>Coste</span><span>Margen</span><span>Estado</span><span/></div>{sortedVisibleInvoices.length?sortedVisibleInvoices.map(item=><div className="table-row" key={item.id}><span className="primary-cell"><span className="invoice-icon"><ReceiptText/></span><span><b>{item.id}</b><button onClick={()=>openCase(item.expediente)}>{item.expediente}</button>{item.holdedStatus&&<small>Holded: {item.holdedStatus}{item.holdedNumber?`  -  ${item.holdedNumber}`:''}</small>}</span></span><span data-label="Cliente">{item.cliente}</span><span data-label="Concepto">{item.concepto}</span><strong data-label="Importe">{moneyExact(invoiceRevenue(item))}</strong><span data-label="Coste" className="billing-cost">{moneyExact(invoiceCostOf(item))}</span><strong data-label="Margen" className={invoiceMarginOf(item)<0?'billing-margin negative':'billing-margin'}>{moneyExact(invoiceMarginOf(item))}</strong><span data-label="Estado"><Badge>{item.estado}</Badge></span><span className="billing-row-actions"><button className="icon-button" aria-label={'Editar '+item.id} onClick={()=>setEditing(item)}><PencilLine/></button>{canAdmin&&item.estado!=='Archivado'&&<button className="icon-button danger" aria-label={'Archivar '+item.id} onClick={()=>archiveInvoice(item)} title="Archivar de facturación"><Archive/></button>}<button className="button secondary compact" disabled={sendingHolded===item.id||['Enviado a Holded','Facturado','Cobrado','Archivado'].includes(item.estado)} onClick={()=>sendHolded(item)}>{sendingHolded===item.id?'Enviando…':'Enviar a Holded'}</button></span></div>):<Empty text={billingView==='pending'?'No hay facturas pendientes en este filtro.':'No hay documentos en este estado.'}/>}</div></section>
-    {editing&&<InvoiceEditModal item={editing} cases={cases} warehouseEntries={warehouseEntries} transports={transports} calendarEvents={calendarEvents} clients={clients} close={()=>setEditing(null)} submit={item=>{updateInvoice(item);setEditing(null)}} simulateHolded={item=>{sendHolded(item);setEditing(null)}}/>}
+    {editing&&<InvoiceModalBoundary key={invoiceText(editing.id)} close={()=>setEditing(null)}><InvoiceEditModal item={editing} cases={cases} warehouseEntries={warehouseEntries} transports={transports} calendarEvents={calendarEvents} clients={clients} close={()=>setEditing(null)} submit={item=>{updateInvoice(item);setEditing(null)}} simulateHolded={item=>{sendHolded(item);setEditing(null)}}/></InvoiceModalBoundary>}
   </>;
 }
 const MAIL_STATUS={review:'Revisar',processed:'Creado',ignored:'Descartado',error:'Error'};
@@ -3903,6 +3905,11 @@ function ClientEditModal({item,close,submit}){
   return <div className="modal-backdrop" onMouseDown={event=>{if(event.target===event.currentTarget)close()}}><section className="modal client-profile-modal" role="dialog" aria-modal="true"><div className="modal-head"><div><span className="overline">{form.codigo}</span><h2>Ficha de cliente</h2><p>Datos que se reutilizan en facturación y tarifas automáticas.</p></div><button className="icon-button" onClick={close}><X/></button></div><form onSubmit={event=>{event.preventDefault();submit({...form,expedientes:Number(form.expedientes)||0})}}><div className="client-form-section wide"><b>Datos fiscales</b></div><label className="field"><span>Nombre comercial *</span><input name="nombre" value={form.nombre} onChange={update} required autoFocus/></label><label className="field"><span>Razón social</span><input name="fiscalName" value={form.fiscalName} onChange={update}/></label><label className="field"><span>NIF / VAT</span><input name="taxId" value={form.taxId} onChange={update}/></label><label className="field"><span>Expedientes activos</span><input name="expedientes" type="number" min="0" value={form.expedientes} onChange={update}/></label><label className="field wide"><span>Dirección fiscal</span><input name="direccion" value={form.direccion} onChange={update}/></label><div className="client-form-section wide"><b>Contacto y pago</b></div><label className="field"><span>Email de contacto</span><input name="contacto" type="email" value={form.contacto} onChange={update}/></label><label className="field"><span>Teléfono</span><input name="telefono" value={form.telefono} onChange={update}/></label><label className="field"><span>Condiciones de pago</span><input name="condicionesPago" value={form.condicionesPago} onChange={update}/></label><label className="field"><span>Moneda</span><input name="moneda" value={form.moneda} onChange={update}/></label><div className="client-form-section wide"><b>Tarifa de facturación</b><small>Por ahora la tarifa automática real está activa para LIMANI.</small></div><label className="field wide"><span>Tarifa activa</span><input name="tarifaActiva" value={form.tarifaActiva} onChange={update}/></label><label className="field wide"><span>Recepción</span><input name="recepcion" value={form.recepcion} onChange={update}/></label><label className="field wide"><span>Storage</span><input name="storage" value={form.storage} onChange={update}/></label><label className="field wide"><span>Transporte</span><input name="transporte" value={form.transporte} onChange={update}/></label><label className="field wide"><span>Recargo fuera de horario / festivos</span><input name="recargo" value={form.recargo} onChange={update}/></label><label className="field wide"><span>Notas internas</span><input name="notas" value={form.notas} onChange={update} placeholder="Preferencias, emails habituales, excepciones…"/></label><div className="modal-actions wide"><button type="button" className="button tertiary" onClick={close}>Cancelar</button><button className="button primary"><Save/> Guardar ficha</button></div></form></section></div>;
 }
 function InvoiceEditModal({item,cases=[],warehouseEntries=[],transports=[],calendarEvents=[],clients=[],close,submit,simulateHolded}){
+class InvoiceModalBoundary extends React.Component{
+  constructor(props){super(props);this.state={failed:false}}
+  static getDerivedStateFromError(){return {failed:true}}
+  render(){return this.state.failed?<div className="modal-backdrop"><section className="modal"><div className="modal-head"><div><span className="overline">Facturación</span><h2>No se pudo leer este borrador</h2><p>El borrador contiene datos antiguos incompatibles. Cierra esta ventana y vuelve a intentarlo tras recargar.</p></div><button className="icon-button" onClick={this.props.close}><X/></button></div><div className="modal-actions"><button className="button primary" onClick={this.props.close}>Cerrar</button></div></section></div>:this.props.children}
+}
   const safeItem=item&&typeof item==='object'?item:{};
   const relatedCase=cases.find(entry=>entry.id===safeItem.expediente);
   const clientProfiles=mergeClientProfiles(clients);
@@ -3910,11 +3917,14 @@ function InvoiceEditModal({item,cases=[],warehouseEntries=[],transports=[],calen
     const key=clientProfileKey({nombre:value});
     return clientProfiles.find(profile=>clientProfileKey(profile)===key)||clientProfiles.find(profile=>String(profile.nombre||'').toLowerCase().includes(String(value||'').toLowerCase())&&String(value||'').trim().length>=3);
   };
-  const currentCargo=relatedCase?invoiceCargoSummary(relatedCase,warehouseEntries):'';
-  const currentHeader=relatedCase?invoiceHeaderTitle(relatedCase):safeItem.concepto;
-  const template=relatedCase?draftInvoiceFromCase(relatedCase,warehouseEntries,transports,calendarEvents):null;
-  const templateLines=invoiceLinesOf(template?.lines);
-  const storedItemLines=invoiceLinesOf(safeItem.lines);
+  let currentCargo='';
+  let currentHeader=invoiceText(safeItem.concepto);
+  let template=null;
+  try{currentCargo=relatedCase?invoiceText(invoiceCargoSummary(relatedCase,warehouseEntries)):''}catch{currentCargo=''}
+  try{currentHeader=relatedCase?invoiceText(invoiceHeaderTitle(relatedCase)):currentHeader}catch{}
+  try{template=relatedCase?draftInvoiceFromCase(relatedCase,warehouseEntries,transports,calendarEvents):null}catch{template=null}
+  const templateLines=invoiceLinesOf(template?.lines).map(invoiceLineForEditor);
+  const storedItemLines=invoiceLinesOf(safeItem.lines).map(invoiceLineForEditor);
   const storedLines=storedItemLines.length?storedItemLines:[{id:'line-1',item:safeItem.concepto||'TRANSPORT FROM WAREHOUSE TO VESSEL',detail:'',price:Number(safeItem.importe)||0,units:1,tax:'0%'}];
   const standardIds=new Set(['ref','reception','handling','storage','transport','waiting']);
   const comparableLines=lines=>['ref','reception','handling','storage','transport','waiting'].map(id=>{const line=invoiceLinesOf(lines).find(entry=>entry.id===id);return line?[id,line.item,line.detail,Number(line.price)||0,Number(line.units)||0,line.tax||'0%']:null}).filter(Boolean);
@@ -3923,25 +3933,30 @@ function InvoiceEditModal({item,cases=[],warehouseEntries=[],transports=[],calen
   const changedTemplateLine=templateLines.length>0&&JSON.stringify(comparableLines(storedLines))!==JSON.stringify(comparableLines(templateLines));
   const shouldUseTemplate=templateLines.length>0&&(storedLines.length<4||missingTemplateLine||changedTemplateLine||/^SPL/i.test(String(storedLines[0]?.item||'')));
   const customLines=storedLines.filter(line=>!standardIds.has(line.id));
-  const initialLines=(shouldUseTemplate?[...templateLines,...customLines]:storedLines).map((line,index)=>currentCargo?{...line,item:index===0?currentHeader:line.item,detail:line.detail||currentCargo}:line);
-  const [form,setForm]=useState({...safeItem,...template,id:safeItem.id,expediente:safeItem.expediente||template?.expediente,cliente:template?.cliente||safeItem.cliente,buque:template?.buque||safeItem.buque,puerto:template?.puerto||safeItem.puerto,concepto:currentHeader||template?.concepto||safeItem.concepto,estado:safeItem.estado||template?.estado||'Borrador',vencimiento:safeItem.vencimiento||template?.vencimiento||'',observaciones:safeItem.observaciones||template?.observaciones||'',proforma:safeItem.proforma||template?.proforma||'',payment:safeItem.payment||template?.payment||'',supplierInvoices:asArray(safeItem.supplierInvoices),supplierText:safeItem.supplierText||'',lines:initialLines});
-  const [supplierText,setSupplierText]=useState(safeItem.supplierText||'');
+  const initialLines=(shouldUseTemplate?[...templateLines,...customLines]:storedLines).map((line,index)=>invoiceLineForEditor(currentCargo?{...line,item:index===0?currentHeader:line.item,detail:line.detail||currentCargo}:line,index));
+  const [form,setForm]=useState({...safeItem,...template,id:invoiceText(safeItem.id),expediente:invoiceText(safeItem.expediente||template?.expediente),cliente:invoiceText(template?.cliente||safeItem.cliente),buque:invoiceText(template?.buque||safeItem.buque),puerto:invoiceText(template?.puerto||safeItem.puerto),concepto:invoiceText(currentHeader||template?.concepto||safeItem.concepto),estado:invoiceText(safeItem.estado||template?.estado)||'Borrador',vencimiento:invoiceText(safeItem.vencimiento||template?.vencimiento),observaciones:invoiceText(safeItem.observaciones||template?.observaciones),proforma:invoiceText(safeItem.proforma||template?.proforma),payment:invoiceText(safeItem.payment||template?.payment),supplierInvoices:invoiceLinesOf(safeItem.supplierInvoices),supplierText:invoiceText(safeItem.supplierText),lines:initialLines});
+  const [supplierText,setSupplierText]=useState(invoiceText(safeItem.supplierText));
   const [supplierNote,setSupplierNote]=useState('');
   const [supplierScanning,setSupplierScanning]=useState(false);
   const [selectedTariffConcept,setSelectedTariffConcept]=useState('');
-  const manualInvoiceWeight=invoiceLinesWeight(form.lines);
-  const manualInvoiceCargo=invoiceLinesCargoSummary(form.lines);
+  let manualInvoiceWeight=0;
+  let manualInvoiceCargo='';
+  try{manualInvoiceWeight=invoiceLinesWeight(form.lines);manualInvoiceCargo=invoiceLinesCargoSummary(form.lines)}catch{}
   const billingCase=relatedCase?{...relatedCase,cliente:form.cliente}:null;
-  const tariffConceptOptions=billingCase?invoiceTariffConceptOptions(billingCase,warehouseEntries,transports,calendarEvents,{manualWeight:manualInvoiceWeight,manualCargo:manualInvoiceCargo}):[];
+  let tariffConceptOptions=[];
+  try{tariffConceptOptions=billingCase?invoiceTariffConceptOptions(billingCase,warehouseEntries,transports,calendarEvents,{manualWeight:manualInvoiceWeight,manualCargo:manualInvoiceCargo}):[]}catch{tariffConceptOptions=[]}
   const selectedClient=findClientProfile(form.cliente);
   const applyClient=value=>{
     const profile=findClientProfile(value);
     const clientName=profile?.nombre||value;
     if(relatedCase){
-      const repriced=draftInvoiceFromCase({...relatedCase,cliente:clientName},warehouseEntries,transports,calendarEvents);
-      const templateIds=new Set(repriced.lines.map(line=>line.id));
+      let repriced=null;
+      try{repriced=draftInvoiceFromCase({...relatedCase,cliente:clientName},warehouseEntries,transports,calendarEvents)}catch{}
+      if(!repriced){setForm({...form,cliente:clientName});return}
+      const repricedLines=invoiceLinesOf(repriced.lines).map(invoiceLineForEditor);
+      const templateIds=new Set(repricedLines.map(line=>line.id));
       const customLines=form.lines.filter(line=>!standardIds.has(line.id)&&!templateIds.has(line.id));
-      setForm({...form,cliente:clientName,concepto:repriced.concepto,buque:repriced.buque,puerto:repriced.puerto,lines:[...repriced.lines,...customLines]});
+      setForm({...form,cliente:clientName,concepto:invoiceText(repriced.concepto),buque:invoiceText(repriced.buque),puerto:invoiceText(repriced.puerto),lines:[...repricedLines,...customLines]});
       return;
     }
     setForm({...form,cliente:clientName});
