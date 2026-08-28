@@ -2618,8 +2618,8 @@ const layoutOverlappingEvents=events=>{
   const finishCluster=()=>{
     if(!cluster.length)return;
     const rawColumns=Math.max(1,...cluster.map(item=>item._lane+1));
-    const columns=Math.min(rawColumns,2);
-    cluster.forEach(item=>result.push({...item,_columns:columns,_lane:item._lane%columns,_stackOffset:Math.floor(item._lane/columns),_rawColumns:rawColumns}));
+    const columns=rawColumns;
+    cluster.forEach(item=>result.push({...item,_columns:columns,_lane:item._lane,_stackOffset:0,_rawColumns:rawColumns}));
     cluster=[];active=[];clusterEnd=-1;
   };
   sorted.forEach(event=>{
@@ -2783,7 +2783,7 @@ function DraggableCalendarEvent({event,cases,team,saveEvent,setEditing,openCase,
     if(click.target?.closest?.('.calendar-event-delete,.calendar-event-edit,.calendar-driver-quick,select,input'))return;
     clean.expediente?openCase(clean.expediente):setEditing(clean);
   };
-  return <article onPointerDown={pointer=>startPointerDrag(pointer,clean)} onClick={openRelated} className={`calendar-event ${event.color} ${event._columns>1?'is-overlap':''} ${draggingId===event.id?'dragging':''}`} style={calendarEventStyle(event)} title={`${event.inicio}–${event.fin}  -  ${event.titulo||event.id}`}>
+  return <article onPointerDown={pointer=>startPointerDrag(pointer,clean)} onClick={openRelated} className={`calendar-event ${event.color} ${event._columns>1?'is-overlap':''} ${event._columns>2?'many-overlaps':''} ${draggingId===event.id?'dragging':''}`} style={calendarEventStyle(event)} title={`${event.inicio}–${event.fin}  -  ${event.titulo||event.id}`}>
     <button className="calendar-event-open" title={clean.expediente?'Abrir expediente':'Editar servicio'} onPointerDown={pointer=>pointer.stopPropagation()} onClick={click=>{click.stopPropagation();openRelated(click)}}><CalendarEventContent event={event} cases={cases}/></button>
     <CalendarDriverSelect event={event} team={team} saveEvent={saveEvent}/>
     <button type="button" className="calendar-event-edit" title="Editar servicio" onClick={click=>{click.stopPropagation();setEditing(clean)}}><PencilLine/></button>

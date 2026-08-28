@@ -1220,6 +1220,12 @@
 .calendar-event{
   min-height:72px!important;
 }
+.calendar-event.many-overlaps .calendar-route,
+.calendar-event.many-overlaps .calendar-service,
+.calendar-event.many-overlaps .calendar-port-call,
+.calendar-event.many-overlaps .calendar-driver-quick span{display:none!important}
+.calendar-event.many-overlaps .calendar-vessel-name,.calendar-event.many-overlaps .calendar-port-name{font-size:9px!important;overflow-wrap:anywhere!important}
+.calendar-event.many-overlaps .calendar-driver-quick select{font-size:8px!important;padding-inline:2px!important}
 .calendar-unscheduled-card{
   min-height:86px!important;
 }
