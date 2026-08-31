@@ -50,7 +50,7 @@ $sql = 'SELECT id, mailbox, received_at, sender_name, sender_email, subject, bod
 if ($where !== []) {
     $sql .= ' WHERE ' . implode(' AND ', $where);
 }
-$sql .= ' ORDER BY COALESCE(received_at, created_at) DESC LIMIT 200';
+$sql .= ' ORDER BY COALESCE(received_at, created_at) DESC, id DESC LIMIT 200';
 
 $statement = db()->prepare($sql);
 $statement->execute($parameters);
