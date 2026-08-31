@@ -3301,7 +3301,7 @@ function Expedientes({cases,selected,select,search,setSearch,completeCaseStep,no
   return <div className={'case-layout '+(mobileDetail?'mobile-detail-open':'')}>
     <section className={'panel case-list '+(selected?'has-selection':'')}><div className="list-toolbar"><label className="search-box"><Search/><input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Buscar número, buque, ETA o puerto…"/></label><div className="filter-chips">{['Todos','En curso','Cancelados','Completados'].map(value=><button key={value} className={filter===value?'active':''} onClick={()=>setFilter(value)}>{value}</button>)}</div></div><div className="case-count">{filtered.length} expedientes</div>{filtered.length?filtered.map(item=><button key={item.id} className={'case-card port-'+portTone(item.puerto)+' '+(selected.id===item.id?'selected':'')} onClick={()=>{select(item.id);setMobileDetail(true)}}><div className="case-card-top"><span className="ship-icon"><Ship/></span><span><b>{caseLabel(item)}</b><small>{item.cliente}</small></span><Badge>{item.estado}</Badge></div><span className={'service-type-badge '+serviceTypeOf(item)}>{serviceTypeMeta(item).short}</span><div className="case-card-meta"><span><MapPin/>{item.puerto}</span><span><CalendarDays/>{item.eta}</span></div><div className="case-progress"><span><i style={{width:item.progreso+'%'}}/></span><small>{item.progreso}%</small></div><p><b>Siguiente:</b> {item.siguiente}</p></button>):<Empty text="Prueba con otro término o estado."/>}</section>
     <section className="panel case-detail"><button className="mobile-detail-back" onClick={()=>setMobileDetail(false)}><ArrowLeft/> Expedientes</button><div className="detail-hero"><div><div className="detail-id">{selected.id} <Badge>{selected.estado}</Badge></div><h2>{selected.buque}</h2><p>{selected.cliente}  -  {selected.puerto}</p><span className={'service-type-badge large '+serviceTypeOf(selected)}>{serviceTypeMeta(selected).label}</span></div><div className="detail-actions"><button className="icon-button" aria-label="Editar expediente" onClick={()=>setEditOpen(true)}><PencilLine/></button>{(hasRole(currentUser,'operations')||hasRole(currentUser,'admin'))&&<button className="icon-button danger" aria-label="Borrar expediente" onClick={()=>deleteCase(selected.id)}><Trash2/></button>}</div></div><div className={'detail-stats '+(!showFinance?'detail-stats-three':'')}><Stat label="ETA" value={selected.eta} icon={Clock3}/><Stat label="Mercancía" value={selected.bultos+' bultos  -  '+selected.peso} icon={Box}/><Stat label="Conductor" value={selected.conductor} icon={UserRound}/>{showFinance&&<Stat label="Importe previsto" value={money(selected.importe)} icon={BadgeEuro}/>}</div><PortCallPanel item={selected}/><OperationChecklist item={selected} csrfToken={csrfToken} reloadOperational={reloadOperational} notify={notify} currentRoles={currentUser} onStepSelect={openFlowStep}/><CaseStepReopenPanel item={selected} reopen={key=>reopenCaseStep?.(selected.id,key)}/><ShipmentDocuments item={selected} onDelete={(file,scope)=>deleteAttachment?.(selected.id,scope||'shipment',file,(selected.recepciones||[]).find(record=>(record.documentos||[]).some(stored=>sameAttachment(stored,file)))?.ref)} onUpload={files=>attachCaseFiles('shipment',files)} uploading={postUpload==='shipment'}/><div className="detail-columns"><div><h3>Línea temporal real</h3><ActualTimeline item={selected}/></div><aside className="detail-side"><div className={'next-action '+(operationFlow(selected).billingReady?'complete':'')}><span>{operationFlow(selected).billingReady?'Operativa completada':'Próxima acción'}</span><b>{selected.siguiente}</b><p>{operationFlow(selected).billingReady?'El POD está registrado y el expediente ha pasado a facturación.':'Sigue el paso indicado para que todo el equipo trabaje igual.'}</p><button className="button primary full" disabled={operationFlow(selected).billingReady} onClick={()=>openFlowStep(null)}><ClipboardCheck/> {operationFlow(selected).billingReady?'Listo para facturar':'Registrar siguiente paso'}</button></div><PodDocuments item={selected} notify={notify} onDelete={(file,scope)=>deleteAttachment?.(selected.id,scope,file)} onUploadPod={files=>attachCaseFiles('pod',files)} onUploadDeliveryPhoto={files=>attachCaseFiles('delivery-photo',files)} uploading={postUpload}/>{(hasRole(currentUser,'operations')||hasRole(currentUser,'admin'))&&<button className="button danger full" onClick={()=>deleteCase(selected.id)}><Trash2/> Borrar expediente</button>}</aside></div></section>
-    {(hasRole(currentUser,'operations')||hasRole(currentUser,'admin'))&&<section className="panel case-mails-panel"><CaseEmailsPanel caseRef={selected.id}/></section>}
+    {(hasRole(currentUser,'operations')||hasRole(currentUser,'admin'))&&<section className="panel case-mails-panel"><CaseEmailsPanel item={selected} csrfToken={csrfToken} notify={notify}/></section>}
     <section className="panel case-services-panel"><CaseServicesPanel item={selected} events={calendarEvents} cases={cases} transports={transports} team={team} providers={providers} warehouseEntries={warehouseEntries} saveEvent={saveEvent}/></section>
     <section className="panel case-load-panel"><CaseLoadPanel item={selected} warehouseEntries={warehouseEntries} events={calendarEvents}/></section>
     {showFinance&&<section className="panel client-cost-panel"><ClientCostPanel item={selected} warehouseEntries={warehouseEntries} updateCase={updateCase} notify={notify}/></section>}
@@ -3311,20 +3311,80 @@ function Expedientes({cases,selected,select,search,setSearch,completeCaseStep,no
     {flowOpen&&<OperationStepModal item={selected} warehouseEntries={warehouseEntries} transports={transports} csrfToken={csrfToken} currentUser={currentUser} onEvidenceUploaded={onEvidenceUploaded} initialStepKey={flowStep} close={()=>{setFlowOpen(false);setFlowStep(null)}} submit={(key,note,evidence)=>{if(completeCaseStep(selected.id,key,note,evidence)){setFlowOpen(false);setFlowStep(null)}}}/>}
   </div>;
 }
-function CaseEmailsPanel({caseRef}){
-  const [items,setItems]=useState([]);
+function CaseEmailsPanel({item,csrfToken,notify}){
+  const caseRef=item.id;
+  const [linked,setLinked]=useState([]);
+  const [candidates,setCandidates]=useState([]);
+  const [selectedIds,setSelectedIds]=useState([]);
+  const [search,setSearch]=useState('');
+  const [mailboxFilter,setMailboxFilter]=useState('all');
   const [loading,setLoading]=useState(true);
+  const [syncing,setSyncing]=useState(false);
+  const [saving,setSaving]=useState(false);
   const [error,setError]=useState('');
-  useEffect(()=>{
-    let active=true;
+  const loadVersion=useRef(0);
+  const load=async()=>{
+    const version=++loadVersion.current;
     setLoading(true);setError('');
-    api('/api/mail/inbox.php?case_ref='+encodeURIComponent(caseRef))
-      .then(result=>{if(active)setItems(result.items||[])})
-      .catch(reason=>{if(active)setError(reason.message)})
-      .finally(()=>{if(active)setLoading(false)});
-    return()=>{active=false};
-  },[caseRef]);
-  return <><SectionHeader title="Correos vinculados" subtitle={loading?'Consultando bandeja…':`${items.length} correo(s) asociados a ${caseRef}`}/>{error&&<div className="form-error"><CircleAlert/>{error}</div>}{!loading&&items.length?<div className="case-mail-list">{items.map(item=><details key={item.id}><summary><span className="mail-source">{String(item.mailbox||'').toLowerCase().includes('operations@')?'operations@':'info@'}</span><span><b>{item.subject||'Sin asunto'}</b><small>{item.sender_name||item.sender_email} · {formatReceptionDate(item.received_at)}</small></span><ChevronRight/></summary><pre>{item.body}</pre></details>)}</div>:!loading&&!error&&<div className="case-mails-empty"><Mail/><span><b>Sin correos vinculados</b><small>Ve a Correos, elige este expediente y pulsa Vincular.</small></span></div>}</>;
+    try{
+      const [linkedResult,candidateResult]=await Promise.all([
+        api('/api/mail/inbox.php?case_ref='+encodeURIComponent(caseRef)),
+        api('/api/mail/inbox.php?link=unlinked')
+      ]);
+      if(version!==loadVersion.current)return;
+      setLinked([...(linkedResult.items||[])].sort(newestMailFirst));
+      setCandidates([...(candidateResult.items||[])].sort(newestMailFirst));
+      setSelectedIds([]);
+    }catch(reason){if(version===loadVersion.current)setError(reason.message)}finally{if(version===loadVersion.current)setLoading(false)}
+  };
+  useEffect(()=>{load()},[caseRef]);
+  const mailboxLabel=value=>String(value||'').toLowerCase().includes('operations@')?'operations@':'info@';
+  const searchable=mail=>[mail.subject,mail.sender_name,mail.sender_email,mail.body,mail.extracted?.vessel,mail.extracted?.port].filter(Boolean).join(' ').toLowerCase();
+  const vesselNeedle=String(item.buque||'').trim().toLowerCase();
+  const caseNeedle=String(caseRef).toLowerCase();
+  const suggested=mail=>{const text=searchable(mail);return Boolean((vesselNeedle&&text.includes(vesselNeedle))||text.includes(caseNeedle))};
+  const visibleCandidates=candidates
+    .filter(mail=>mailboxFilter==='all'||mailboxLabel(mail.mailbox)===`${mailboxFilter}@`)
+    .filter(mail=>searchable(mail).includes(search.trim().toLowerCase()))
+    .sort((a,b)=>Number(suggested(b))-Number(suggested(a))||newestMailFirst(a,b));
+  const toggle=id=>setSelectedIds(current=>current.includes(id)?current.filter(value=>value!==id):[...current,id]);
+  const linkSelected=async()=>{
+    if(!selectedIds.length)return;
+    setSaving(true);setError('');
+    try{
+      for(const id of selectedIds)await api('/api/mail/review.php',{method:'PUT',headers:{'X-CSRF-Token':csrfToken},body:jsonBody({id,action:'link',caseRef})});
+      notify?.(`${selectedIds.length} correo(s) vinculado(s) a ${caseRef}`);
+      await load();
+    }catch(reason){const message=reason.message;await load();setError(message)}finally{setSaving(false)}
+  };
+  const unlink=async mail=>{
+    setSaving(true);setError('');
+    try{
+      await api('/api/mail/review.php',{method:'PUT',headers:{'X-CSRF-Token':csrfToken},body:jsonBody({id:mail.id,action:'unlink'})});
+      notify?.('Correo desvinculado');
+      await load();
+    }catch(reason){setError(reason.message)}finally{setSaving(false)}
+  };
+  const sync=async()=>{
+    setSyncing(true);setError('');
+    try{
+      const result=await api('/api/mail/process.php',{method:'POST',headers:{'X-CSRF-Token':csrfToken},body:'{}'});
+      notify?.(`${Number(result.summary?.scanned||0)} correo(s) nuevo(s) encontrados`);
+      await load();
+    }catch(reason){setError(reason.message)}finally{setSyncing(false)}
+  };
+  const allVisibleSelected=visibleCandidates.length>0&&visibleCandidates.every(mail=>selectedIds.includes(mail.id));
+  return <>
+    <SectionHeader title="Emails del barco" subtitle={loading?'Consultando operations@ e info@…':`${linked.length} vinculado(s) · ${candidates.length} disponible(s) para seleccionar`} action={<button className="button secondary" disabled={loading||syncing||saving} onClick={sync}><RefreshCw className={syncing?'spinning':''}/>{syncing?'Actualizando…':'Actualizar bandejas'}</button>}/>
+    {error&&<div className="form-error"><CircleAlert/>{error}</div>}
+    <div className="case-mail-picker">
+      <div className="case-mail-picker-head"><div><b>Seleccionar correos para {item.buque}</b><small>Marca todos los mensajes de operations@ o info@ que pertenezcan a este expediente.</small></div><button className="button primary" disabled={!selectedIds.length||saving} onClick={linkSelected}><FolderKanban/>{saving?'Vinculando…':`Vincular ${selectedIds.length||''} seleccionado${selectedIds.length===1?'':'s'}`}</button></div>
+      <div className="case-mail-picker-tools"><label className="search-box"><Search/><input value={search} onChange={event=>setSearch(event.target.value)} placeholder={`Buscar ${item.buque}, remitente, asunto o texto…`}/></label><div className="mail-filters">{[['all','Todos'],['operations','operations@'],['info','info@']].map(([value,label])=><button key={value} className={mailboxFilter===value?'active':''} onClick={()=>setMailboxFilter(value)}>{label}</button>)}</div><button className="text-button" disabled={!visibleCandidates.length} onClick={()=>setSelectedIds(current=>allVisibleSelected?current.filter(id=>!visibleCandidates.some(mail=>mail.id===id)):[...new Set([...current,...visibleCandidates.map(mail=>mail.id)])])}>{allVisibleSelected?'Quitar visibles':'Seleccionar visibles'}</button></div>
+      {loading?<div className="users-loading">Cargando emails…</div>:visibleCandidates.length?<div className="case-mail-candidates">{visibleCandidates.map(mail=>{const checked=selectedIds.includes(mail.id);const recommended=suggested(mail);return <label key={mail.id} className={`case-mail-candidate${checked?' selected':''}${recommended?' recommended':''}`}><input type="checkbox" checked={checked} onChange={()=>toggle(mail.id)}/><span className="mail-source">{mailboxLabel(mail.mailbox)}</span><span><b>{mail.subject||'Sin asunto'}</b><small>{mail.sender_name||mail.sender_email} · {formatReceptionDate(mail.received_at)}</small><p>{String(mail.body||'').replace(/\s+/g,' ').slice(0,180)}</p></span>{recommended&&<em>Sugerido para este barco</em>}</label>})}</div>:<div className="case-mails-empty compact"><Mail/><span><b>No hay correos disponibles con este filtro</b><small>Actualiza las bandejas o prueba otra búsqueda.</small></span></div>}
+    </div>
+    <div className="case-linked-mail-head"><b>Ya vinculados a {caseRef}</b><small>{linked.length} correo(s)</small></div>
+    {!loading&&linked.length?<div className="case-mail-list">{linked.map(mail=><details key={mail.id}><summary><span className="mail-source">{mailboxLabel(mail.mailbox)}</span><span><b>{mail.subject||'Sin asunto'}</b><small>{mail.sender_name||mail.sender_email} · {formatReceptionDate(mail.received_at)}</small></span><ChevronRight/></summary><pre>{mail.body}</pre><footer><button className="button tertiary" disabled={saving} onClick={()=>unlink(mail)}>Desvincular de {caseRef}</button></footer></details>)}</div>:!loading&&!error&&<div className="case-mails-empty"><Mail/><span><b>Todavía no hay correos vinculados</b><small>Selecciona uno o varios mensajes arriba y pulsa Vincular.</small></span></div>}
+  </>;
 }
 function CaseServicesPanel({item,events,cases,transports,team,providers,warehouseEntries=[],saveEvent}){
   const [editing,setEditing]=useState(null);
