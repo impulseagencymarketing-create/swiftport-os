@@ -603,3 +603,110 @@
   .notification-drawer{left:0;width:100vw}
   .delivery-popup{left:12px;right:12px;top:92px;width:auto}
 }
+
+/* Final dark-theme surface pass. Keep this block last so legacy light rules cannot win. */
+:root[data-theme="dark"] :is(
+  .case-service-list>button,
+  .case-services-empty,
+  .case-load-empty,
+  .case-load-selected,
+  .load-cargo-card,
+  .load-cargo-card header,
+  .load-cargo-meta,
+  .load-pieces p,
+  .load-photo-grid a,
+  .load-doc-list a,
+  .client-cost-footer span,
+  .route-preview,
+  .calendar-help,
+  .calendar-clean-bar,
+  .calendar-zone,
+  .calendar-unscheduled-row,
+  .calendar-unscheduled-row>span,
+  .calendar-unscheduled-row>div,
+  .calendar-view-switch,
+  .notification-card,
+  .notification-empty,
+  .invoice-client-hint
+){background:#101c29!important;color:#f2f6fb!important;border-color:#314256!important}
+
+:root[data-theme="dark"] :is(
+  .case-service-list>button b,
+  .load-cargo-card header b,
+  .load-pieces p,
+  .load-photo-grid a,
+  .load-doc-list a,
+  .client-cost-footer b,
+  .port-call-panel b,
+  .calendar-head b,
+  .calendar-event b,
+  .calendar-event strong,
+  .calendar-unscheduled-card b,
+  .calendar-month-event b,
+  .notification-card b,
+  .invoice-client-hint b
+){color:#f5f8fc!important}
+
+:root[data-theme="dark"] :is(
+  .case-service-list>button small,
+  .load-cargo-card small,
+  .load-cargo-meta,
+  .load-photo-grid small,
+  .load-doc-list small,
+  .calendar-help,
+  .calendar-event small,
+  .calendar-unscheduled-card small,
+  .notification-card p,
+  .notification-card small
+){color:#a8b5c5!important}
+
+:root[data-theme="dark"] .load-cargo-card header{background:#142333!important}
+:root[data-theme="dark"] .load-cargo-card header>span{background:#183653!important;color:#8bc3ff!important;border-color:#31597d!important}
+:root[data-theme="dark"] .load-pieces p,
+:root[data-theme="dark"] .load-photo-grid a,
+:root[data-theme="dark"] .load-doc-list a{background:#0c1722!important}
+:root[data-theme="dark"] .client-cost-note{background:#3a2c18!important;color:#f4ca78!important;border-color:#6f5323!important}
+:root[data-theme="dark"] .client-cost-note :is(b,span,p){color:inherit!important}
+:root[data-theme="dark"] .client-cost-footer span{background:#101c29!important}
+
+:root[data-theme="dark"] .port-call-panel>div{background:#101c29!important;color:#f2f6fb!important;border-color:#314256!important}
+:root[data-theme="dark"] .port-call-panel>footer{background:#13283b!important;color:#dcecff!important;border-color:#31506c!important}
+:root[data-theme="dark"] .driver-job-main .driver-port-call{background:#101c29!important;color:#f2f6fb!important;border-color:#314256!important}
+
+:root[data-theme="dark"] :is(.calendar-shell,.calendar-body,.calendar-scroll){background:#0b151f!important}
+:root[data-theme="dark"] .calendar-head{background:#0d1824!important;color:#f2f6fb!important;border-color:#314256!important}
+:root[data-theme="dark"] .calendar-head>div{border-color:#314256!important}
+:root[data-theme="dark"] .calendar-hours{background:#0d1824!important;color:#91a6bc!important;border-color:#314256!important}
+:root[data-theme="dark"] .calendar-day{background:#101b28!important;border-color:#314256!important}
+:root[data-theme="dark"] .calendar-line{border-color:#293a4d!important}
+:root[data-theme="dark"] .calendar-month-day,
+:root[data-theme="dark"] .calendar-month-head b{background:#101b28!important;color:#f2f6fb!important;border-color:#314256!important}
+:root[data-theme="dark"] .calendar-day.drop-target,
+:root[data-theme="dark"] .calendar-month-day.drop-target{background:#153653!important;box-shadow:inset 0 0 0 2px #55a7ff!important}
+:root[data-theme="dark"] .calendar-driver-quick{background:#0d1824!important;border-color:#314256!important}
+:root[data-theme="dark"] :is(.calendar-driver-quick select,.calendar-event>select,.calendar-unscheduled-card select){background:#09141f!important;color:#f5f8fc!important;border-color:#3b526a!important}
+:root[data-theme="dark"] .calendar-event-open{background:transparent!important}
+:root[data-theme="dark"] .calendar-event-edit,
+:root[data-theme="dark"] .calendar-event-delete{background:#142333!important;color:#cfe6ff!important;border-color:#3b526a!important}
+:root[data-theme="dark"] .overlap-indicator{background:#0b1621!important;color:#eef6ff!important;border-color:#4a6077!important}
+:root[data-theme="dark"] .calendar-provisional{background:#3a2c18!important;color:#f4ca78!important;border-color:#806027!important}
+
+:root[data-theme="dark"] :is(.calendar-event.blue,.calendar-unscheduled-card.blue,.calendar-month-event.blue){background:#153452!important;color:#a8d3ff!important;border-color:#4f9cff!important}
+:root[data-theme="dark"] :is(.calendar-event.teal,.calendar-unscheduled-card.teal,.calendar-month-event.teal){background:#143a37!important;color:#9ce0d6!important;border-color:#35a99a!important}
+:root[data-theme="dark"] :is(.calendar-event.orange,.calendar-unscheduled-card.orange,.calendar-month-event.orange){background:#402f1b!important;color:#ffd18a!important;border-color:#e59a31!important}
+:root[data-theme="dark"] :is(.calendar-event.purple,.calendar-unscheduled-card.purple,.calendar-month-event.purple){background:#302647!important;color:#d4bcff!important;border-color:#956be0!important}
+:root[data-theme="dark"] :is(.calendar-event.red,.calendar-unscheduled-card.red,.calendar-month-event.red){background:#40242c!important;color:#ffb7c4!important;border-color:#dc6076!important}
+:root[data-theme="dark"] :is(.calendar-event.pink,.calendar-unscheduled-card.pink,.calendar-month-event.pink){background:#3d2535!important;color:#ffb8db!important;border-color:#d75a9b!important}
+:root[data-theme="dark"] :is(.calendar-event.green,.calendar-unscheduled-card.green,.calendar-month-event.green){background:#17382a!important;color:#a7e6bd!important;border-color:#46ae70!important}
+:root[data-theme="dark"] :is(.calendar-event.gray,.calendar-unscheduled-card.gray,.calendar-month-event.gray){background:#25313e!important;color:#d3dde8!important;border-color:#697b8e!important}
+
+:root[data-theme="dark"] .ais-map iframe{filter:brightness(.58) saturate(.72) contrast(1.12)!important}
+
+:root[data-theme="dark"] .notification-drawer{background:#0d1824!important;color:#f2f6fb!important;border-color:#314256!important}
+:root[data-theme="dark"] .notification-card.active{background:#382b18!important;border-color:#755722!important}
+:root[data-theme="dark"] .notification-card>span{background:#173653!important;color:#8bc3ff!important}
+:root[data-theme="dark"] .notification-card.active>span{background:#4a3517!important;color:#f4ca78!important}
+:root[data-theme="dark"] .delivery-popup{background:#241d13!important;color:#f2f6fb!important;border-color:#755722!important}
+:root[data-theme="dark"] .delivery-popup :is(b,p){color:#f2f6fb!important}
+:root[data-theme="dark"] .delivery-popup small{color:#f4ca78!important}
+:root[data-theme="dark"] .delivery-popup-icon{background:#4a3517!important;color:#f4ca78!important}
