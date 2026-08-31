@@ -710,3 +710,36 @@
 :root[data-theme="dark"] .delivery-popup :is(b,p){color:#f2f6fb!important}
 :root[data-theme="dark"] .delivery-popup small{color:#f4ca78!important}
 :root[data-theme="dark"] .delivery-popup-icon{background:#4a3517!important;color:#f4ca78!important}
+/* Dark theme: merchandise, reception and permission controls. */
+:root[data-theme="dark"] :is(
+  .merchandise-item,
+  .merchandise-item summary,
+  .merchandise-editor,
+  .piece-documents label,
+  .document-switch,
+  .reception-empty,
+  .reception-record,
+  .reception-documents a,
+  .reception-photos figure,
+  .cargo-line,
+  .cargo-entry-summary,
+  .file-picker,
+  .photo-identification article,
+  .selected-files span,
+  .driver-manifest footer span,
+  .multi-role-selector label
+){background:#101c29!important;color:#f2f6fb!important;border-color:#314256!important}
+
+:root[data-theme="dark"] .merchandise-editor,
+:root[data-theme="dark"] .reception-empty{background:#0c1722!important}
+:root[data-theme="dark"] :is(.merchandise-item summary b,.reception-empty b,.reception-record b,.multi-role-selector label b){color:#f5f8fc!important}
+:root[data-theme="dark"] :is(.merchandise-item summary small,.reception-empty small,.reception-record small,.multi-role-selector label small){color:#9eafc2!important}
+:root[data-theme="dark"] .document-count{background:#183653!important;color:#9dccff!important;border:1px solid #31597d!important}
+:root[data-theme="dark"] .piece-documents label.checked,
+:root[data-theme="dark"] .document-switch.checked,
+:root[data-theme="dark"] .multi-role-selector label.checked{background:#173653!important;color:#dcecff!important;border-color:#3975b5!important}
+:root[data-theme="dark"] .multi-role-selector label>svg{color:#71869d!important}
+:root[data-theme="dark"] .multi-role-selector label.checked>svg{color:#69afff!important}
+:root[data-theme="dark"] .multi-role-selector label:hover{background:#1a2a3b!important;border-color:#46627f!important}
+:root[data-theme="dark"] .multi-role-selector label.checked:hover{background:#1d4160!important;border-color:#5793cc!important}
+:root[data-theme="dark"] .file-picker:hover{background:#173653!important;border-color:#5fa8ff!important;color:#b9dcff!important}
