@@ -761,3 +761,83 @@
 :root[data-theme="dark"] :is(.invoice-locked b,.supplier-import-head b,.invoice-lines-title b,.invoice-line-row>strong,.invoice-total-box b){color:#f5f8fc!important}
 :root[data-theme="dark"] :is(.invoice-locked small,.invoice-locked em,.supplier-import-head small,.invoice-lines-title small,.invoice-total-box span){color:#a8b5c5!important}
 :root[data-theme="dark"] .invoice-line-row .line-detail input{color:#dce8f5!important}
+/* Dark theme: final neutral-surface audit across mail, operations and warehouse. */
+:root[data-theme="dark"] :is(
+  .mail-extracted span,
+  .mail-original pre,
+  .notification-sound-settings,
+  .delivery-popup-sound,
+  .driver-legend span,
+  .mail-ai-summary,
+  .mail-task-proposal,
+  .mail-task-proposal>span,
+  .manifest-reference,
+  .document-box .upload,
+  .case-services-empty,
+  .case-expenses-empty,
+  .case-load-empty,
+  .warehouse-selection-bar,
+  .warehouse-cargo-evidence a,
+  .warehouse-cargo-list p,
+  .warehouse-photo-gallery,
+  .warehouse-doc-list,
+  .driver-job-route,
+  .provider-strip>div:last-child>span,
+  .vessel-data span,
+  .vessel-metrics span,
+  .vessel-list-head,
+  .transport-provider,
+  .transport-route-detail,
+  .new-case-modal .case-service-fieldset,
+  .warehouse-transport-review,
+  .warehouse-cargo-reception,
+  .warehouse-view-tabs span,
+  .service-list .muted-service,
+  .ais-metrics span,
+  .driver-route,
+  .timeline-empty,
+  .multi-photo-strip figure,
+  .user-role-select select
+){background:#101c29!important;color:#f2f6fb!important;border-color:#314256!important}
+
+:root[data-theme="dark"] :is(
+  .mail-extracted b,
+  .mail-task-proposal b,
+  .warehouse-cargo-list p,
+  .warehouse-photo-gallery>b,
+  .warehouse-doc-list>b,
+  .driver-job-route b,
+  .provider-strip>div:last-child b,
+  .vessel-data b,
+  .vessel-metrics b,
+  .transport-route-detail b,
+  .driver-route b,
+  .timeline-empty b
+){color:#f5f8fc!important}
+
+:root[data-theme="dark"] :is(
+  .mail-extracted small,
+  .mail-original pre,
+  .mail-ai-summary>small,
+  .mail-task-proposal small,
+  .mail-task-proposal em,
+  .notification-sound-settings label,
+  .delivery-popup-sound label,
+  .provider-strip>div:last-child small,
+  .vessel-data small,
+  .vessel-metrics small,
+  .transport-route-detail small,
+  .warehouse-photo-gallery span,
+  .driver-route small,
+  .timeline-empty small
+){color:#a8b5c5!important}
+
+:root[data-theme="dark"] :is(.notification-sound-settings .sound-toggle,.delivery-popup-sound .sound-toggle){color:#f2f6fb!important}
+:root[data-theme="dark"] .mail-filters span{background:#223448!important;color:#dcecff!important}
+:root[data-theme="dark"] .mail-ai-summary>span{background:#173653!important;color:#9dccff!important}
+:root[data-theme="dark"] .mail-task-proposal i{background:#183653!important;color:#8bc3ff!important}
+:root[data-theme="dark"] :is(.case-load-selected,.manifest-selected-cargo,.warehouse-copy-status){background:#132d43!important;color:#cfe6ff!important;border-color:#315f86!important}
+:root[data-theme="dark"] .warehouse-review-check{background:#12362c!important;color:#85dfbd!important;border-color:#2f7259!important}
+:root[data-theme="dark"] .warehouse-cargo-list article.selected{background:#153653!important;border-color:#4f8ed0!important}
+:root[data-theme="dark"] :is(.driver-next-action,.driver-job-main em,.warehouse-review-head strong){background:#173653!important;color:#9dccff!important;border-color:#3975b5!important}
+:root[data-theme="dark"] .driver-finished{background:#12362c!important;color:#85dfbd!important;border-color:#2f7259!important}
