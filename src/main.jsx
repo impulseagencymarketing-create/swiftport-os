@@ -610,7 +610,27 @@ const invoiceCargoSummary=(item,warehouseEntries=[])=>{
   if(item.resumenMercancia)return String(item.resumenMercancia).toUpperCase();
   return `${Number(item.bultos)||1} BOX${Number(item.bultos)===1?'':'ES'}${item.peso&&!/pendiente|registrar/i.test(item.peso)?` ${String(item.peso).toUpperCase()}`:''}`;
 };
-const invoiceHeaderTitle=item=>[item.id,item.buque,formatEtaDate(item.eta),item.puerto].filter(Boolean).join(' ').toUpperCase();
+const invoiceScheduleLabel=(item,transports=[],calendarEvents=[])=>{
+  const call=item?.portCall||{};
+  const dates=[
+    ['ETA',call.etaDate||item?.etaDate||(!/confirmar/i.test(String(item?.eta||''))?item.eta:'')],
+    ['ETB',call.etbDate||item?.etbDate||item?.etb],
+    ['ETD',call.etdDate||item?.etdDate||item?.etd]
+  ];
+  for(const [source,value] of dates){
+    const date=toIsoDateValue(value);
+    if(date)return source==='ETA'?formatEtaDate(date):`${source} ${formatEtaDate(date)}`;
+  }
+  const caseId=item?.id;
+  const linked=[
+    ...(transports||[]).filter(entry=>entry.expediente===caseId&&!/cancel|anulad/i.test(String(entry.estado||''))),
+    ...(calendarEvents||[]).filter(entry=>entry.expediente===caseId&&(entry.transporte||String(entry.tipoServicio||'').toLowerCase().startsWith('transporte')))
+  ].map(entry=>({date:toIsoDateValue(entry.fecha||entry.date||entry.transportDate),completed:/entregado|completado|realizado|finalizado/i.test(String(entry.estado||''))})).filter(entry=>entry.date);
+  const completed=linked.filter(entry=>entry.completed);
+  const candidates=(completed.length?completed:linked).sort((a,b)=>b.date.localeCompare(a.date));
+  return candidates[0]?`TRANSPORTE ${formatEtaDate(candidates[0].date)}`:'FECHA POR CONFIRMAR';
+};
+const invoiceHeaderTitle=(item,transports=[],calendarEvents=[])=>[item.id,item.buque,invoiceScheduleLabel(item,transports,calendarEvents),item.puerto].filter(Boolean).join(' ').toUpperCase();
 const suggestedTransportPrice=(item,warehouseEntries=[],route='warehouseToVessel')=>{
   const weight=invoiceCargoWeight(item,warehouseEntries);
   if(isLimaniCase(item)){
@@ -665,8 +685,8 @@ const umeAlgecirasLines=(item,warehouseEntries=[],transports=[],calendarEvents=[
   const billOwnTransport=!isStorageOnly(item)&&(transportServices.length>0||(item.servicios||[]).some(service=>/transporte|entrega|delivery/i.test(String(service)))||Number(item.billing?.transportPrice||0)>0);
   const routeRecords=[...transportServices,...(transports||[]).filter(entry=>entry.expediente===item.id)];
   const lines=[];
-  if(options.includeRef)lines.push({id:'ref',item:invoiceHeaderTitle(item),detail:cargo,price:0,units:1,tax:'21%'});
-  if(item.billing?.openFile)lines.push({id:'open-file',item:'OPEN FILE',detail:invoiceHeaderTitle(item),price:UME_ALGECIRAS_RATES.openFile,units:1,tax:'0%'});
+  if(options.includeRef)lines.push({id:'ref',item:invoiceHeaderTitle(item,transports,calendarEvents),detail:cargo,price:0,units:1,tax:'21%'});
+  if(item.billing?.openFile)lines.push({id:'open-file',item:'OPEN FILE',detail:invoiceHeaderTitle(item,transports,calendarEvents),price:UME_ALGECIRAS_RATES.openFile,units:1,tax:'0%'});
   if(item.billing?.docsCessionDhl||hasRouteKeyword(routeRecords,/dhl/i))lines.push({id:'docs-cession-dhl',item:'DOC CESSION DHL',detail:cargo,price:UME_ALGECIRAS_RATES.docsCessionDhl,units:1,tax:'0%'});
   if(item.billing?.docsCessionTnt||hasRouteKeyword(routeRecords,/tnt/i))lines.push({id:'docs-cession-tnt',item:'DOC CESSION TNT',detail:cargo,price:UME_ALGECIRAS_RATES.docsCessionTnt,units:1,tax:'0%'});
   if(item.billing?.airportExpenses)lines.push({id:'airport-expenses',item:'ARRIVAL EXPENSES AIRPORT',detail:cargo,price:Number(item.billing.airportExpenses)||0,units:1,tax:'0%'});
@@ -800,7 +820,7 @@ const supplierConceptLine=(rawLine,item,warehouseEntries=[],transports=[],calend
   if(/DELIVERY.*VESSEL|VESSEL.*PORT|TRANSPORT.*VESSEL|ENTREGA.*BUQUE|BUQUE/.test(label))return make('delivery-vessel','DELIVERY VESSEL ALGECIRAS PORT',`${invoiceTransportDetail(lineCargo,item,transports,calendarEvents)}${serviceDate?` - ${serviceDate}`:''}`,umeTransportPrice(lineWeight),serviceDate?1:transportUnits);
   if(/DOC.*CESSION.*DHL|CESION.*DHL/.test(label))return make('docs-cession-dhl','DOC CESSION DHL',lineCargo,UME_ALGECIRAS_RATES.docsCessionDhl);
   if(/DOC.*CESSION.*TNT|CESION.*TNT/.test(label))return make('docs-cession-tnt','DOC CESSION TNT',lineCargo,UME_ALGECIRAS_RATES.docsCessionTnt);
-  if(/OPEN FILE|APERTURA/.test(label))return make('open-file','OPEN FILE',invoiceHeaderTitle(item),UME_ALGECIRAS_RATES.openFile);
+  if(/OPEN FILE|APERTURA/.test(label))return make('open-file','OPEN FILE',invoiceHeaderTitle(item,transports,calendarEvents),UME_ALGECIRAS_RATES.openFile);
   if(/OPEN WAREHOUSE|NIGHT|WEEKEND|HOLIDAY|FESTIVO/.test(label))return make('open-warehouse-night','OPEN WAREHOUSE NIGHT/BANK HOLIDAYS',lineCargo,UME_ALGECIRAS_RATES.openWarehouseNightHoliday);
   if(/AGP|MALAGA|AIRPORT|AEROPUERTO/.test(label)&&/TRANSPORT|TRUCK|RECOGIDA|COLLECTION/.test(label))return make('transport-agp','TRANSPORT FROM AGP TO WAREHOUSE',lineCargo,UME_ALGECIRAS_RATES.transportAgpXrjNextDay);
   if(/AGP|MALAGA|MÁLAGA|AIRPORT|AEROPUERTO/.test(label)&&/TRANSPORT|TRUCK|RECOGIDA|COLLECTION/.test(label))return make('transport-agp','TRANSPORT FROM AGP TO WAREHOUSE',cargo,UME_ALGECIRAS_RATES.transportAgpXrjNextDay);
@@ -1049,16 +1069,16 @@ const invoiceTransportDetail=(cargo,item,transports=[],calendarEvents=[])=>{
 };
 const draftInvoiceFromCase=(item,warehouseEntries=[],transports=[],calendarEvents=[])=>{
   const cargo=invoiceCargoSummary(item,warehouseEntries);
-  const date=formatEtaDate(item.eta);
+  const date=invoiceScheduleLabel(item,transports,calendarEvents);
   if(isSurveyService(item)){
     const detail=[item.buque,date,item.puerto].filter(Boolean).join(' - ').toUpperCase();
     const surveyPrice=Number(item.billing?.surveyPrice||item.billing?.transportPrice||0);
     const lines=[
-      {id:'ref',item:invoiceHeaderTitle(item),detail:'SURVEY / BALLAST WATER SAMPLES',price:0,units:1,tax:'21%'},
+      {id:'ref',item:invoiceHeaderTitle(item,transports,calendarEvents),detail:'SURVEY / BALLAST WATER SAMPLES',price:0,units:1,tax:'21%'},
       {id:'survey',item:'SURVEY / BALLAST WATER SAMPLES',detail,price:surveyPrice,units:1,tax:'0%'}
     ];
     const due=new Date(Date.now()+30*86400000).toISOString().slice(0,10);
-    const invoice={id:'BOR-'+item.id.replace('SW-',''),expediente:item.id,cliente:item.cliente,concepto:invoiceHeaderTitle(item),importe:0,estado:'Borrador',vencimiento:due,buque:item.buque,puerto:item.puerto,proforma:`PRO${String(260000+numericRef(item.id)).slice(-6)}`,observaciones:'Exenci\u00f3n de IVA seg\u00fan ART 22 de la ley 37/1992 y 10.2 del real decreto ley 1624/92 de Diciembre',payment:'BANK ACCOUNT: ES06 0182 4775 5102 0174 1635\\nSWIFT: BBVAESMMXXX',lines};
+    const invoice={id:'BOR-'+item.id.replace('SW-',''),expediente:item.id,cliente:item.cliente,concepto:invoiceHeaderTitle(item,transports,calendarEvents),importe:0,estado:'Borrador',vencimiento:due,buque:item.buque,puerto:item.puerto,proforma:`PRO${String(260000+numericRef(item.id)).slice(-6)}`,observaciones:'Exenci\u00f3n de IVA seg\u00fan ART 22 de la ley 37/1992 y 10.2 del real decreto ley 1624/92 de Diciembre',payment:'BANK ACCOUNT: ES06 0182 4775 5102 0174 1635\\nSWIFT: BBVAESMMXXX',lines};
     const importe=invoiceTotal(invoice);
     const coste=caseExpenseTotal(item);
     return {...invoice,importe,coste,margen:importe-coste};
@@ -1066,7 +1086,7 @@ const draftInvoiceFromCase=(item,warehouseEntries=[],transports=[],calendarEvent
   if(isUmeAlgecirasCase(item)){
     const lines=umeAlgecirasLines(item,warehouseEntries,transports,calendarEvents,{includeRef:true});
     const due=new Date(Date.now()+30*86400000).toISOString().slice(0,10);
-    const invoice={id:'BOR-'+item.id.replace('SW-',''),expediente:item.id,cliente:item.cliente,concepto:invoiceHeaderTitle(item),importe:0,estado:'Borrador',vencimiento:due,buque:item.buque,puerto:item.puerto,proforma:`PRO${String(260000+numericRef(item.id)).slice(-6)}`,observaciones:'Exenci\u00f3n de IVA seg\u00fan ART 22 de la ley 37/1992 y 10.2 del real decreto ley 1624/92 de Diciembre',payment:'BANK ACCOUNT: ES06 0182 4775 5102 0174 1635\\nSWIFT: BBVAESMMXXX',lines};
+    const invoice={id:'BOR-'+item.id.replace('SW-',''),expediente:item.id,cliente:item.cliente,concepto:invoiceHeaderTitle(item,transports,calendarEvents),importe:0,estado:'Borrador',vencimiento:due,buque:item.buque,puerto:item.puerto,proforma:`PRO${String(260000+numericRef(item.id)).slice(-6)}`,observaciones:'Exenci\u00f3n de IVA seg\u00fan ART 22 de la ley 37/1992 y 10.2 del real decreto ley 1624/92 de Diciembre',payment:'BANK ACCOUNT: ES06 0182 4775 5102 0174 1635\\nSWIFT: BBVAESMMXXX',lines};
     const importe=invoiceTotal(invoice);
     const coste=caseExpenseTotal(item);
     return {...invoice,importe,coste,margen:importe-coste};
@@ -1076,7 +1096,7 @@ const draftInvoiceFromCase=(item,warehouseEntries=[],transports=[],calendarEvent
   const transportServices=invoiceTransportServices(item,transports,calendarEvents);
   const billOwnTransport=!isStorageOnly(item)&&(transportServices.length>0||(item.servicios||[]).some(service=>/transporte/i.test(String(service)))||Number(item.billing?.transportPrice||0)>0);
   const lines=[
-    {id:'ref',item:invoiceHeaderTitle(item),detail:cargo,price:0,units:1,tax:'21%'},
+    {id:'ref',item:invoiceHeaderTitle(item,transports,calendarEvents),detail:cargo,price:0,units:1,tax:'21%'},
     {id:'reception',item:'RECEPTION',detail:cargo,price:suggestedReceptionPrice(item,warehouseEntries),units:1,tax:'0%'},
     {id:'handling',item:'HANDLING',detail:cargo,price:suggestedHandlingPrice(item,warehouseEntries),units:1,tax:'0%'}
   ];
@@ -1088,7 +1108,7 @@ const draftInvoiceFromCase=(item,warehouseEntries=[],transports=[],calendarEvent
   }
   if(Number(item.billing?.waitingHours||0)>0)lines.push({id:'waiting',item:'WAITING TIME',detail:`${item.billing.waitingHours} HOURS WAITING FOR ARRIVE`,price:suggestedWaitingPrice(item),units:Number(item.billing.waitingHours),tax:'0%'});
   const due=new Date(Date.now()+30*86400000).toISOString().slice(0,10);
-  const invoice={id:'BOR-'+item.id.replace('SW-',''),expediente:item.id,cliente:item.cliente,concepto:invoiceHeaderTitle(item),importe:0,estado:'Borrador',vencimiento:due,buque:item.buque,puerto:item.puerto,proforma:`PRO${String(260000+numericRef(item.id)).slice(-6)}`,observaciones:'Exenci\u00f3n de IVA seg\u00fan ART 22 de la ley 37/1992 y 10.2 del real decreto ley 1624/92 de Diciembre',payment:'BANK ACCOUNT: ES06 0182 4775 5102 0174 1635\\nSWIFT: BBVAESMMXXX',lines};
+  const invoice={id:'BOR-'+item.id.replace('SW-',''),expediente:item.id,cliente:item.cliente,concepto:invoiceHeaderTitle(item,transports,calendarEvents),importe:0,estado:'Borrador',vencimiento:due,buque:item.buque,puerto:item.puerto,proforma:`PRO${String(260000+numericRef(item.id)).slice(-6)}`,observaciones:'Exenci\u00f3n de IVA seg\u00fan ART 22 de la ley 37/1992 y 10.2 del real decreto ley 1624/92 de Diciembre',payment:'BANK ACCOUNT: ES06 0182 4775 5102 0174 1635\\nSWIFT: BBVAESMMXXX',lines};
   const importe=invoiceTotal(invoice);
   const coste=caseExpenseTotal(item);
   return {...invoice,importe,coste,margen:importe-coste};
@@ -3638,7 +3658,7 @@ function Facturacion({openCase,notify,invoices,cases,warehouseEntries=[],transpo
       changed=true;
     });
     if(changed)syncInvoices(nextInvoices);
-  },[billableCases.map(item=>`${item.id}:${serviceTypeOf(item)}:${item.buque}:${item.puerto}:${item.eta}:${item.etb}:${item.etd}:${item.cliente}:${item.updatedAt||''}:${caseExpenseTotal(item)}:${caseExpenses(item).map(expense=>[expense.id,expense.fecha,expense.proveedor,expense.concepto,expense.importe].join(':')).join(',')}`).join('|'),invoices.map(item=>`${item.id}:${item.expediente}:${item.estado}:${item.cliente}:${item.concepto}:${item.buque}:${item.puerto}:${item.coste||0}:${invoiceLinesOf(item.lines).map(line=>[line.id,line.item,line.detail,line.price,line.units,line.tax].join(':')).join('|')}`).join('||'),warehouseEntries.map(item=>`${item.ref}:${item.expediente}:${item.dias}:${item.estado}:${item.archivado}:${item.salida||''}:${item.updatedAt||''}`).join('|'),transports.map(item=>`${item.id}:${item.expediente}:${item.fecha}:${item.inicio}:${item.fin}:${item.estado||''}`).join('|'),calendarEvents.map(item=>`${item.id}:${item.expediente}:${item.transporte}:${item.tipoServicio}:${item.fecha}:${item.inicio}:${item.fin}`).join('|')]);
+  },[billableCases.map(item=>`${item.id}:${serviceTypeOf(item)}:${item.buque}:${item.puerto}:${item.eta}:${item.portCall?.etaDate||''}:${item.portCall?.etbDate||item.etbDate||item.etb||''}:${item.portCall?.etdDate||item.etdDate||item.etd||''}:${item.cliente}:${item.updatedAt||''}:${caseExpenseTotal(item)}:${caseExpenses(item).map(expense=>[expense.id,expense.fecha,expense.proveedor,expense.concepto,expense.importe].join(':')).join(',')}`).join('|'),invoices.map(item=>`${item.id}:${item.expediente}:${item.estado}:${item.cliente}:${item.concepto}:${item.buque}:${item.puerto}:${item.coste||0}:${invoiceLinesOf(item.lines).map(line=>[line.id,line.item,line.detail,line.price,line.units,line.tax].join(':')).join('|')}`).join('||'),warehouseEntries.map(item=>`${item.ref}:${item.expediente}:${item.dias}:${item.estado}:${item.archivado}:${item.salida||''}:${item.updatedAt||''}`).join('|'),transports.map(item=>`${item.id}:${item.expediente}:${item.fecha}:${item.inicio}:${item.fin}:${item.estado||''}`).join('|'),calendarEvents.map(item=>`${item.id}:${item.expediente}:${item.transporte}:${item.tipoServicio}:${item.fecha}:${item.inicio}:${item.fin}`).join('|')]);
   const draftFromCase=item=>draftInvoiceFromCase(item,warehouseEntries,transports,calendarEvents);
   const createDraft=item=>setEditing(draftFromCase(item));
   const archiveInvoice=item=>{
@@ -4040,7 +4060,7 @@ function InvoiceEditModal({item,cases=[],warehouseEntries=[],transports=[],calen
   let currentHeader=invoiceText(safeItem.concepto);
   let template=null;
   try{currentCargo=relatedCase?invoiceText(invoiceCargoSummary(relatedCase,warehouseEntries)):''}catch{currentCargo=''}
-  try{currentHeader=relatedCase?invoiceText(invoiceHeaderTitle(relatedCase)):currentHeader}catch{}
+  try{currentHeader=relatedCase?invoiceText(invoiceHeaderTitle(relatedCase,transports,calendarEvents)):currentHeader}catch{}
   try{template=relatedCase?draftInvoiceFromCase(relatedCase,warehouseEntries,transports,calendarEvents):null}catch{template=null}
   const templateLines=invoiceLinesOf(template?.lines).map(invoiceLineForEditor);
   const storedItemLines=invoiceLinesOf(safeItem.lines).map(invoiceLineForEditor);
@@ -4109,7 +4129,7 @@ function InvoiceEditModal({item,cases=[],warehouseEntries=[],transports=[],calen
     const billingCase={...relatedCase,cliente:form.cliente};
     const lines=enforceLimaniFreeStorageLines(parseSupplierInvoiceConcepts(text,billingCase,warehouseEntries,transports,calendarEvents),billingCase);
     if(!lines.length){setSupplierNote(source==='PDF'?'PDF guardado, pero no pude leer conceptos claros. Si es escaneado/foto, pega el texto o usa OCR.':'No encontré conceptos claros. Pega líneas como “Load / Unload 18.00” o “Delivery vessel Algeciras Port 65.00”.');return false}
-    const baseLine={...(form.lines.find(line=>line.id==='ref')||{id:'ref',price:0,units:1,tax:'21%'}),item:invoiceHeaderTitle(billingCase),detail:currentCargo||invoiceCargoSummary(billingCase,warehouseEntries)};
+    const baseLine={...(form.lines.find(line=>line.id==='ref')||{id:'ref',price:0,units:1,tax:'21%'}),item:invoiceHeaderTitle(billingCase,transports,calendarEvents),detail:currentCargo||invoiceCargoSummary(billingCase,warehouseEntries)};
     setForm(current=>({...current,supplierText:text,lines:[baseLine,...lines]}));
     setSupplierNote(`${lines.length} concepto(s) importados automáticamente desde ${source} con tarifa Swiftport. Revisa los importes antes de enviar a Holded.`);
     return true;
