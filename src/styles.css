@@ -1326,3 +1326,104 @@
   color:#7890a8;
   text-align:left;
 }
+
+.holded-confirmation-panel{
+  border-color:#a9dcc9;
+  overflow:hidden;
+}
+.holded-confirmation-list{
+  display:grid;
+  gap:9px;
+  padding:0 20px 20px;
+}
+.holded-confirmation-card{
+  display:grid;
+  grid-template-columns:auto minmax(170px,1.25fr) minmax(125px,.75fr) minmax(145px,.8fr) auto;
+  align-items:center;
+  gap:14px;
+  padding:13px 14px;
+  border:1px solid #bfe4d3;
+  border-radius:12px;
+  background:#f7fffb;
+}
+.holded-confirmation-card.changed{
+  border-color:#efcf91;
+  background:#fffaf0;
+}
+.holded-confirmation-card.pending{
+  border-color:#d8e2ec;
+  background:#f8fafc;
+}
+.holded-confirmation-check{
+  width:40px;
+  height:40px;
+  display:grid;
+  place-items:center;
+  border-radius:50%;
+  background:#dff6ea;
+  color:#14805c;
+}
+.holded-confirmation-check svg{
+  width:24px;
+  height:24px;
+  stroke-width:2.6;
+}
+.holded-confirmation-document b,
+.holded-confirmation-document small,
+.holded-confirmation-price b,
+.holded-confirmation-price small{
+  display:block;
+}
+.holded-confirmation-document b{
+  font-size:12px;
+}
+.holded-confirmation-document small{
+  margin-top:3px;
+  color:var(--muted);
+  font-size:9px;
+}
+.holded-confirmation-price small{
+  color:#71869b;
+  font-size:8px;
+  font-weight:900;
+  letter-spacing:.05em;
+}
+.holded-confirmation-price b{
+  margin-top:4px;
+  font-family:Manrope,sans-serif;
+  font-size:14px;
+}
+.holded-confirmation-result{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  gap:5px;
+  padding:7px 9px;
+  border-radius:999px;
+  background:#dff6ea;
+  color:#127452;
+  font-size:9px;
+  white-space:nowrap;
+}
+.holded-confirmation-result svg{
+  width:14px;
+  height:14px;
+}
+.holded-confirmation-card.changed .holded-confirmation-result{
+  background:#fff0cf;
+  color:#9a6210;
+}
+.holded-confirmation-card.pending .holded-confirmation-result{
+  background:#e9eef4;
+  color:#60758b;
+}
+@media(max-width:900px){
+  .holded-confirmation-card{
+    grid-template-columns:auto 1fr;
+  }
+  .holded-confirmation-price,
+  .holded-confirmation-result{
+    grid-column:2;
+    justify-self:start;
+  }
+}

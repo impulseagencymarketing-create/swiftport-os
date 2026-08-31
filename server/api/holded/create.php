@@ -237,6 +237,7 @@ if (!is_array($decoded)) {
 
 $holdedId = (string) ($decoded['id'] ?? $decoded['_id'] ?? $decoded['docId'] ?? '');
 $holdedNumber = (string) ($decoded['docNumber'] ?? $decoded['number'] ?? $decoded['num'] ?? '');
+$holdedAmount = is_numeric($decoded['total'] ?? null) ? round((float) $decoded['total'], 2) : round($total, 2);
 
 audit((int) $user['id'], 'holded.proform.create', [
     'invoice' => substr((string) ($invoice['id'] ?? ''), 0, 40),
@@ -250,5 +251,6 @@ respond([
     'docType' => $docType,
     'holdedId' => $holdedId,
     'holdedNumber' => $holdedNumber,
+    'holdedAmount' => $holdedAmount,
     'holdedStatus' => 'Proforma simple creada',
 ]);

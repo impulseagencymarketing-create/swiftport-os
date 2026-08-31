@@ -108,6 +108,81 @@ function holded_document_list(mixed $decoded): array
     return array_is_list($decoded) ? array_values(array_filter($decoded, 'is_array')) : [];
 }
 
+function holded_document_source_id(array $document): string
+{
+    foreach (['from', 'source', 'origin', 'convertedFrom', 'source_document'] as $key) {
+        $source = $document[$key] ?? null;
+        if (is_array($source)) {
+            $id = trim((string) ($source['id'] ?? $source['_id'] ?? $source['documentId'] ?? ''));
+            if ($id !== '') {
+                return $id;
+            }
+        }
+    }
+    foreach (['fromId', 'sourceId', 'proformId', 'proformaId'] as $key) {
+        $id = trim((string) ($document[$key] ?? ''));
+        if ($id !== '') {
+            return $id;
+        }
+    }
+    return '';
+}
+
+function holded_document_amount(array $document): ?float
+{
+    foreach (['total', 'amount', 'totalAmount', 'total_with_taxes', 'totalWithTaxes'] as $key) {
+        if (isset($document[$key]) && is_numeric($document[$key])) {
+            return round((float) $document[$key], 2);
+        }
+    }
+    return null;
+}
+
+function holded_document_number(array $document): string
+{
+    return trim((string) ($document['document_number'] ?? $document['docNumber'] ?? $document['invoiceNum'] ?? $document['invoiceNumber'] ?? $document['number'] ?? $document['num'] ?? ''));
+}
+
+function holded_v2_invoice_map(string $apiKey, array $targetIds): array
+{
+    $targets = array_fill_keys(array_filter($targetIds), true);
+    if (!$targets) {
+        return [];
+    }
+    $found = [];
+    $cursor = '';
+    for ($page = 0; $page < 3; $page++) {
+        $query = 'limit=100&sort=-date' . ($cursor !== '' ? '&cursor=' . rawurlencode($cursor) : '');
+        $ch = curl_init('https://api.holded.com/api/v2/invoices?' . $query);
+        curl_setopt_array($ch, [
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_TIMEOUT => 12,
+            CURLOPT_HTTPHEADER => ['Accept: application/json', 'Authorization: Bearer ' . $apiKey],
+        ]);
+        $response = curl_exec($ch);
+        $status = (int) curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
+        curl_close($ch);
+        if ($response === false || $status < 200 || $status >= 300) {
+            break;
+        }
+        $decoded = json_decode((string) $response, true);
+        foreach (holded_document_list($decoded) as $document) {
+            $sourceId = holded_document_source_id($document);
+            if ($sourceId !== '' && isset($targets[$sourceId])) {
+                $found[$sourceId] = $document;
+            }
+        }
+        if (count($found) >= count($targets) || !is_array($decoded) || empty($decoded['has_more'])) {
+            break;
+        }
+        $cursor = trim((string) ($decoded['cursor'] ?? ''));
+        if ($cursor === '') {
+            break;
+        }
+    }
+    return $found;
+}
+
 [$status, $response, $usedAuth, $usedVersion] = holded_status_try_get(
     $apiKey,
     'documents/proform?billed=1&sort=created-desc'
@@ -136,6 +211,25 @@ foreach ($billedDocuments as $document) {
     }
 }
 
+$targetHoldedIds = [];
+foreach ($invoices as $invoice) {
+    $targetId = trim((string) ($invoice['holdedId'] ?? ''));
+    if ($targetId !== '') {
+        $targetHoldedIds[] = $targetId;
+    }
+}
+$invoiceByProform = holded_v2_invoice_map($apiKey, $targetHoldedIds);
+[$invoiceListStatus, $invoiceListResponse] = holded_status_try_get($apiKey, 'documents/invoice?sort=created-desc');
+if ($invoiceListStatus >= 200 && $invoiceListStatus < 300) {
+    $invoiceListDecoded = json_decode((string) $invoiceListResponse, true);
+    foreach (holded_document_list($invoiceListDecoded) as $document) {
+        $sourceId = holded_document_source_id($document);
+        if ($sourceId !== '' && in_array($sourceId, $targetHoldedIds, true) && !isset($invoiceByProform[$sourceId])) {
+            $invoiceByProform[$sourceId] = $document;
+        }
+    }
+}
+
 $checkedAt = gmdate('c');
 $results = [];
 foreach ($invoices as $invoice) {
@@ -152,19 +246,29 @@ foreach ($invoices as $invoice) {
         ];
         continue;
     }
-    $isBilled = isset($billedById[$holdedId]);
-    $document = $billedById[$holdedId] ?? [];
+    $isBilled = isset($billedById[$holdedId]) || isset($invoiceByProform[$holdedId]);
+    $document = $invoiceByProform[$holdedId] ?? [];
+    $sentAmount = round((float) ($invoice['sentAmount'] ?? 0), 2);
+    $invoicedAmount = $document ? holded_document_amount($document) : null;
+    $priceVerified = $isBilled && $invoicedAmount !== null;
+    $difference = $priceVerified ? round($invoicedAmount - $sentAmount, 2) : null;
+    $priceMatches = $priceVerified ? abs((float) $difference) < 0.01 : null;
     $results[] = [
         'id' => $localId,
         'holdedId' => $holdedId,
         'verified' => true,
         'billed' => $isBilled,
         'holdedStatus' => $isBilled
-            ? 'Facturada: confirmado directamente en Holded'
+            ? ($priceVerified ? 'Facturada y precio confirmado directamente en Holded' : 'Facturada en Holded - precio final pendiente de lectura')
             : 'Proforma confirmada en Holded · todavía no facturada',
         'holdedCheckedAt' => $checkedAt,
-        'holdedInvoiceId' => (string) ($document['invoiceId'] ?? $document['billedId'] ?? ''),
-        'holdedInvoiceNumber' => (string) ($document['invoiceNum'] ?? $document['invoiceNumber'] ?? ''),
+        'holdedInvoiceId' => holded_document_id($document),
+        'holdedInvoiceNumber' => holded_document_number($document),
+        'holdedSentAmount' => $sentAmount,
+        'holdedInvoicedAmount' => $invoicedAmount,
+        'holdedPriceVerified' => $priceVerified,
+        'holdedPriceMatches' => $priceMatches,
+        'holdedPriceDifference' => $difference,
     ];
 }
 
