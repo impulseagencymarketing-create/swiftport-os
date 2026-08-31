@@ -218,7 +218,7 @@ export const holdedClientProfiles = [
     moneda:'EUR',
     tarifaActiva:'LIMANI Barcelona 2026',
     recepcion:'0-35 kg 15€ · 35-250 kg 60€ · 251-500 kg 130€ · 501-2500 kg 245€',
-    storage:'0-35 kg gratis · 36-100 kg 5€/día · 101-500 kg 10€/día · 500+ kg 15€/día',
+    storage:'GRATIS · Sin coste por días ni peso',
     transporte:'Warehouse→Vessel: 45€ / 95€ / 250€ / 350€ por peso',
     recargo:'+30% overtime / holidays',
     notas:'Importado de Holded · cuenta 40000092 · régimen general · modelo 347: sí'

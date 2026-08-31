@@ -26,6 +26,10 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'PUT') {
              surcharge_rate=VALUES(surcharge_rate), client_profile=VALUES(client_profile)'
         );
         foreach ($clients as $client) {
+            $isLimani = stripos((string) ($client['nombre'] ?? ''), 'limani') !== false;
+            $storageRate = $isLimani
+                ? 'GRATIS · Sin coste por días ni peso'
+                : (string) ($client['storage'] ?? '');
             $profile = [
                 'telefono' => (string) ($client['telefono'] ?? ''),
                 'fiscalName' => (string) ($client['fiscalName'] ?? ''),
@@ -42,7 +46,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'PUT') {
                 substr((string) ($client['contacto'] ?? ''), 0, 190),
                 max(0, (int) ($client['expedientes'] ?? 0)),
                 substr((string) ($client['recepcion'] ?? ''), 0, 120),
-                substr((string) ($client['storage'] ?? ''), 0, 120),
+                substr($storageRate, 0, 120),
                 substr((string) ($client['transporte'] ?? ''), 0, 120),
                 substr((string) ($client['recargo'] ?? ''), 0, 120),
                 json_encode($profile, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
@@ -110,6 +114,7 @@ respond([
     'caseAmounts' => $caseAmounts,
     'warehouseStorageTotal' => 318,
     'clients' => array_map(static function (array $row): array {
+        $isLimani = stripos((string) ($row['name'] ?? ''), 'limani') !== false;
         $profile = json_decode((string) ($row['client_profile'] ?? ''), true);
         if (!is_array($profile)) {
             $profile = [];
@@ -120,7 +125,7 @@ respond([
             'contacto' => $row['contact'],
             'expedientes' => (int) $row['active_cases'],
             'recepcion' => $row['reception_rate'],
-            'storage' => $row['storage_rate'],
+            'storage' => $isLimani ? 'GRATIS · Sin coste por días ni peso' : $row['storage_rate'],
             'transporte' => $row['transport_rate'],
             'recargo' => $row['surcharge_rate'],
             'telefono' => (string) ($profile['telefono'] ?? ''),

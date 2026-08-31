@@ -276,6 +276,7 @@ function ensure_schema(): void
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
     );
     seed_demo_finance_data($pdo);
+    $pdo->exec("UPDATE app_clients SET storage_rate = 'GRATIS · Sin coste por días ni peso' WHERE LOWER(name) LIKE '%limani%' AND storage_rate <> 'GRATIS · Sin coste por días ni peso'");
 }
 
 function seed_demo_finance_data(PDO $pdo): void
@@ -286,7 +287,7 @@ function seed_demo_finance_data(PDO $pdo): void
                 (code, name, contact, active_cases, reception_rate, storage_rate, transport_rate, surcharge_rate)
              VALUES
                 ('CLI-0012', 'UME Shipping', 'ops@umeshipping.com', 12, '65 €', '7 días + 25 €/día', 'Por ruta', '+30%'),
-                ('CLI-0028', 'Limani', 'spares@limani.gr', 7, '60 €', '7 días + 22 €/día', 'Por viaje', '+30%'),
+                ('CLI-0028', 'Limani', 'spares@limani.gr', 7, '60 €', 'GRATIS · Sin coste por días ni peso', 'Por viaje', '+30%'),
                 ('CLI-0034', 'A-Ships', 'agency@aships.com', 5, '55 €', 'Según acuerdo', 'Por puerto', '+25%'),
                 ('CLI-0041', 'BlueWave Marine', 'supply@bluewave.no', 3, '72 €', '5 días + 28 €/día', 'Por ruta', '+35%')"
         );
