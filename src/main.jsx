@@ -547,7 +547,8 @@ const dayStart=date=>new Date(date.getFullYear(),date.getMonth(),date.getDate())
 const calendarDaysBetween=(start,end=new Date())=>Math.max(0,Math.floor((dayStart(end)-dayStart(start))/86400000));
 const WAREHOUSE_FLOOR_M2=75;
 const EURO_PALLET_FLOOR_M2=.96;
-const WAREHOUSE_PALLET_CAPACITY=Math.floor(WAREHOUSE_FLOOR_M2/EURO_PALLET_FLOOR_M2);
+const WAREHOUSE_PALLET_CAPACITY=30;
+const WAREHOUSE_OPERATIONAL_M2=WAREHOUSE_PALLET_CAPACITY*EURO_PALLET_FLOOR_M2;
 const floorNumber=value=>Math.max(0,Number(String(value??'').replace(',','.'))||0);
 const warehouseFloorArea=entry=>{
   const mode=entry.spaceType||'auto';
@@ -556,7 +557,7 @@ const warehouseFloorArea=entry=>{
   if(mode==='long')return floorNumber(entry.spacePositions)*floorNumber(entry.spaceLength||3)*floorNumber(entry.spaceWidth||1);
   return (entry.mercancias||[]).filter(line=>/PALL?ET/i.test(String(line.tipo||''))).reduce((sum,line)=>sum+floorNumber(line.cantidad)*EURO_PALLET_FLOOR_M2,0);
 };
-const warehouseOccupancyPercent=area=>area/WAREHOUSE_FLOOR_M2*100;
+const warehouseOccupancyPercent=area=>area/WAREHOUSE_OPERATIONAL_M2*100;
 const warehouseEntryDates=entry=>{
   const start=parseWarehouseMoment(entry.fechaRecepcion||entry.entrada);
   if(!start)return null;
@@ -3508,10 +3509,10 @@ function Almacen({items,cases,openCase,registerEntry,updateEntry,deleteEntry,sho
       {showFinance&&<Summary icon={CircleDollarSign} label="Storage acumulado" value={money(storageTotal)}/>}
     </section>
     <section className="panel warehouse-occupancy-panel">
-      <div className="warehouse-occupancy-heading"><div><span className="overline">75 m² de superficie</span><h2>Ocupación real del almacén</h2><p>Las cajas, sobres, paquetes y bultos no suman porcentaje. Solo pallets y material largo declarado.</p></div><div className="warehouse-capacity"><span><b>{WAREHOUSE_PALLET_CAPACITY}</b><small>europalets teóricos</small></span><span><b>25</b><small>posiciones de 3 × 1 m</small></span></div></div>
+      <div className="warehouse-occupancy-heading"><div><span className="overline">75 m² de superficie total</span><h2>Ocupación real del almacén</h2><p>Capacidad operativa: 30 pallets equivalen al 100%, descontando estanterías y zonas de maniobra. Cajas, sobres, paquetes y bultos no suman porcentaje.</p></div><div className="warehouse-capacity"><span><b>{WAREHOUSE_PALLET_CAPACITY}</b><small>pallets = 100%</small></span><span><b>{WAREHOUSE_OPERATIONAL_M2.toLocaleString('es-ES',{maximumFractionDigits:1})} m²</b><small>superficie útil equivalente</small></span></div></div>
       <div className="warehouse-current-occupancy">
-        <div className="occupancy-gauge"><div><strong>{occupationPercent.toLocaleString('es-ES',{maximumFractionDigits:1})}%</strong><small>{occupiedArea.toLocaleString('es-ES',{maximumFractionDigits:2})} de {WAREHOUSE_FLOOR_M2} m² ocupados</small></div><span className={occupationPercent>=100?'danger':occupationPercent>=70?'warning':'good'}><i style={{width:`${Math.min(100,occupationPercent)}%`}}/></span></div>
-        <div className="occupancy-equivalent"><small>EQUIVALENTE ACTUAL</small><b>{(occupiedArea/EURO_PALLET_FLOOR_M2).toLocaleString('es-ES',{maximumFractionDigits:1})} pallets</b><span>Capacidad física sin descontar pasillos ni zonas de maniobra.</span></div>
+        <div className="occupancy-gauge"><div><strong>{occupationPercent.toLocaleString('es-ES',{maximumFractionDigits:1})}%</strong><small>{occupiedArea.toLocaleString('es-ES',{maximumFractionDigits:2})} m² computables · límite operativo {WAREHOUSE_OPERATIONAL_M2.toLocaleString('es-ES',{maximumFractionDigits:1})} m²</small></div><span className={occupationPercent>=100?'danger':occupationPercent>=70?'warning':'good'}><i style={{width:`${Math.min(100,occupationPercent)}%`}}/></span></div>
+        <div className="occupancy-equivalent"><small>EQUIVALENTE ACTUAL</small><b>{(occupiedArea/EURO_PALLET_FLOOR_M2).toLocaleString('es-ES',{maximumFractionDigits:1})} de {WAREHOUSE_PALLET_CAPACITY} pallets</b><span>El 100% ya descuenta estanterías, pasillos y zonas de maniobra.</span></div>
       </div>
       <div className="warehouse-history"><div className="warehouse-history-head"><span>Mes</span><span>Promedio</span><span>Máximo</span><span>≥ 30%</span><span>≥ 70%</span><span>≥ 100%</span></div>{monthlyOccupancy.map(month=><div className="warehouse-history-row" key={month.key}><span><b>{month.label}</b><small>{month.days} días medidos</small></span><span>{month.average.toLocaleString('es-ES',{maximumFractionDigits:1})}%</span><span>{month.max.toLocaleString('es-ES',{maximumFractionDigits:1})}%</span><span><b>{month.over30}</b> días</span><span><b>{month.over70}</b> días</span><span className={month.over100?'danger':''}><b>{month.over100}</b> días</span></div>)}</div>
     </section>
