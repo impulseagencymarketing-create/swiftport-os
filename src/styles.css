@@ -1483,3 +1483,42 @@
 .billing-row-actions{flex-wrap:wrap}.billing-row-actions .button.compact{padding:8px 9px;font-size:9px}.billing-row-actions .button.compact svg{width:14px}
 :root[data-theme="dark"] .billing-holded-review{background:#14382d;border-color:#2d6d56;color:#74ddb6}:root[data-theme="dark"] .billing-holded-review.pending{background:#172433;border-color:#34475b;color:#a5b6c8}:root[data-theme="dark"] .billing-holded-review.changed{background:#3c2e19;border-color:#6d5226;color:#f2c26f}:root[data-theme="dark"] .billing-holded-review small{color:#9caec0}:root[data-theme="dark"] .billing-final-revenue small{color:#64d3a8}
 @media(max-width:720px){.billing-review-column{justify-items:stretch}.billing-holded-review{max-width:100%}.billing-table .table-row>span.billing-review-column{display:grid!important}}
+/* Modo oscuro uniforme: elimina superficies claras residuales */
+:root[data-theme="dark"]{--ink:#f2f6fb;--muted:#a8b5c5;--line:#314256;--soft:#0f1a26;--white:#142130}
+:root[data-theme="dark"] :is(.billing-rules div,.billing-sort-control,.detail-hero,.detail-columns,.ais-panel,.ais-info,.operation-checklist,.shipment-documents,.shipment-document-list a,.next-action,.document-box,.case-expense-summary article,.case-expense-list article,.invoice-margin-box,.client-cost-summary article,.client-cost-lines,.client-cost-lines-head,.audit-kpis span,.audit-head,.audit-row code,.cargo-selection-panel,.pod-scanner,.operation-guidance,.global-documents,.mail-reason,.manifest-email-brief.notes){background:#101c29;color:var(--ink);border-color:var(--line)}
+:root[data-theme="dark"] :is(.billing-rules b,.detail-hero h2,.detail-stats b,.ais-status b,.ais-metrics b,.ais-empty b,.operation-checklist>div b,.shipment-documents b,.next-action>b,.document-box h3,.case-expense-summary b,.invoice-margin-box b,.client-cost-summary b,.client-cost-lines-head b,.audit-kpis b,.cargo-selection-head b){color:#f5f8fc}
+:root[data-theme="dark"] :is(.billing-rules small,.billing-sort-control span,.detail-id,.detail-hero p,.detail-stats small,.ais-status small,.ais-metrics small,.ais-info>p,.ais-empty p,.ais-actions p,.operation-checklist>div small,.operation-checklist li small,.shipment-documents small,.next-action>span,.next-action p,.document-box small,.case-expense-summary small,.invoice-margin-box small,.client-cost-summary small,.cargo-selection-head small){color:#a8b5c5}
+:root[data-theme="dark"] .billing-sort-control select{background:#0b1621;color:#f5f8fc;border:1px solid #3a4e64;border-radius:7px;padding:7px 9px}
+:root[data-theme="dark"] .detail-hero{background:linear-gradient(115deg,#132334,#0e1a27)}
+:root[data-theme="dark"] .detail-stats{background:#0d1824}
+:root[data-theme="dark"] .detail-stats>div{background:#111f2e;border-color:#314256}
+:root[data-theme="dark"] .ais-panel{background:#0e1a26;border-color:#35485e;box-shadow:0 18px 40px rgba(0,0,0,.22)}
+:root[data-theme="dark"] .ais-info{background:linear-gradient(145deg,#122235,#0e1b29)}
+:root[data-theme="dark"] .ais-info>.overline{color:#79b8ff}
+:root[data-theme="dark"] .ais-map{background:#08121b}
+:root[data-theme="dark"] .ais-map iframe{filter:brightness(.78) saturate(.82) contrast(1.08)}
+:root[data-theme="dark"] .ais-status>i{box-shadow:0 0 0 6px rgba(70,201,149,.14)}
+:root[data-theme="dark"] .ais-status>i.moored{box-shadow:0 0 0 6px rgba(95,168,255,.14)}
+:root[data-theme="dark"] .ais-status>i.stale{box-shadow:0 0 0 6px rgba(242,173,67,.15)}
+:root[data-theme="dark"] .operation-checklist{background:#0d1925;border-color:#314256}
+:root[data-theme="dark"] .operation-checklist li{background:#132130;color:#b3bfcd;border-color:#33465a}
+:root[data-theme="dark"] .operation-checklist li>span:first-child{background:#223246;color:#dce7f3}
+:root[data-theme="dark"] .operation-checklist li.current{background:#153451;color:#9dccff;border-color:#3d78b5}
+:root[data-theme="dark"] .operation-checklist li.current>span:first-child{background:#378bea;color:#fff}
+:root[data-theme="dark"] .operation-checklist li.done{background:#12362c;color:#72dcb4;border-color:#2f7259}
+:root[data-theme="dark"] .operation-checklist li.done>span:first-child{background:#1f5946;color:#9aebcc}
+:root[data-theme="dark"] .shipment-documents{background:#111f2e;border-color:#33475c}
+:root[data-theme="dark"] .shipment-documents>p{color:#e7b863}
+:root[data-theme="dark"] .shipment-document-list a{background:#17283a;color:#f2f6fb}
+:root[data-theme="dark"] .next-action{background:linear-gradient(145deg,#14283d,#101e2d);border-color:#36536f}
+:root[data-theme="dark"] .next-action.complete{background:linear-gradient(145deg,#12362c,#10271f);border-color:#2f7259}
+:root[data-theme="dark"] .service-type-badge.vessel_delivery{background:#173451;color:#9dccff;border-color:#3b72aa}
+:root[data-theme="dark"] .service-type-badge.storage_other{background:#3c2f19;color:#f3c56d;border-color:#725629}
+:root[data-theme="dark"] .service-type-badge.survey_samples{background:#2d2546;color:#c9b8ff;border-color:#5d4c8f}
+:root[data-theme="dark"] :is(.case-expense-list input,.client-cost-lines article .field input){background:#0b1621;color:#f2f6fb;border-color:#3a4e64}
+:root[data-theme="dark"] .client-cost-summary .client-cost-weight{background:linear-gradient(135deg,#16324b,#101d2a);border-color:#35658f}
+:root[data-theme="dark"] .client-cost-summary .client-cost-weight b{color:#8fc6ff}
+:root[data-theme="dark"] :is(.audit-head,.client-cost-lines-head){background:#142231}
+:root[data-theme="dark"] :is(.audit-row code,.shipment-document-list a){color:#dce8f5}
+:root[data-theme="dark"] .cargo-selection-panel{background:#101d2a;border-color:#334a61}
+:root[data-theme="dark"] .attachment-row .attachment-delete{background:#34202a;color:#ff91a0;border-color:#65313e}
