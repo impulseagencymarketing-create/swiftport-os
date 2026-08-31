@@ -1333,6 +1333,59 @@ async function uploadAttachment(file,category,csrfToken){
   if(!response.ok)throw new Error(body.error||`No se pudo subir ${file.name}.`);
   return body.file;
 }
+function MultiPhotoButton({onFiles,disabled=false,className='button primary',title='Sesión de fotos',children}){
+  const [open,setOpen]=useState(false);
+  return <><button type="button" className={className} disabled={disabled} onClick={()=>setOpen(true)}>{children}</button>{open&&<MultiPhotoCapture title={title} close={()=>setOpen(false)} finish={files=>{setOpen(false);onFiles(files)}}/>}</>;
+}
+function MultiPhotoCapture({title,close,finish}){
+  const videoRef=useRef(null);
+  const streamRef=useRef(null);
+  const shotsRef=useRef([]);
+  const [shots,setShots]=useState([]);
+  const [starting,setStarting]=useState(true);
+  const [error,setError]=useState('');
+  useEffect(()=>{
+    let cancelled=false;
+    const start=async()=>{
+      try{
+        if(!navigator.mediaDevices?.getUserMedia)throw new Error('La cámara continua no está disponible en este dispositivo.');
+        const stream=await navigator.mediaDevices.getUserMedia({audio:false,video:{facingMode:{ideal:'environment'},width:{ideal:1920},height:{ideal:1080}}});
+        if(cancelled){stream.getTracks().forEach(track=>track.stop());return}
+        streamRef.current=stream;
+        if(videoRef.current){videoRef.current.srcObject=stream;await videoRef.current.play()}
+      }catch(reason){if(!cancelled)setError(reason.message||'No se pudo abrir la cámara. Puedes elegir varias fotos de la galería.')}
+      finally{if(!cancelled)setStarting(false)}
+    };
+    start();
+    return()=>{cancelled=true;streamRef.current?.getTracks().forEach(track=>track.stop())};
+  },[]);
+  useEffect(()=>{shotsRef.current=shots},[shots]);
+  useEffect(()=>()=>{shotsRef.current.forEach(shot=>URL.revokeObjectURL(shot.preview))},[]);
+  const addFiles=files=>{
+    const selected=[...files].filter(file=>file?.type?.startsWith('image/'));
+    if(!selected.length)return;
+    setShots(current=>[...current,...selected.map((file,index)=>({id:`SHOT-${Date.now()}-${index}`,file,preview:URL.createObjectURL(file)}))]);
+  };
+  const capture=()=>{
+    const video=videoRef.current;
+    if(!video?.videoWidth){setError('Espera un momento a que la cámara esté lista.');return}
+    const canvas=document.createElement('canvas');
+    canvas.width=video.videoWidth;canvas.height=video.videoHeight;
+    canvas.getContext('2d').drawImage(video,0,0,canvas.width,canvas.height);
+    canvas.toBlob(blob=>{
+      if(!blob){setError('No se pudo guardar la foto.');return}
+      const file=new File([blob],`swiftport-${Date.now()}-${shots.length+1}.jpg`,{type:'image/jpeg',lastModified:Date.now()});
+      setShots(current=>[...current,{id:`SHOT-${Date.now()}`,file,preview:URL.createObjectURL(file)}]);
+      setError('');
+    },'image/jpeg',.9);
+  };
+  const remove=id=>setShots(current=>{
+    const target=current.find(shot=>shot.id===id);
+    if(target)URL.revokeObjectURL(target.preview);
+    return current.filter(shot=>shot.id!==id);
+  });
+  return <div className="modal-backdrop multi-photo-backdrop" onMouseDown={event=>{if(event.target===event.currentTarget)close()}}><section className="modal multi-photo-modal" role="dialog" aria-modal="true" aria-label={title}><div className="modal-head"><div><span className="overline">Cámara continua</span><h2>{title}</h2><p>Haz todas las fotos seguidas y pulsa Usar fotos cuando termines.</p></div><button type="button" className="icon-button" onClick={close}><X/></button></div><div className="multi-photo-body"><div className="multi-photo-view"><video ref={videoRef} autoPlay playsInline muted/>{starting&&<span><RefreshCw className="spinning"/> Abriendo cámara…</span>}{error&&<span className="camera-error"><CircleAlert/>{error}</span>}</div><div className="multi-photo-counter"><Camera/><b>{shots.length} foto{shots.length===1?'':'s'} preparada{shots.length===1?'':'s'}</b><small>Puedes seguir disparando sin cerrar esta ventana.</small></div>{shots.length>0&&<div className="multi-photo-strip">{shots.map((shot,index)=><figure key={shot.id}><img src={shot.preview} alt={`Foto ${index+1}`}/><button type="button" onClick={()=>remove(shot.id)} aria-label={`Quitar foto ${index+1}`}><X/></button><figcaption>{index+1}</figcaption></figure>)}</div>}<div className="multi-photo-actions"><button type="button" className="button tertiary" onClick={close}>Cancelar</button><label className="button secondary attachment-upload"><UploadCloud/> Elegir varias<input type="file" accept="image/*" multiple onChange={event=>{addFiles(event.target.files);event.target.value=''}}/></label><button type="button" className="button primary camera-shutter" disabled={starting||!streamRef.current} onClick={capture}><Camera/> Hacer otra foto</button><button type="button" className="button primary use-photos" disabled={!shots.length} onClick={()=>finish(shots.map(shot=>shot.file))}><CheckCircle2/> Usar {shots.length||''} foto{shots.length===1?'':'s'}</button></div></div></section></div>;
+}
 const bytesJoin=parts=>{
   const size=parts.reduce((total,part)=>total+part.length,0);
   const result=new Uint8Array(size);
@@ -2978,7 +3031,7 @@ function ShipmentDocuments({item,onDelete,onUpload,uploading}){
     : individual.length?individual.join('  -  '):'DOCUMENTOS INDIVIDUALES PENDIENTES';
   const scopeFor=file=>(arrivalDocuments||[]).some(stored=>sameAttachment(stored,file))?'reception-document':'shipment';
   return <section className="shipment-documents">
-    <div className="shipment-documents-head"><span className="shipment-documents-title"><FileCheck2/><span><b>DOCUMENTACION DEL ENVIO</b><small>{customs}</small></span></span>{onUpload&&<label className={'button secondary small attachment-upload '+(uploading?'disabled':'')}><UploadCloud/> {uploading?'Subiendo...':'Anadir documentos'}<input type="file" multiple accept="application/pdf,image/*" disabled={Boolean(uploading)} onChange={event=>{onUpload(event.target.files);event.target.value=''}}/></label>}</div>
+    <div className="shipment-documents-head"><span className="shipment-documents-title"><FileCheck2/><span><b>DOCUMENTACION DEL ENVIO</b><small>{customs}</small></span></span>{onUpload&&<div className="shipment-upload-actions"><MultiPhotoButton className="button secondary small" disabled={Boolean(uploading)} title="Fotos de documentos del envío" onFiles={onUpload}><Camera/> Fotografiar varios documentos</MultiPhotoButton><label className={'button tertiary small attachment-upload '+(uploading?'disabled':'')}><UploadCloud/> {uploading?'Subiendo...':'Añadir PDFs'}<input type="file" multiple accept="application/pdf" disabled={Boolean(uploading)} onChange={event=>{onUpload(event.target.files);event.target.value=''}}/></label></div>}</div>
     {documents.length?<div className="shipment-document-list">{documents.map((file,index)=><div className="attachment-row" key={file.id||file.url||index}><a href={file.url} target="_blank" rel="noreferrer"><FileText/><span><b>{documentLabel(file.name)}</b><small>{file.name}</small></span><ExternalLink/></a>{onDelete&&<button type="button" className="icon-button danger attachment-delete" aria-label="Eliminar documento" onClick={()=>onDelete(file,scopeFor(file))}><Trash2/></button>}</div>)}</div>:<p><CircleAlert/> Todavia no hay archivos de packing list, delivery note, CMR o aduanas.</p>}
   </section>;
 }
@@ -3020,7 +3073,7 @@ function PodDocuments({item,notify,onDelete,onUploadPod,onUploadDeliveryPhoto,up
   const deliveryPhotos=documentation.fotosEntrega||[];
   const podException=Boolean(documentation.podNoSellado);
   return <div className="document-box"><h3>POD de entrega <small>{pods.length?`${pods.length} PDF${pods.length===1?'':'S'}`:podException?'NO SELLADO':'PENDIENTE'}</small></h3>
-    <div className="pod-upload-actions">{onUploadDeliveryPhoto&&<label className={'button secondary attachment-upload '+(uploading==='delivery-photo'?'disabled':'')}><Camera/> {uploading==='delivery-photo'?'Subiendo...':'Anadir fotos de entrega'}<input type="file" multiple accept="image/*" disabled={uploading==='delivery-photo'} onChange={event=>{onUploadDeliveryPhoto(event.target.files);event.target.value=''}}/></label>}{onUploadPod&&<label className={'button secondary attachment-upload '+(uploading==='pod'?'disabled':'')}><ScanLine/> {uploading==='pod'?'Subiendo...':'Anadir POD'}<input type="file" multiple accept="application/pdf,image/*" disabled={uploading==='pod'} onChange={event=>{onUploadPod(event.target.files);event.target.value=''}}/></label>}</div>
+    <div className="pod-upload-actions">{onUploadDeliveryPhoto&&<MultiPhotoButton className="button secondary" disabled={uploading==='delivery-photo'} title="Fotos de entrega" onFiles={onUploadDeliveryPhoto}><Camera/> {uploading==='delivery-photo'?'Subiendo...':'Tomar varias fotos de entrega'}</MultiPhotoButton>}{onUploadPod&&<><MultiPhotoButton className="button secondary" disabled={uploading==='pod'} title="Fotos del POD" onFiles={onUploadPod}><ScanLine/> {uploading==='pod'?'Subiendo...':'Fotografiar varias páginas del POD'}</MultiPhotoButton><label className={'button tertiary attachment-upload '+(uploading==='pod'?'disabled':'')}><FileText/> Añadir PDF de POD<input type="file" multiple accept="application/pdf" disabled={uploading==='pod'} onChange={event=>{onUploadPod(event.target.files);event.target.value=''}}/></label></>}</div>
     {podException&&<div className="pod-exception-note"><CircleAlert/><span><b>POD no sellado / no disponible</b><small>{documentation.podObservacion||'Sin observacion registrada'}</small></span></div>}{pods.length?pods.map((file,index)=><div className="attachment-row compact" key={file.id||file.url||index}><a className="document-link" href={file.url} target="_blank" rel="noreferrer"><FileText/><span><b>POD {index+1}</b><small>{file.name}</small></span><ExternalLink/></a>{onDelete&&<button type="button" className="icon-button danger attachment-delete" aria-label="Eliminar POD" onClick={()=>onDelete(file,'pod')}><Trash2/></button>}</div>):!podException&&<button onClick={()=>notify('POD todavia pendiente')}><Camera/><span><b>POD / fotografias</b><small>Pendiente de entrega</small></span><ChevronRight/></button>}{deliveryPhotos.length>0&&<div className="delivery-photo-list"><b>Fotos de entrega</b>{deliveryPhotos.map((file,index)=><div className="attachment-row compact" key={file.id||file.url||index}><a className="document-link" href={file.url} target="_blank" rel="noreferrer"><Camera/><span><b>Foto entrega {index+1}</b><small>{file.name}</small></span><ExternalLink/></a>{onDelete&&<button type="button" className="icon-button danger attachment-delete" aria-label="Eliminar foto de entrega" onClick={()=>onDelete(file,'delivery-photo')}><Trash2/></button>}</div>)}</div>}</div>;
 }
 function DriverTaskModal({event,item,transport,warehouseEntries,currentUser,csrfToken,reloadOperational,notify,onEvidenceUploaded,close,claim,submit,undo}){
@@ -3089,9 +3142,9 @@ function DriverTaskModal({event,item,transport,warehouseEntries,currentUser,csrf
             <div><Camera/><span><b>{step.key==='cargo'?(surveyService?'Evidencia inicial del survey':'Fotos de la mercancía recibida'):surveyService?'Evidencia del survey realizado':storageOnly?'Evidencias de salida / recogida':'Evidencias de la entrega'}</b><small>{step.key==='cargo'?(surveyService?'Opcional: foto de acceso, equipo o llegada al buque.':'Se requiere al menos una foto; puedes añadir todas las necesarias.'):surveyService?'Se requiere foto, documento o informe del servicio realizado.':storageOnly?'Se requiere foto o evidencia clara de que la mercancía salió del almacén.':'Se requiere foto de la entrega y POD firmado.'}</small></span></div>
             {false&&<div className="evidence-assignment-lock"><LockKeyhole/><span><b>Activa el registro de este trabajo</b><small>{event.asignado&&event.asignado!=='Sin asignar'?`Ahora figura asignado a ${event.asignado}. Asígnatelo para activar la cámara y el POD.`:'El servicio todavía no tiene conductor. Asígnatelo para activar la cámara y el POD.'}</small></span><button className="button secondary" onClick={claim}>Asignarme y activar</button></div>}
             <div className="pod-scanner-actions">
-              <label className={`button primary${!mine?' disabled':''}`}><Camera/> {uploading?'Procesando…':step.key==='cargo'?'Añadir fotos de recepción':'Añadir fotos de entrega'}<input type="file" accept="image/*" multiple disabled={uploading||!mine} onChange={change=>{uploadEvidence(change.target.files,step.key==='cargo'?'cargo-photo':'delivery-photo');change.target.value=''}}/></label>
-              {step.key==='delivery'&&!storageOnly&&!surveyService&&<><label className={`button secondary${!mine?' disabled':''}`}><ScanLine/> Escanear POD automático<input type="file" accept="image/*" multiple disabled={uploading||!mine} onChange={change=>{uploadEvidence(change.target.files,'pod');change.target.value=''}}/></label><label className={`button tertiary${!mine?' disabled':''}`}><FileText/> Añadir PDFs de POD<input type="file" accept="application/pdf" multiple disabled={uploading||!mine} onChange={change=>{uploadEvidence(change.target.files,'pod');change.target.value=''}}/></label></>}
-              {step.key==='delivery'&&surveyService&&<label className={`button tertiary${!mine?' disabled':''}`}><FileText/> Añadir informe / PDF<input type="file" accept="application/pdf,image/*" multiple disabled={uploading||!mine} onChange={change=>{uploadEvidence(change.target.files,'pod');change.target.value=''}}/></label>}
+              <MultiPhotoButton className="button primary" disabled={uploading||!mine} title={step.key==='cargo'?'Fotos de recepción':'Fotos de entrega'} onFiles={files=>uploadEvidence(files,step.key==='cargo'?'cargo-photo':'delivery-photo')}><Camera/> {uploading?'Procesando…':step.key==='cargo'?'Tomar varias fotos de recepción':'Tomar varias fotos de entrega'}</MultiPhotoButton>
+              {step.key==='delivery'&&!storageOnly&&!surveyService&&<><MultiPhotoButton className="button secondary" disabled={uploading||!mine} title="Fotos del POD" onFiles={files=>uploadEvidence(files,'pod')}><ScanLine/> Fotografiar varias páginas del POD</MultiPhotoButton><label className={`button tertiary${!mine?' disabled':''}`}><FileText/> Añadir PDFs de POD<input type="file" accept="application/pdf" multiple disabled={uploading||!mine} onChange={change=>{uploadEvidence(change.target.files,'pod');change.target.value=''}}/></label></>}
+              {step.key==='delivery'&&surveyService&&<label className={`button tertiary${!mine?' disabled':''}`}><FileText/> Añadir informe / PDF<input type="file" accept="application/pdf" multiple disabled={uploading||!mine} onChange={change=>{uploadEvidence(change.target.files,'pod');change.target.value=''}}/></label>}
             </div>
             {step.key==='delivery'&&!storageOnly&&!surveyService&&<label className={'document-switch pod-exception '+(podException?'checked':'')}><input type="checkbox" checked={podException} onChange={change=>setPodException(change.target.checked)}/><CircleAlert/><span><b>POD no sellado / no disponible</b><small>Permite cerrar la entrega dejando una observación obligatoria para facturación.</small></span></label>}
             {step.key==='delivery'&&<div className="evidence-requirements"><span className={deliveryPhotos.length?'done':''}><CheckCircle2/> {surveyService?'Foto / evidencia':storageOnly?'Evidencia de salida':'Foto de entrega'} {deliveryPhotos.length?`(${deliveryPhotos.length})`:'pendiente'}</span>{!storageOnly&&!surveyService&&<span className={podFiles.length||podException?'done':''}><CheckCircle2/> {podException?'POD no sellado justificado':'POD firmado'} {podFiles.length?`(${podFiles.length})`:podException?'con observación':'pendiente'}</span>}{surveyService&&<span className={podFiles.length?'done':''}><CheckCircle2/> Informe / documento {podFiles.length?`(${podFiles.length})`:'opcional'}</span>}</div>}
@@ -3452,15 +3505,15 @@ function OperationStepModal({item,warehouseEntries,transports,csrfToken,currentU
         {step.key==='delivery'&&!surveyService&&<WarehouseTransportReview entries={vesselWarehouseEntries} item={item} checked={warehouseReviewed} setChecked={setWarehouseReviewed}/>}
         {step.key==='documents'&&<div className="pod-scanner shipment-document-upload">
           <div><FileCheck2/><span><b>Adjuntar documentación del envío</b><small>Packing list, delivery note, CMR, T1, levante u otros documentos.</small></span></div>
-          <div className="pod-scanner-actions"><label className="button primary"><UploadCloud/> {uploading?'Subiendo…':'Añadir varios PDFs'}<input type="file" accept="application/pdf,image/*" multiple disabled={uploading} onChange={event=>{uploadEvidence(event.target.files,'shipment-document');event.target.value=''}}/></label></div>
+          <div className="pod-scanner-actions"><MultiPhotoButton className="button primary" disabled={uploading} title="Fotos de documentos del envío" onFiles={files=>uploadEvidence(files,'shipment-document')}><Camera/> Fotografiar varios documentos</MultiPhotoButton><label className="button secondary"><UploadCloud/> {uploading?'Subiendo…':'Añadir varios PDFs'}<input type="file" accept="application/pdf" multiple disabled={uploading} onChange={event=>{uploadEvidence(event.target.files,'shipment-document');event.target.value=''}}/></label></div>
           {shipmentFiles.length>0&&<div className="evidence-file-list">{shipmentFiles.map((file,index)=><a className="pod-uploaded" href={file.url} target="_blank" rel="noreferrer" key={`${file.id}-${index}`}><CheckCircle2/><span><b>{documentLabel(file.name)}</b><small>{file.name}</small></span><ExternalLink/></a>)}</div>}
         </div>}
         {needsEvidence&&<div className="pod-scanner evidence-capture">
           <div><Camera/><span><b>{step.key==='cargo'?(surveyService?'Evidencia inicial del survey':'Fotos de la mercancía recibida'):surveyService?'Evidencia del survey realizado':storageOnly?'Evidencias de salida / recogida':'Evidencias de la entrega'}</b><small>{step.key==='cargo'?(surveyService?'Opcional: foto de acceso, equipo o nota inicial.':'Puedes tomar varias fotografías.'):surveyService?'Foto, informe o documento del servicio realizado.':storageOnly?'Se exige al menos una foto o evidencia de salida.':'Se exige al menos una foto de entrega y un POD.'}</small></span></div>
           <div className="pod-scanner-actions">
-            <label className="button primary"><Camera/> {uploading?'Procesando…':step.key==='cargo'?'Añadir fotos de recepción':'Añadir fotos de entrega'}<input type="file" accept="image/*" multiple disabled={uploading} onChange={event=>{uploadEvidence(event.target.files,step.key==='cargo'?'cargo-photo':'delivery-photo');event.target.value=''}}/></label>
-            {step.key==='delivery'&&!storageOnly&&!surveyService&&<><label className="button secondary"><ScanLine/> Escanear POD automático<input type="file" accept="image/*" multiple disabled={uploading} onChange={event=>{uploadEvidence(event.target.files,'pod');event.target.value=''}}/></label><label className="button tertiary"><FileText/> Añadir PDFs de POD<input type="file" accept="application/pdf" multiple disabled={uploading} onChange={event=>{uploadEvidence(event.target.files,'pod');event.target.value=''}}/></label></>}
-            {step.key==='delivery'&&surveyService&&<label className="button tertiary"><FileText/> Añadir informe / PDF<input type="file" accept="application/pdf,image/*" multiple disabled={uploading} onChange={event=>{uploadEvidence(event.target.files,'pod');event.target.value=''}}/></label>}
+            <MultiPhotoButton className="button primary" disabled={uploading} title={step.key==='cargo'?'Fotos de recepción':'Fotos de entrega'} onFiles={files=>uploadEvidence(files,step.key==='cargo'?'cargo-photo':'delivery-photo')}><Camera/> {uploading?'Procesando…':step.key==='cargo'?'Tomar varias fotos de recepción':'Tomar varias fotos de entrega'}</MultiPhotoButton>
+            {step.key==='delivery'&&!storageOnly&&!surveyService&&<><MultiPhotoButton className="button secondary" disabled={uploading} title="Fotos del POD" onFiles={files=>uploadEvidence(files,'pod')}><ScanLine/> Fotografiar varias páginas del POD</MultiPhotoButton><label className="button tertiary"><FileText/> Añadir PDFs de POD<input type="file" accept="application/pdf" multiple disabled={uploading} onChange={event=>{uploadEvidence(event.target.files,'pod');event.target.value=''}}/></label></>}
+            {step.key==='delivery'&&surveyService&&<label className="button tertiary"><FileText/> Añadir informe / PDF<input type="file" accept="application/pdf" multiple disabled={uploading} onChange={event=>{uploadEvidence(event.target.files,'pod');event.target.value=''}}/></label>}
           </div>
           {step.key==='delivery'&&!storageOnly&&!surveyService&&<label className={'document-switch pod-exception '+(podException?'checked':'')}><input type="checkbox" checked={podException} onChange={event=>setPodException(event.target.checked)}/><CircleAlert/><span><b>POD no sellado / no disponible</b><small>Permite cerrar la entrega dejando una observación obligatoria para facturación.</small></span></label>}
           {step.key==='delivery'&&<div className="evidence-requirements"><span className={deliveryPhotos.length?'done':''}><CheckCircle2/> {surveyService?'Foto / evidencia':storageOnly?'Evidencia de salida':'Foto de entrega'} {deliveryPhotos.length?`(${deliveryPhotos.length})`:'pendiente'}</span>{!storageOnly&&!surveyService&&<span className={podFiles.length||podException?'done':''}><CheckCircle2/> {podException?'POD no sellado justificado':'POD firmado'} {podFiles.length?`(${podFiles.length})`:podException?'con observación':'pendiente'}</span>}{surveyService&&<span className={podFiles.length?'done':''}><CheckCircle2/> Informe / documento {podFiles.length?`(${podFiles.length})`:'opcional'}</span>}</div>}
@@ -4278,11 +4331,11 @@ function WarehouseEntryModal({cases,close,submit,csrfToken}){
   const update=e=>setForm({...form,[e.target.name]:e.target.value});
   const updateLine=(index,field,value)=>setForm({...form,mercancias:form.mercancias.map((line,lineIndex)=>lineIndex===index?{...line,[field]:value}:line)});
   const updatePhoto=(index,change)=>setPhotos(photos.map((photo,photoIndex)=>photoIndex===index?{...photo,...change}:photo));
-  const selectPhotos=event=>{
-    const selected=[...event.target.files];
+  const addPhotos=files=>{
+    const selected=[...files];
     setPhotos(current=>[...current,...selected.map((file,index)=>({id:`PHOTO-${Date.now()}-${index}`,file,preview:URL.createObjectURL(file),tipo:current.length+index===0?'VISTA GENERAL':'ESTADO DE EMBALAJE',mercanciaIndex:'0',nota:''}))]);
-    event.target.value='';
   };
+  const addDocuments=files=>setDocuments(current=>[...current,...files]);
   const removePhoto=index=>setPhotos(current=>current.filter((_,photoIndex)=>photoIndex!==index));
   const addLine=()=>setForm({...form,mercancias:[...form.mercancias,{tipo:'CAJA',cantidad:'1',peso:'',seguimiento:''}]});
   const removeLine=index=>{
@@ -4334,8 +4387,9 @@ function WarehouseEntryModal({cases,close,submit,csrfToken}){
           <p>{form.spaceType==='auto'?'Cada PALLET suma 1,20 × 0,80 m; el resto suma 0%.':form.spaceType==='long'?`${floorNumber(form.spacePositions)*floorNumber(form.spaceLength)*floorNumber(form.spaceWidth)} m² computables para esta entrada.`:form.spaceType==='pallet'?`${floorNumber(form.spacePositions)*EURO_PALLET_FLOOR_M2} m² computables para esta entrada.`:'Esta entrada se conserva en stock, pero ocupa 0% en la estadística.'}</p>
         </div>
         <div className="arrival-files wide">
-          <label className="file-picker"><Camera/><span><b>Añadir fotos de la mercancía *</b><small>Puedes tomar varias fotos; las nuevas se suman a las anteriores</small></span><input type="file" accept="image/jpeg,image/png,image/webp" multiple required={!photos.length} onChange={selectPhotos}/></label>
-          <label className="file-picker"><FileText/><span><b>Escanear documentos</b><small>Packing list, CMR, delivery note o albarán</small></span><input type="file" accept="image/jpeg,image/png,image/webp,application/pdf,.pdf" multiple onChange={event=>setDocuments([...event.target.files])}/></label>
+          <MultiPhotoButton className="file-picker multi-photo-trigger" disabled={busy} title="Fotos de recepción de mercancía" onFiles={addPhotos}><Camera/><span><b>Tomar varias fotos de la mercancía *</b><small>La cámara queda abierta hasta que termines la serie</small></span></MultiPhotoButton>
+          <MultiPhotoButton className="file-picker multi-photo-trigger" disabled={busy} title="Fotos de documentos de recepción" onFiles={addDocuments}><Camera/><span><b>Fotografiar varios documentos</b><small>Packing list, CMR, delivery note o albarán</small></span></MultiPhotoButton>
+          <label className="file-picker"><FileText/><span><b>Añadir documentos PDF</b><small>Puedes seleccionar varios archivos a la vez</small></span><input type="file" accept="application/pdf,.pdf" multiple onChange={event=>{addDocuments(event.target.files);event.target.value=''}}/></label>
           {Boolean(photos.length)&&<div className="photo-identification"><div className="photo-identification-title"><b>Identificación fotográfica</b><small>{photos.length} foto(s). Asocia cada evidencia con su mercancía.</small></div>{photos.map((photo,index)=><article key={photo.id||`${photo.file.name}-${photo.file.lastModified}`}><img src={photo.preview} alt={`Vista previa ${index+1}`}/><div><span className="photo-number">FOTO {String(index+1).padStart(2,'0')}<button type="button" onClick={()=>removePhoto(index)}>Quitar</button></span><label className="field"><span>Qué muestra</span><select value={photo.tipo} onChange={event=>updatePhoto(index,{tipo:event.target.value})}>{PHOTO_TYPES.map(type=><option key={type}>{type}</option>)}</select></label><label className="field"><span>Mercancía asociada *</span><select value={photo.mercanciaIndex} onChange={event=>updatePhoto(index,{mercanciaIndex:event.target.value})} required>{form.mercancias.map((line,lineIndex)=><option key={lineIndex} value={lineIndex}>{line.cantidad} {line.tipo}{Number(line.cantidad)===1?'':'S'}  -  {line.peso||'—'} KG{line.seguimiento?`  -  ${line.seguimiento.toUpperCase()}`:''}</option>)}</select></label><label className="field photo-note"><span>Observación (opcional)</span><input value={photo.nota} onChange={event=>updatePhoto(index,{nota:event.target.value})} placeholder="Ej. esquina golpeada, precinto intacto…"/></label></div></article>)}</div>}
           {Boolean(documents.length)&&<div className="selected-files documents-selected">{documents.map(file=><span key={`doc-${file.name}`}><FileText/>{file.name}</span>)}</div>}
         </div>
