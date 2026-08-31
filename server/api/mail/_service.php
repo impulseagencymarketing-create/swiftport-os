@@ -2388,13 +2388,13 @@ function remove_outdated_auto_cases(PDO $pdo): int
     return count($refs);
 }
 
-function process_mailboxes(string $triggerType): array
+function process_mailboxes(string $triggerType, bool $inboxOnly = false): array
 {
     if (!function_exists('imap_open')) {
         throw new RuntimeException('La extensión PHP IMAP no está disponible.');
     }
     $pdo = db();
-    $autoPublish = automatic_mail_publish_enabled($pdo);
+    $autoPublish = !$inboxOnly && automatic_mail_publish_enabled($pdo);
     if ((int) $pdo->query("SELECT GET_LOCK('swiftport_mail_processor', 2)")->fetchColumn() !== 1) {
         throw new RuntimeException('Ya hay otro procesamiento de correo en curso.');
     }
@@ -2403,9 +2403,12 @@ function process_mailboxes(string $triggerType): array
         $run->execute([$triggerType]);
         $runId = (int) $pdo->lastInsertId();
         $summary = ['scanned' => 0, 'processed' => 0, 'review' => 0, 'ignored' => 0, 'errors' => 0, 'removedOldCases' => 0, 'removedInvalidCases' => 0];
-        $summary['removedInvalidCases'] = remove_invalid_auto_cases($pdo);
-        $summary['removedOldCases'] = remove_outdated_auto_cases($pdo);
-        $summary['reconciliation'] = reconcile_existing_mail_threads($pdo);
+        $summary['reconciliation'] = ['mergedCases' => 0, 'correctedCases' => 0, 'removedEmptyCases' => 0];
+        if (!$inboxOnly) {
+            $summary['removedInvalidCases'] = remove_invalid_auto_cases($pdo);
+            $summary['removedOldCases'] = remove_outdated_auto_cases($pdo);
+            $summary['reconciliation'] = reconcile_existing_mail_threads($pdo);
+        }
         $accounts = [
             [config('info_email_user'), config('info_email_password')],
             [config('operations_email_user'), config('operations_email_password')],
@@ -2558,8 +2561,10 @@ function process_mailboxes(string $triggerType): array
                 // Si la correlación no es suficientemente segura, permanece para revisión humana.
             }
         }
-        $summary['removedInvalidCases'] += remove_invalid_auto_cases($pdo);
-        $summary['removedOldCases'] += remove_outdated_auto_cases($pdo);
+        if (!$inboxOnly) {
+            $summary['removedInvalidCases'] += remove_invalid_auto_cases($pdo);
+            $summary['removedOldCases'] += remove_outdated_auto_cases($pdo);
+        }
         $finish = $pdo->prepare(
             "UPDATE app_mail_runs SET status = ?, scanned = ?, processed = ?, review_count = ?,
              ignored = ?, errors = ?, finished_at = NOW() WHERE id = ?"
@@ -2569,7 +2574,7 @@ function process_mailboxes(string $triggerType): array
             $summary['scanned'], $summary['processed'], $summary['review'],
             $summary['ignored'], $summary['errors'], $runId,
         ]);
-        $summary['scheduleCoherence'] = ensure_operational_schedule_coherence($pdo);
+        $summary['scheduleCoherence'] = $inboxOnly ? [] : ensure_operational_schedule_coherence($pdo);
         return $summary;
     } finally {
         $pdo->query("SELECT RELEASE_LOCK('swiftport_mail_processor')");

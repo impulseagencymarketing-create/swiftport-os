@@ -100,6 +100,7 @@ const NAV = [
   ['dashboard','Dashboard',LayoutDashboard],
   ['calendario','Calendario',CalendarDays],
   ['expedientes','Expedientes',FolderKanban],
+  ['correos','Correos',Mail],
   ['almacen','Almacén',WarehouseIcon],
   ['buques','Buques',Ship],
   ['clientes','Clientes / Tarifas',UsersRound],
@@ -115,7 +116,7 @@ const TITLES = {
   buques:['Buques','Fichas, IMO/MMSI y seguimiento AIS'],
   transportes:['Transportes','Planificación y asignación de conductores'],
   aduanas:['Aduanas','Documentación y control de despachos'],
-  correos:['Correos automáticos','Servicios recibidos por info@ y operations@'],
+  correos:['Correos','Bandeja de operations@ e info@ vinculada a expedientes'],
   clientes:['Clientes y tarifas','Condiciones comerciales por cliente'],
   facturacion:['Facturación','Servicios listos para revisar y exportar'],
   auditoria:['Auditoría','Registro de movimientos por usuario'],
@@ -223,7 +224,7 @@ const warehouseWhatsappSummary=(entries=[],cases=[])=>{
   return blocks.join('\n').trim();
 };const warehouseEntriesForVessel=(entries,item)=>entries.filter(entry=>activeWarehouseEntry(entry)&&(entry.expediente===item.id||sameVessel(entry.buque,item.buque)));
 const canAccess=(roles,id)=>{
-  if(id==='correos')return false;
+  if(id==='correos')return hasRole(roles,'operations')||hasRole(roles,'admin');
   if(['transportes','aduanas'].includes(id))return false;
   if(isDriverOnly(roles))return ['calendario','almacen'].includes(id);
   if (['clientes','facturacion'].includes(id)) return hasRole(roles,'finance')||hasRole(roles,'admin');
@@ -2367,7 +2368,7 @@ No se borrarán documentos ni fotos. El expediente volverá a este punto para co
         {tab==='buques'&&<Buques vessels={vessels} cases={casesWithFinance} warehouseEntries={warehouseEntries} saveVessel={saveVessel} deleteVessel={deleteVessel} openCase={openCase}/>}
         {tab==='transportes'&&<Transportes items={transports} update={updateTransport} openCase={openCase} team={operationalTeam} providers={providers} saveProvider={saveProvider}/>}
         {tab==='aduanas'&&<Aduanas items={customs} update={updateCustom} openCase={openCase} notify={notify}/>}
-        {tab==='correos'&&<Correos csrfToken={auth.csrfToken} notify={notify} openCase={openCase} reloadOperational={loadOperational} canRebuild={hasRole(effectiveRoles,'admin')}/>}
+        {tab==='correos'&&<Correos csrfToken={auth.csrfToken} notify={notify} openCase={openCase} cases={casesWithFinance}/>}
         {tab==='clientes'&&showFinance&&<Clientes notify={notify} clients={finance.clients} updateClient={updateClient}/>}
         {tab==='facturacion'&&showFinance&&<Facturacion openCase={openCase} notify={notify} invoices={finance.invoices} cases={casesWithFinance} warehouseEntries={warehouseEntries} transports={transports} calendarEvents={calendarEvents} clients={finance.clients} updateInvoice={updateInvoice} syncInvoices={syncInvoices} csrfToken={auth.csrfToken} currentUser={visibleUser}/>}
         {tab==='auditoria'&&hasRole(user,'admin')&&!previewUser&&<Auditoria csrfToken={auth.csrfToken} notify={notify}/>}
@@ -3247,6 +3248,7 @@ function Expedientes({cases,selected,select,search,setSearch,completeCaseStep,no
   return <div className={'case-layout '+(mobileDetail?'mobile-detail-open':'')}>
     <section className={'panel case-list '+(selected?'has-selection':'')}><div className="list-toolbar"><label className="search-box"><Search/><input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Buscar número, buque, ETA o puerto…"/></label><div className="filter-chips">{['Todos','En curso','Cancelados','Completados'].map(value=><button key={value} className={filter===value?'active':''} onClick={()=>setFilter(value)}>{value}</button>)}</div></div><div className="case-count">{filtered.length} expedientes</div>{filtered.length?filtered.map(item=><button key={item.id} className={'case-card port-'+portTone(item.puerto)+' '+(selected.id===item.id?'selected':'')} onClick={()=>{select(item.id);setMobileDetail(true)}}><div className="case-card-top"><span className="ship-icon"><Ship/></span><span><b>{caseLabel(item)}</b><small>{item.cliente}</small></span><Badge>{item.estado}</Badge></div><span className={'service-type-badge '+serviceTypeOf(item)}>{serviceTypeMeta(item).short}</span><div className="case-card-meta"><span><MapPin/>{item.puerto}</span><span><CalendarDays/>{item.eta}</span></div><div className="case-progress"><span><i style={{width:item.progreso+'%'}}/></span><small>{item.progreso}%</small></div><p><b>Siguiente:</b> {item.siguiente}</p></button>):<Empty text="Prueba con otro término o estado."/>}</section>
     <section className="panel case-detail"><button className="mobile-detail-back" onClick={()=>setMobileDetail(false)}><ArrowLeft/> Expedientes</button><div className="detail-hero"><div><div className="detail-id">{selected.id} <Badge>{selected.estado}</Badge></div><h2>{selected.buque}</h2><p>{selected.cliente}  -  {selected.puerto}</p><span className={'service-type-badge large '+serviceTypeOf(selected)}>{serviceTypeMeta(selected).label}</span></div><div className="detail-actions"><button className="icon-button" aria-label="Editar expediente" onClick={()=>setEditOpen(true)}><PencilLine/></button>{(hasRole(currentUser,'operations')||hasRole(currentUser,'admin'))&&<button className="icon-button danger" aria-label="Borrar expediente" onClick={()=>deleteCase(selected.id)}><Trash2/></button>}</div></div><div className={'detail-stats '+(!showFinance?'detail-stats-three':'')}><Stat label="ETA" value={selected.eta} icon={Clock3}/><Stat label="Mercancía" value={selected.bultos+' bultos  -  '+selected.peso} icon={Box}/><Stat label="Conductor" value={selected.conductor} icon={UserRound}/>{showFinance&&<Stat label="Importe previsto" value={money(selected.importe)} icon={BadgeEuro}/>}</div><PortCallPanel item={selected}/><OperationChecklist item={selected} csrfToken={csrfToken} reloadOperational={reloadOperational} notify={notify} currentRoles={currentUser} onStepSelect={openFlowStep}/><CaseStepReopenPanel item={selected} reopen={key=>reopenCaseStep?.(selected.id,key)}/><ShipmentDocuments item={selected} onDelete={(file,scope)=>deleteAttachment?.(selected.id,scope||'shipment',file,(selected.recepciones||[]).find(record=>(record.documentos||[]).some(stored=>sameAttachment(stored,file)))?.ref)} onUpload={files=>attachCaseFiles('shipment',files)} uploading={postUpload==='shipment'}/><div className="detail-columns"><div><h3>Línea temporal real</h3><ActualTimeline item={selected}/></div><aside className="detail-side"><div className={'next-action '+(operationFlow(selected).billingReady?'complete':'')}><span>{operationFlow(selected).billingReady?'Operativa completada':'Próxima acción'}</span><b>{selected.siguiente}</b><p>{operationFlow(selected).billingReady?'El POD está registrado y el expediente ha pasado a facturación.':'Sigue el paso indicado para que todo el equipo trabaje igual.'}</p><button className="button primary full" disabled={operationFlow(selected).billingReady} onClick={()=>openFlowStep(null)}><ClipboardCheck/> {operationFlow(selected).billingReady?'Listo para facturar':'Registrar siguiente paso'}</button></div><PodDocuments item={selected} notify={notify} onDelete={(file,scope)=>deleteAttachment?.(selected.id,scope,file)} onUploadPod={files=>attachCaseFiles('pod',files)} onUploadDeliveryPhoto={files=>attachCaseFiles('delivery-photo',files)} uploading={postUpload}/>{(hasRole(currentUser,'operations')||hasRole(currentUser,'admin'))&&<button className="button danger full" onClick={()=>deleteCase(selected.id)}><Trash2/> Borrar expediente</button>}</aside></div></section>
+    {(hasRole(currentUser,'operations')||hasRole(currentUser,'admin'))&&<section className="panel case-mails-panel"><CaseEmailsPanel caseRef={selected.id}/></section>}
     <section className="panel case-services-panel"><CaseServicesPanel item={selected} events={calendarEvents} cases={cases} transports={transports} team={team} providers={providers} warehouseEntries={warehouseEntries} saveEvent={saveEvent}/></section>
     <section className="panel case-load-panel"><CaseLoadPanel item={selected} warehouseEntries={warehouseEntries} events={calendarEvents}/></section>
     {showFinance&&<section className="panel client-cost-panel"><ClientCostPanel item={selected} warehouseEntries={warehouseEntries} updateCase={updateCase} notify={notify}/></section>}
@@ -3255,6 +3257,21 @@ function Expedientes({cases,selected,select,search,setSearch,completeCaseStep,no
     {editOpen&&<CaseEditModal item={selected} clientOptions={clientOptions} vessels={vessels} close={()=>setEditOpen(false)} submit={item=>{updateCase(item);setEditOpen(false)}}/>}
     {flowOpen&&<OperationStepModal item={selected} warehouseEntries={warehouseEntries} transports={transports} csrfToken={csrfToken} currentUser={currentUser} onEvidenceUploaded={onEvidenceUploaded} initialStepKey={flowStep} close={()=>{setFlowOpen(false);setFlowStep(null)}} submit={(key,note,evidence)=>{if(completeCaseStep(selected.id,key,note,evidence)){setFlowOpen(false);setFlowStep(null)}}}/>}
   </div>;
+}
+function CaseEmailsPanel({caseRef}){
+  const [items,setItems]=useState([]);
+  const [loading,setLoading]=useState(true);
+  const [error,setError]=useState('');
+  useEffect(()=>{
+    let active=true;
+    setLoading(true);setError('');
+    api('/api/mail/inbox.php?case_ref='+encodeURIComponent(caseRef))
+      .then(result=>{if(active)setItems(result.items||[])})
+      .catch(reason=>{if(active)setError(reason.message)})
+      .finally(()=>{if(active)setLoading(false)});
+    return()=>{active=false};
+  },[caseRef]);
+  return <><SectionHeader title="Correos vinculados" subtitle={loading?'Consultando bandeja…':`${items.length} correo(s) asociados a ${caseRef}`}/>{error&&<div className="form-error"><CircleAlert/>{error}</div>}{!loading&&items.length?<div className="case-mail-list">{items.map(item=><details key={item.id}><summary><span className="mail-source">{String(item.mailbox||'').toLowerCase().includes('operations@')?'operations@':'info@'}</span><span><b>{item.subject||'Sin asunto'}</b><small>{item.sender_name||item.sender_email} · {formatReceptionDate(item.received_at)}</small></span><ChevronRight/></summary><pre>{item.body}</pre></details>)}</div>:!loading&&!error&&<div className="case-mails-empty"><Mail/><span><b>Sin correos vinculados</b><small>Ve a Correos, elige este expediente y pulsa Vincular.</small></span></div>}</>;
 }
 function CaseServicesPanel({item,events,cases,transports,team,providers,warehouseEntries=[],saveEvent}){
   const [editing,setEditing]=useState(null);
@@ -3778,122 +3795,62 @@ function Facturacion({openCase,notify,invoices,cases,warehouseEntries=[],transpo
     {editing&&<InvoiceModalBoundary key={invoiceText(editing.id)} close={()=>setEditing(null)}><InvoiceEditModal item={editing} cases={cases} warehouseEntries={warehouseEntries} transports={transports} calendarEvents={calendarEvents} clients={clients} close={()=>setEditing(null)} submit={item=>{updateInvoice(item);setEditing(null)}} simulateHolded={item=>{sendHolded(item);setEditing(null)}}/></InvoiceModalBoundary>}
   </>;
 }
-const MAIL_STATUS={review:'Revisar',processed:'Creado',ignored:'Descartado',error:'Error'};
-const MAIL_ACTION_LABELS={new:'NUEVO SERVICIO',update:'ACTUALIZACIÓN',cancel:'CANCELACIÓN',information:'INFORMATIVO',not_service:'NO OPERATIVO'};
+const MAIL_STATUS={review:'Pendiente',processed:'Procesado',ignored:'Descartado',error:'Error'};
 const MAIL_SERVICE_LABELS={reception:'RECEPCIÓN',pickup:'RECOGIDA',delivery:'ENTREGA',reception_and_delivery:'RECEPCIÓN + ENTREGA',customs:'ADUANAS',other:'OTRO SERVICIO',none:'SIN SERVICIO'};
-function Correos({csrfToken,notify,openCase,reloadOperational,canRebuild}){
+function Correos({csrfToken,notify,openCase,cases=[]}){
   const [items,setItems]=useState([]);
-  const [counts,setCounts]=useState({review:0,processed:0,ignored:0,error:0});
+  const [counts,setCounts]=useState({review:0,processed:0,ignored:0,error:0,linked:0,unlinked:0,total:0});
+  const [mailboxCounts,setMailboxCounts]=useState({info:0,operations:0});
   const [lastRun,setLastRun]=useState(null);
-  const [filter,setFilter]=useState('all');
+  const [statusFilter,setStatusFilter]=useState('all');
+  const [mailboxFilter,setMailboxFilter]=useState('all');
+  const [linkFilter,setLinkFilter]=useState('all');
+  const [search,setSearch]=useState('');
+  const [draftLinks,setDraftLinks]=useState({});
   const [loading,setLoading]=useState(true);
   const [processing,setProcessing]=useState(false);
-  const [rebuilding,setRebuilding]=useState(false);
-  const [rebuildProgress,setRebuildProgress]=useState('');
-  const [editing,setEditing]=useState(null);
+  const [busyId,setBusyId]=useState(0);
   const [error,setError]=useState('');
-  const load=async(nextFilter=filter)=>{
+  const load=async()=>{
     setLoading(true);setError('');
-    try{const result=await api('/api/mail/inbox.php?status='+nextFilter);setItems([...(result.items||[])].sort(newestMailFirst));setCounts(result.counts);setLastRun(result.lastRun);const repaired=Number(result.reconciliation?.mergedCases||0)+Number(result.reconciliation?.correctedCases||0)+Number(result.reconciliation?.removedEmptyCases||0);if(repaired){await reloadOperational();notify(`${repaired} expedientes portuarios corregidos`)}}
-    catch(reason){setError(reason.message)}
+    try{
+      const params=new URLSearchParams({status:statusFilter,mailbox:mailboxFilter,link:linkFilter});
+      const result=await api('/api/mail/inbox.php?'+params.toString());
+      const nextItems=[...(result.items||[])].sort(newestMailFirst);
+      setItems(nextItems);
+      setCounts(result.counts||{});
+      setMailboxCounts(result.mailboxCounts||{});
+      setLastRun(result.lastRun);
+      setDraftLinks(Object.fromEntries(nextItems.map(item=>[item.id,item.case_ref||''])));
+    }catch(reason){setError(reason.message)}
     finally{setLoading(false)}
   };
-  useEffect(()=>{load(filter)},[filter]);
-  const process=async()=>{
+  useEffect(()=>{load()},[statusFilter,mailboxFilter,linkFilter]);
+  const sync=async()=>{
     setProcessing(true);setError('');
     try{
       const result=await api('/api/mail/process.php',{method:'POST',headers:{'X-CSRF-Token':csrfToken},body:'{}'});
-      const summary=result.summary;
-      const repaired=Number(summary.reconciliation?.mergedCases||0)+Number(summary.reconciliation?.correctedCases||0)+Number(summary.reconciliation?.removedEmptyCases||0);
-      const removedOld=Number(summary.removedOldCases||0);
-      const removedInvalid=Number(summary.removedInvalidCases||0);
-      const coherence=summary.scheduleCoherence||{};
-      const synced=0;
-      notify(`${summary.scanned} correos nuevos  -  ${summary.processed} trabajos creados  -  ${summary.review} para revisar${synced?`  -  ${synced} trabajos al calendario`:''}${removedInvalid?`  -  ${removedInvalid} inválidos retirados`:''}${removedOld?`  -  ${removedOld} antiguos retirados`:''}${repaired?`  -  ${repaired} duplicados corregidos`:''}`);
-      await Promise.all([load(filter),reloadOperational()]);
+      const summary=result.summary||{};
+      notify(`${Number(summary.scanned||0)} correos nuevos recibidos · ${Number(summary.review||0)} pendientes de vincular · ningún expediente creado automáticamente`);
+      await load();
     }catch(reason){setError(reason.message)}
     finally{setProcessing(false)}
   };
-  const rebuild=async()=>{
-    setRebuilding(true);setError('');setRebuildProgress('Preparando reconstrucción…');
+  const linkMail=async(item,unlink=false)=>{
+    const caseRef=unlink?'':String(draftLinks[item.id]||'').trim();
+    if(!unlink&&!caseRef){setError('Selecciona un expediente antes de vincular el correo.');return}
+    setBusyId(item.id);setError('');
     try{
-      const period={start:'2026-06-01',end:'2026-07-06'};
-      const markerKey='swiftport-email-rebuild';
-      const canResume=localStorage.getItem(markerKey)===JSON.stringify(period);
-      let reset;
-      const preview=await api('/api/admin/rebuild.php',{method:'POST',headers:{'X-CSRF-Token':csrfToken},body:jsonBody({action:'preview_period',...period})});
-      if(canResume){
-        reset={pendingEmails:Number(preview.pendingEmails||0),removedCases:0};
-      }else{
-      if(!window.confirm(`Se borrarán ${preview.caseCount} expedientes, incluidos los completados, y toda su operativa. Se guardará una copia de seguridad y se reinterpretarán ${preview.mailCount} correos de junio. ¿Continuar?`)){setRebuildProgress('');return}
-      reset=await api('/api/admin/rebuild.php',{method:'POST',headers:{'X-CSRF-Token':csrfToken},body:jsonBody({action:'reset_period',...period})});
-      }
-      localStorage.setItem(markerKey,JSON.stringify(period));
-      let remaining=Number(reset.pendingEmails||0),interpreted=0,created=0,ignored=0;
-      while(remaining>0){
-        setRebuildProgress(`Interpretando junio con IA  -  ${remaining} pendientes`);
-        const batch=await api('/api/admin/rebuild.php',{method:'POST',headers:{'X-CSRF-Token':csrfToken},body:jsonBody({action:'process_period_batch',...period})});
-        interpreted+=Number(batch.summary?.processed||0)+Number(batch.summary?.review||0)+Number(batch.summary?.ignored||0);
-        created+=Number(batch.summary?.processed||0);ignored+=Number(batch.summary?.ignored||0);
-        const next=Number(batch.remaining||0);
-        if(next>=remaining)break;
-        remaining=next;
-      }
-      setRebuildProgress('');
-      localStorage.removeItem(markerKey);
-      notify(`${reset.removedCases} expedientes retirados  -  ${created} correos aplicados  -  ${ignored} fuera de junio o no operativos`);
-      await Promise.all([load('all'),reloadOperational()]);
-      setFilter('all');
+      await api('/api/mail/review.php',{method:'PUT',headers:{'X-CSRF-Token':csrfToken},body:jsonBody({id:item.id,action:unlink?'unlink':'link',caseRef})});
+      notify(unlink?'Correo desvinculado':`Correo vinculado a ${caseRef}`);
+      await load();
     }catch(reason){setError(reason.message)}
-    finally{setRebuilding(false)}
+    finally{setBusyId(0)}
   };
-  useEffect(()=>{
-    if(!canRebuild)return;
-    const host=document.querySelector('.mail-hero-actions');
-    if(!host)return;
-    const button=document.createElement('button');
-    button.type='button';
-    button.className='button secondary';
-    button.disabled=processing||rebuilding;
-    button.textContent=rebuilding?(rebuildProgress||'Creando prueba automática…'):'Crear todo automáticamente';
-    button.onclick=rebuild;
-    host.prepend(button);
-    return()=>button.remove();
-  },[canRebuild,processing,rebuilding,rebuildProgress]);
-  const ignore=async item=>{
-    try{await api('/api/mail/review.php',{method:'PUT',headers:{'X-CSRF-Token':csrfToken},body:jsonBody({id:item.id,action:'ignore'})});notify('Correo descartado');load(filter)}
-    catch(reason){setError(reason.message)}
-  };
-  const reprocess=async item=>{
-    try{const result=await api('/api/mail/review.php',{method:'PUT',headers:{'X-CSRF-Token':csrfToken},body:jsonBody({id:item.id,action:'reprocess'})});notify(result.status==='processed'?`Trabajo creado automáticamente: ${result.caseRef}`:result.status==='review'?'Servicio detectado, pero faltan datos en el correo':'El correo sigue sin datos operativos suficientes');if(result.status==='processed')await reloadOperational();setFilter(result.status);load(result.status)}
-    catch(reason){setError(reason.message)}
-  };
-  const approve=async(item,extracted)=>{
-    const result=await api('/api/mail/review.php',{method:'PUT',headers:{'X-CSRF-Token':csrfToken},body:jsonBody({id:item.id,action:'approve',extracted})});
-    setEditing(null);notify('Expediente '+result.caseRef+' creado desde el correo');
-    await Promise.all([load(filter),reloadOperational()]);
-  };
-  return <><section className="mail-automation-hero"><div><Mail/><span><b>Entrada automática con IA</b><small>Los servicios nuevos crean el trabajo; cambios y dudas esperan revisión.</small></span></div><div><small>Última comprobación</small><b>{lastRun?.finished_at&&formatReceptionDate(lastRun.finished_at)||'Todavía no ejecutada'}</b></div><div className="mail-hero-actions"><button className="button primary" disabled={processing||rebuilding} onClick={process}><RefreshCw className={processing?'spinning':''}/>{processing?'Leyendo buzones…':'Comprobar correos ahora'}</button></div></section>{error&&<div className="form-error"><CircleAlert/>{error}</div>}<section className="panel"><SectionHeader title="Bandeja de servicios" subtitle="info@swiftportlogistic.com y operations@swiftportlogistic.com"/><div className="mail-filters">{[['all','Todos',Object.values(counts).reduce((a,b)=>a+b,0)],['review','Revisar',counts.review],['processed','Creados',counts.processed],['ignored','Descartados',counts.ignored],['error','Errores',counts.error]].map(([value,label,total])=><button key={value} className={filter===value?'active':''} onClick={()=>setFilter(value)}>{label}<span>{total}</span></button>)}</div>{loading?<div className="users-loading">Cargando correos…</div>:items.length?<div className="mail-list">{items.map(item=><article key={item.id} className={'mail-item '+item.status}><header><div><b>{item.subject||'Sin asunto'}</b><small>{item.sender_name||item.sender_email}  -  {formatReceptionDate(item.received_at)}</small></div><Badge>{MAIL_STATUS[item.status]||item.status}</Badge></header>{item.extracted&&<><div className="mail-extracted"><span><small>BUQUE</small><b>{item.extracted.vessel||'—'}</b></span><span><small>ETB / ETA</small><b>{[item.extracted.etb||item.extracted.eta,item.extracted.etb_time||item.extracted.eta_time].filter(Boolean).join('  -  ')||'POR CONFIRMAR'}</b></span><span><small>PUERTO</small><b>{item.extracted.port||'POR CONFIRMAR'}</b></span><span><small>SERVICIO</small><b>{MAIL_SERVICE_LABELS[item.extracted.service_kind]||[item.extracted.reception?.required&&'RECEPCIÓN',item.extracted.transport?.required&&'TRANSPORTE'].filter(Boolean).join(' + ')||'—'}</b></span></div><div className="mail-ai-summary"><span>{MAIL_ACTION_LABELS[item.extracted.request_action]||'CLASIFICACIÓN ANTERIOR'}</span><b>{item.extracted.cargo_summary||item.extracted.operational_notes||'Sin resumen operativo'}</b>{item.extracted.operational_notes&&item.extracted.cargo_summary&&<small>{item.extracted.operational_notes}</small>}<em>Confianza {Math.round(Number(item.extracted.confidence||item.confidence||0)*100)}%</em></div>{item.extracted.tasks?.length>0&&<MailTaskProposal tasks={item.extracted.tasks}/>}</>}{item.review_reason&&<p className="mail-reason"><CircleAlert/>{item.review_reason}</p>}{item.error_message&&<p className="mail-reason error"><CircleAlert/>{item.error_message}</p>}<details className="mail-original"><summary>Ver correo original</summary><pre>{item.body}</pre></details><footer>{item.case_ref&&<button className="button tertiary" onClick={()=>openCase(item.case_ref)}>Abrir {item.case_ref}</button>}{['ignored','error'].includes(item.status)&&<button className="button secondary" onClick={()=>reprocess(item)}><RefreshCw/> Reinterpretar</button>}{item.status==='review'&&<><button className="button tertiary" onClick={()=>ignore(item)}>Descartar</button><button className="button secondary" onClick={()=>reprocess(item)}><RefreshCw/> Reinterpretar con IA</button><button className="button primary" onClick={()=>setEditing(item)}><PencilLine/> Revisar y crear</button></>}</footer></article>)}</div>:<Empty text="No hay correos en este estado."/>}</section>{editing&&<MailReviewModal item={editing} close={()=>setEditing(null)} submit={data=>approve(editing,data)}/>}</>;
-}
-function MailTaskProposal({tasks}){
-  const labels={reception:'Recepción',pickup:'Recogida',delivery:'Entrega',samples:'Muestras',crew_transport:'Tripulación',other:'Otro'};
-  return <div className="mail-task-proposal"><strong>PROPUESTA OPERATIVA</strong>{tasks.map((task,index)=><span key={index}><i>{index+1}</i><span><b>{labels[task.kind]||task.kind}  -  {[task.date,task.time].filter(Boolean).join(' ')||'Fecha pendiente'}</b><small>{task.pickup||'Origen pendiente'} → {task.delivery||'Destino pendiente'}</small>{task.cargo&&<em>{task.cargo}</em>}</span><small>{Math.round(Number(task.confidence||0)*100)}%</small></span>)}</div>;
-}
-function MailReviewModal({item,close,submit}){
-  const base=item.extracted||{};
-  const [form,setForm]=useState({
-    client:base.client||'',vessel:base.vessel||'',imo:base.imo||'',mmsi:base.mmsi||'',eta:base.eta||'',eta_time:base.eta_time||'',etb:base.etb||'',etb_time:base.etb_time||'',etd:base.etd||'',etd_time:base.etd_time||'',port_stay:base.port_stay||'',delivery_mode:base.delivery_mode||'unknown',operation_location:base.operation_location||'',port:base.port||'',priority:base.priority||'Media',cargo_summary:base.cargo_summary||'',
-    operational_notes:base.operational_notes||'',existing_reference:base.existing_reference||'',request_action:'new',service_kind:base.service_kind||'other',
-    reception:{required:Boolean(base.reception?.required),date:base.reception?.date||'',time:base.reception?.time||'',location:base.reception?.location||''},
-    transport:{required:Boolean(base.transport?.required),date:base.transport?.date||'',time:base.transport?.time||'',pickup:base.transport?.pickup||'',delivery:base.transport?.delivery||''},
-    is_service:true,confidence:1
-  });
-  const [busy,setBusy]=useState(false);
-  const [error,setError]=useState('');
-  const top=event=>setForm({...form,[event.target.name]:event.target.value});
-  const service=(type,key,value)=>setForm({...form,[type]:{...form[type],[key]:value}});
-  const save=async event=>{event.preventDefault();setBusy(true);setError('');try{await submit(form)}catch(reason){setError(reason.message);setBusy(false)}};
-  return <div className="modal-backdrop" onMouseDown={event=>{if(event.target===event.currentTarget&&!busy)close()}}><section className="modal mail-review-modal"><div className="modal-head"><div><span className="overline">Revisión de correo</span><h2>Confirmar trabajo operativo</h2><p>{item.subject}</p></div><button className="icon-button" disabled={busy} onClick={close}><X/></button></div><form onSubmit={save}>{error&&<div className="form-error wide"><CircleAlert/>{error}</div>}<label className="field"><span>Cliente</span><input name="client" value={form.client} onChange={top}/></label><label className="field"><span>Buque *</span><input name="vessel" value={form.vessel} onChange={top} required/></label><label className="field"><span>ETA  -  fecha</span><input name="eta" type="date" value={form.eta} onChange={top}/></label><label className="field"><span>ETA  -  hora</span><input name="eta_time" type="time" value={form.eta_time} onChange={top}/></label><label className="field"><span>ETB  -  fecha</span><input name="etb" type="date" value={form.etb} onChange={top}/></label><label className="field"><span>ETB  -  hora</span><input name="etb_time" type="time" value={form.etb_time} onChange={top}/></label><label className="field"><span>ETD  -  fecha</span><input name="etd" type="date" value={form.etd} onChange={top}/></label><label className="field"><span>ETD  -  hora</span><input name="etd_time" type="time" value={form.etd_time} onChange={top}/></label><label className="field"><span>Puerto</span><input name="port" value={form.port} onChange={top}/></label><label className="field"><span>Prioridad</span><select name="priority" value={form.priority} onChange={top}>{['Baja','Media','Alta','Urgente'].map(value=><option key={value}>{value}</option>)}</select></label><label className="field"><span>Referencia cliente</span><input name="existing_reference" value={form.existing_reference} onChange={top}/></label><label className="field wide"><span>Resumen de mercancía</span><input name="cargo_summary" value={form.cargo_summary} onChange={top}/></label><label className="field wide"><span>Instrucciones operativas</span><input name="operational_notes" value={form.operational_notes} onChange={top}/></label><fieldset className="mail-service-fieldset wide"><label className="service-check"><input type="checkbox" checked={form.reception.required} onChange={event=>service('reception','required',event.target.checked)}/><Box/><span><b>RECEPCIÓN</b><small>Crear tarea de recepción</small></span></label>{form.reception.required&&<div className="mail-service-fields"><label className="field"><span>Fecha *</span><input type="date" value={form.reception.date} onChange={event=>service('reception','date',event.target.value)} required/></label><label className="field"><span>Hora</span><input type="time" value={form.reception.time} onChange={event=>service('reception','time',event.target.value)}/></label><label className="field"><span>Lugar</span><input value={form.reception.location} onChange={event=>service('reception','location',event.target.value)}/></label></div>}</fieldset><fieldset className="mail-service-fieldset wide"><label className="service-check"><input type="checkbox" checked={form.transport.required} onChange={event=>service('transport','required',event.target.checked)}/><Truck/><span><b>TRANSPORTE</b><small>Crear transporte y tarea de calendario</small></span></label>{form.transport.required&&<div className="mail-service-fields"><label className="field"><span>Fecha *</span><input type="date" value={form.transport.date} onChange={event=>service('transport','date',event.target.value)} required/></label><label className="field"><span>Hora</span><input type="time" value={form.transport.time} onChange={event=>service('transport','time',event.target.value)}/></label><label className="field"><span>Recogida</span><input value={form.transport.pickup} onChange={event=>service('transport','pickup',event.target.value)}/></label><label className="field"><span>Entrega</span><input value={form.transport.delivery} onChange={event=>service('transport','delivery',event.target.value)}/></label></div>}</fieldset><div className="modal-actions wide"><button type="button" className="button tertiary" disabled={busy} onClick={close}>Cancelar</button><button className="button primary" disabled={busy}><CheckCircle2/>{busy?'Creando…':'Crear expediente y trabajos'}</button></div></form></section></div>;
+  const visibleItems=items.filter(item=>[item.subject,item.sender_name,item.sender_email,item.body,item.case_ref].join(' ').toLowerCase().includes(search.toLowerCase()));
+  const mailboxLabel=value=>String(value||'').toLowerCase().includes('operations@')?'operations@':String(value||'').toLowerCase().includes('info@')?'info@':String(value||'').split('@')[0]||'Buzón';
+  const sortedCases=[...cases].sort(newestFirst);
+  return <><section className="mail-automation-hero"><div><Mail/><span><b>Bandeja conjunta de operaciones</b><small>Lee operations@ e info@. Los correos se vinculan manualmente y nunca crean expedientes.</small></span></div><div><small>Última sincronización</small><b>{lastRun?.finished_at?formatReceptionDate(lastRun.finished_at):'Todavía no ejecutada'}</b></div><div className="mail-hero-actions"><button className="button primary" disabled={processing} onClick={sync}><RefreshCw className={processing?'spinning':''}/>{processing?'Leyendo buzones…':'Sincronizar ahora'}</button></div></section>{error&&<div className="form-error"><CircleAlert/>{error}</div>}<section className="panel mail-inbox-panel"><SectionHeader title="Bandeja de entrada" subtitle="Un expediente puede tener tantos correos vinculados como necesite"/><div className="mail-filter-groups"><div className="mail-filters">{[['all','Todos los buzones',Number(counts.total||0)],['operations','operations@',Number(mailboxCounts.operations||0)],['info','info@',Number(mailboxCounts.info||0)]].map(([value,label,total])=><button key={value} className={mailboxFilter===value?'active':''} onClick={()=>setMailboxFilter(value)}>{label}<span>{total}</span></button>)}</div><div className="mail-filters">{[['all','Todos',Number(counts.total||0)],['unlinked','Sin vincular',Number(counts.unlinked||0)],['linked','Vinculados',Number(counts.linked||0)]].map(([value,label,total])=><button key={value} className={linkFilter===value?'active':''} onClick={()=>setLinkFilter(value)}>{label}<span>{total}</span></button>)}</div></div><div className="mail-inbox-toolbar"><label className="search-box"><Search/><input value={search} onChange={event=>setSearch(event.target.value)} placeholder="Buscar remitente, asunto, texto o expediente…"/></label><label><span>ESTADO DEL CORREO</span><select value={statusFilter} onChange={event=>setStatusFilter(event.target.value)}><option value="all">Todos</option><option value="review">Pendientes</option><option value="processed">Procesados</option><option value="ignored">Descartados</option><option value="error">Con error</option></select></label></div>{loading?<div className="users-loading">Cargando correos…</div>:visibleItems.length?<div className="mail-list">{visibleItems.map(item=>{const selectedRef=draftLinks[item.id]??item.case_ref??'';return <article key={item.id} className={'mail-item '+item.status+(item.case_ref?' linked':'')}><header><div><span className="mail-source">{mailboxLabel(item.mailbox)}</span><b>{item.subject||'Sin asunto'}</b><small>{item.sender_name||item.sender_email} · {item.sender_email} · {formatReceptionDate(item.received_at)}</small></div><Badge>{item.case_ref?`Vinculado · ${item.case_ref}`:MAIL_STATUS[item.status]||item.status}</Badge></header>{item.extracted&&<div className="mail-extracted"><span><small>BUQUE</small><b>{item.extracted.vessel||'—'}</b></span><span><small>ETA / ETB</small><b>{[item.extracted.etb||item.extracted.eta,item.extracted.etb_time||item.extracted.eta_time].filter(Boolean).join(' · ')||'POR CONFIRMAR'}</b></span><span><small>PUERTO</small><b>{item.extracted.port||'POR CONFIRMAR'}</b></span><span><small>MERCANCÍA / SERVICIO</small><b>{item.extracted.cargo_summary||MAIL_SERVICE_LABELS[item.extracted.service_kind]||'—'}</b></span></div>}{item.review_reason&&<p className="mail-reason"><CircleAlert/>{item.review_reason}</p>}{item.error_message&&<p className="mail-reason error"><CircleAlert/>{item.error_message}</p>}<div className="mail-linker"><label><span>VINCULAR A EXPEDIENTE</span><select value={selectedRef} onChange={event=>setDraftLinks(current=>({...current,[item.id]:event.target.value}))}><option value="">Seleccionar expediente…</option>{sortedCases.map(caseItem=><option key={caseItem.id} value={caseItem.id}>{caseItem.id} · {caseItem.buque} · {caseItem.cliente}</option>)}</select></label><button className="button primary" disabled={!selectedRef||busyId===item.id} onClick={()=>linkMail(item)}><FolderKanban/>{busyId===item.id?'Guardando…':item.case_ref?'Cambiar vínculo':'Vincular'}</button>{item.case_ref&&<><button className="button secondary" onClick={()=>openCase(item.case_ref)}>Abrir {item.case_ref}</button><button className="button tertiary" disabled={busyId===item.id} onClick={()=>linkMail(item,true)}>Desvincular</button></>}</div><details className="mail-original"><summary>Ver correo completo</summary><pre>{item.body}</pre></details></article>})}</div>:<Empty text="No hay correos que coincidan con estos filtros."/>}</section></>;
 }
 const AUDIT_LABELS={
   'auth.login':'Inicio de sesión',

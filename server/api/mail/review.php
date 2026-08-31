@@ -10,8 +10,50 @@ verify_csrf();
 $payload = input();
 $id = (int) ($payload['id'] ?? 0);
 $action = (string) ($payload['action'] ?? '');
-if ($id < 1 || !in_array($action, ['approve', 'ignore', 'reprocess'], true)) {
+if ($id < 1 || !in_array($action, ['approve', 'ignore', 'reprocess', 'link', 'unlink'], true)) {
     respond(['error' => 'Acción no válida.'], 422);
+}
+
+if (in_array($action, ['link', 'unlink'], true)) {
+    $mailStatement = db()->prepare('SELECT id, case_ref FROM app_mail_items WHERE id = ?');
+    $mailStatement->execute([$id]);
+    $mail = $mailStatement->fetch();
+    if (!$mail) {
+        respond(['error' => 'El correo ya no existe.'], 404);
+    }
+
+    $caseRef = $action === 'link'
+        ? mb_strtoupper(trim((string) ($payload['caseRef'] ?? '')))
+        : '';
+    if ($action === 'link') {
+        if ($caseRef === '' || mb_strlen($caseRef) > 40) {
+            respond(['error' => 'Selecciona un expediente válido.'], 422);
+        }
+        $stateRow = db()->query('SELECT data FROM app_operational_state WHERE id = 1')->fetch();
+        $state = $stateRow ? json_decode((string) $stateRow['data'], true) : null;
+        $cases = is_array($state['cases'] ?? null) ? $state['cases'] : [];
+        $exists = false;
+        foreach ($cases as $case) {
+            if (is_array($case) && mb_strtoupper((string) ($case['id'] ?? '')) === $caseRef) {
+                $exists = true;
+                break;
+            }
+        }
+        if (!$exists) {
+            respond(['error' => 'El expediente seleccionado no existe.'], 422);
+        }
+    }
+
+    $update = db()->prepare(
+        'UPDATE app_mail_items SET case_ref = ?, reviewed_by = ?, reviewed_at = NOW() WHERE id = ?'
+    );
+    $update->execute([$caseRef !== '' ? $caseRef : null, (int) $user['id'], $id]);
+    audit((int) $user['id'], $action === 'link' ? 'mail.case_link' : 'mail.case_unlink', [
+        'mailId' => $id,
+        'previousCaseRef' => (string) ($mail['case_ref'] ?? ''),
+        'caseRef' => $caseRef,
+    ]);
+    respond(['ok' => true, 'caseRef' => $caseRef !== '' ? $caseRef : null]);
 }
 
 if (in_array($action, ['approve', 'reprocess'], true) && function_exists('mail_case_creation_enabled') && !mail_case_creation_enabled()) {

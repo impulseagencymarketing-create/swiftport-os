@@ -1,6 +1,8 @@
-name: Correos automáticos desactivados
+name: Sincronizar bandeja de correos cada 30 minutos
 
 on:
+  schedule:
+    - cron: "*/30 * * * *"
   workflow_dispatch:
 
 permissions:
@@ -12,9 +14,21 @@ concurrency:
 
 jobs:
   process-mail:
-    name: Proceso detenido temporalmente
+    name: Leer info y operations sin crear expedientes
     runs-on: ubuntu-latest
+    timeout-minutes: 8
     steps:
-      - name: No leer correos
+      - name: Sincronizar bandeja segura
+        env:
+          CRON_TOKEN: ${{ secrets.APP_SETUP_TOKEN }}
         run: |
-          echo "La lectura automática de correos está desactivada temporalmente."
+          if [ -z "$CRON_TOKEN" ]; then
+            echo "::error::APP_SETUP_TOKEN no está configurado."
+            exit 1
+          fi
+          curl --fail --silent --show-error \
+            --request POST \
+            --header "X-Cron-Token: $CRON_TOKEN" \
+            --header "Content-Type: application/json" \
+            --data '{}' \
+            https://app.swiftportlogistic.com/api/mail/process.php
