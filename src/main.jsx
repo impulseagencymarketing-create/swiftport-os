@@ -9,7 +9,7 @@ import {
   Circle, Camera, Box, Scale, Layers3, Navigation, UserRound, FileText, UploadCloud,
   Download, Filter, CircleDollarSign, ExternalLink, Mail, PencilLine, ClipboardCheck,
   BadgeEuro, Sparkles, ArrowLeft, Save, LogOut, ShieldCheck, LockKeyhole, UserPlus, Eye,
-  RefreshCw, Timer, Undo2, ScanLine, Trash2, Archive, ClipboardList
+  RefreshCw, Timer, Undo2, ScanLine, Trash2, Archive, ClipboardList, Moon, Sun
 } from 'lucide-react';
 import {
   expedientesIniciales, movimientosAlmacen, transportesIniciales, proveedoresIniciales, tramitesAduana, eventosCalendarioIniciales,
@@ -19,6 +19,11 @@ import './styles.css';
 import './fixes.css';
 pdfjsLib.GlobalWorkerOptions.workerSrc=pdfWorkerUrl;
 const LOCAL_DESIGN_MODE=import.meta.env.DEV&&['localhost','127.0.0.1'].includes(window.location.hostname);
+const THEME_STORAGE_KEY='swiftport-color-theme';
+const loadColorTheme=()=>{try{const stored=localStorage.getItem(THEME_STORAGE_KEY);if(['light','dark'].includes(stored))return stored}catch{}return window.matchMedia?.('(prefers-color-scheme: dark)').matches?'dark':'light'};
+const INITIAL_COLOR_THEME=loadColorTheme();
+document.documentElement.dataset.theme=INITIAL_COLOR_THEME;
+document.documentElement.style.colorScheme=INITIAL_COLOR_THEME;
 const DEMO_USER={id:'local-demo',fullName:'Javier Fernández',email:'demo@swiftport.local',roles:['admin','operations','finance','driver']};
 const DEMO_TEAM=[
   {id:'local-admin',fullName:'Javier Fern\u00e1ndez',email:'javier@swiftport.local',roles:['admin','operations','finance']},
@@ -1554,6 +1559,8 @@ function SetupForm({onSuccess,globalError}){
 }
 function App({auth,finance,onFinanceChange,onLogout}){
   const user=auth.user;
+  const [colorTheme,setColorTheme]=useState(INITIAL_COLOR_THEME);
+  useEffect(()=>{document.documentElement.dataset.theme=colorTheme;document.documentElement.style.colorScheme=colorTheme;try{localStorage.setItem(THEME_STORAGE_KEY,colorTheme)}catch{}},[colorTheme]);
   useEffect(()=>{
     sanitizeVisibleDomEncoding();
     if(typeof document==='undefined'||typeof MutationObserver==='undefined')return undefined;
@@ -2295,6 +2302,7 @@ No se borrarán documentos ni fotos. El expediente volverá a este punto para co
           <div><div className="eyebrow">Operaciones  -  {new Date().toLocaleDateString('es-ES',{day:'numeric',month:'long',year:'numeric'})}</div><h1>{title}</h1><p>{subtitle}</p></div>
         </div>
         <div className="topbar-actions">
+          <button className="icon-button theme-toggle" aria-label={colorTheme==='dark'?'Activar modo claro':'Activar modo oscuro'} title={colorTheme==='dark'?'Modo claro':'Modo oscuro'} onClick={()=>setColorTheme(current=>current==='dark'?'light':'dark')}>{colorTheme==='dark'?<Sun/>:<Moon/>}</button>
           <button className="icon-button notification" aria-label="Notificaciones" onClick={()=>setNotificationOpen(true)}><Bell/>{notificationCount>0&&<i>{notificationCount}</i>}</button>
           {!driverOnly&&<button className="button primary" aria-label="Nuevo expediente" onClick={()=>setNewOpen(true)}><Plus/> <span>Nuevo expediente</span></button>}
           <div className="avatar" title={visibleUser.fullName+'  -  '+roleLabel(visibleUser)}>{initials(visibleUser.fullName)}</div>

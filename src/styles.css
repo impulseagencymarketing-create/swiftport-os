@@ -1437,3 +1437,38 @@
 .floor-space-box{grid-column:1/-1;display:grid;grid-template-columns:1.45fr repeat(3,minmax(120px,.7fr));gap:10px;align-items:end;padding:13px;border:1px solid #bed4ea;border-radius:11px;background:#f2f7fd}.floor-space-box>div:first-child{display:flex;align-items:center;gap:9px;align-self:center}.floor-space-box>div:first-child>svg{color:var(--blue);flex:0 0 auto}.floor-space-box>div:first-child b,.floor-space-box>div:first-child small{display:block}.floor-space-box>div:first-child b{font-size:10px}.floor-space-box>div:first-child small{font-size:8px;color:var(--muted);margin-top:2px;line-height:1.35}.floor-space-box>p{grid-column:1/-1;margin:0;padding-top:4px;font-size:8px;color:#35658f}
 @media(max-width:920px){.warehouse-occupancy-heading{align-items:flex-start}.warehouse-capacity{flex-direction:column}.warehouse-current-occupancy{grid-template-columns:1fr 210px}.floor-space-box{grid-template-columns:1fr 1fr}}
 @media(max-width:720px){.warehouse-occupancy-heading{display:block;padding:17px 16px 13px}.warehouse-capacity{display:grid;grid-template-columns:1fr 1fr;margin-top:12px}.warehouse-capacity span{min-width:0}.warehouse-current-occupancy{grid-template-columns:1fr;padding:15px 16px;gap:14px}.occupancy-equivalent{border-left:0;border-top:1px solid var(--line);padding:12px 0 0}.warehouse-history-head,.warehouse-history-row{padding-inline:16px}.floor-space-box{grid-template-columns:1fr}.floor-space-box>div:first-child,.floor-space-box>p{grid-column:1}}
+/* Tema oscuro */
+:root[data-theme="dark"]{color-scheme:dark;color:#dce6f2;background:#0b1119;--navy:#071422;--navy-2:#0c2239;--blue:#5fa8ff;--blue-2:#3389ed;--cyan:#36c0b8;--ink:#dce6f2;--muted:#93a4b8;--line:#2b3a4c;--soft:#101a26;--white:#152131;--danger:#ff7182;--warning:#f2ad43;--success:#46c995;--shadow:0 12px 32px rgba(0,0,0,.3)}
+:root[data-theme="dark"] body{background:#0b1119;color:var(--ink)}
+:root[data-theme="dark"] .main{background:#0b1119}
+:root[data-theme="dark"] .topbar{background:rgba(14,23,34,.94);box-shadow:0 8px 28px rgba(0,0,0,.18)}
+:root[data-theme="dark"] :is(h1,h2,h3,h4,strong,dt,dd){color:var(--ink)}
+:root[data-theme="dark"] :is(.panel,.kpi-card,.summary-strip article,.transport-card,.custom-card,.client-card,.client-file-card,.billing-ready-card,.billing-ready-list>button,.vessel-card,.vessel-list,.vessel-row,.mail-item,.audit-table,.notification-drawer,.delivery-popup,.warehouse-review-list article,.warehouse-cargo-list article,.load-cargo-card,.holded-confirmation-card){background-color:#131f2c;color:var(--ink);border-color:var(--line);box-shadow:var(--shadow)}
+:root[data-theme="dark"] :is(.icon-button,.button.tertiary,.filter-button,.filter-chips button,.list-toolbar,.case-card,.table-row,.document-box>button:not(.upload),.mobile-nav,.mobile-detail-back,.document-switch,.piece-documents label,.reception-documents a,.reception-documents .attachment-row>a,.calendar-head,.calendar-hours,.calendar-day,.calendar-month-day,.calendar-month-head b,.calendar-view-switch,.warehouse-view-tabs button,.billing-status-tabs button,.driver-scope-tabs button,.driver-view-tabs,.mail-filters button,.calendar-event>select,.calendar-driver-quick,.calendar-driver-quick select,.service-type-selector label,.case-reopen-panel,.case-reopen-panel button,.calendar-unscheduled-row,.calendar-unscheduled-row>span,.supplier-file-list span,.vessel-case-select,.cargo-option-card,.new-case-modal .modal-actions,.calendar-event-modal .modal-actions){background-color:#152231;color:var(--ink);border-color:var(--line)}
+:root[data-theme="dark"] :is(.modal,.auth-card){background:#111c29;color:var(--ink);border:1px solid var(--line)}
+:root[data-theme="dark"] :is(.field input,.field select,.field textarea,.search-box,.search-box input,.case-expense-list input,.notification-sound-settings select,.delivery-popup-sound select){background:#0d1722;color:var(--ink);border-color:#33465b}
+:root[data-theme="dark"] :is(input,textarea)::placeholder{color:#6f8196}
+:root[data-theme="dark"] select option{background:#111c29;color:var(--ink)}
+:root[data-theme="dark"] :is(.table-row:hover,.case-card:hover,.case-reopen-panel button:hover,.driver-undo-step:hover){background-color:#1a2a3b}
+:root[data-theme="dark"] :is(.case-card.selected,.table-row.selected,.filter-chips button.active,.warehouse-view-tabs button.active,.billing-status-tabs button.active,.driver-scope-tabs button.active,.service-type-selector label.active){background-color:#183653;border-color:#3975b5;color:#9dccff}
+:root[data-theme="dark"] :is(.detail-hero,.warehouse-current-occupancy,.floor-space-box,.cargo-line,.cargo-entry-summary,.transport-info,.search-box,.rate-grid span,.custom-card,.reception-record,.operation-checklist li,.billing-edit-note,.billing-flow-steps span,.driver-job-list>button,.evidence-assignment-lock,.manifest-email-brief,.client-cost-lines,.billing-hold-panel,.warehouse-history-head){background-color:#101b27;color:var(--ink);border-color:var(--line)}
+:root[data-theme="dark"] :is(.document-box,.next-action,.driver-manifest,.warehouse-transport-review>p,.warehouse-cargo-reception>p,.warehouse-cargo-evidence a,.pod-exception-note,.client-cost-note,.ais-metrics span,.occupancy-equivalent){border-color:var(--line)}
+:root[data-theme="dark"] :is(.button.secondary,.mail-hero-actions .tertiary){background:#183653;color:#9dccff;border-color:#315b86}
+:root[data-theme="dark"] .theme-toggle{background:#1c2b3d;color:#f4cb63;border-color:#40526a}
+:root[data-theme="dark"] .theme-toggle:hover{background:#26384d}
+:root[data-theme="dark"] :is(.badge.success,.service-list span){background:#14382d;color:#67d9ad}
+:root[data-theme="dark"] .badge.danger{background:#44232c;color:#ff93a1}
+:root[data-theme="dark"] :is(.badge.info,.summary-strip article>span,.ship-icon,.invoice-icon){background:#183653;color:#8dc5ff}
+:root[data-theme="dark"] :is(.badge.warning,.transport-icon.warning){background:#46351c;color:#f5bd60}
+:root[data-theme="dark"] :is(.alert-banner,.form-error,.warehouse-cargo-warning,.schedule-change-alert,.driver-owner-alert,.mail-reason.error,.billing-ready-card.warning,.calendar-provisional){background:#3b2d19;color:#f4c979;border-color:#67502a}
+:root[data-theme="dark"] :is(.timeline-marker svg,.notification-card.active>span,.delivery-popup-icon){background:#152231;fill:#152231}
+:root[data-theme="dark"] :is(.calendar-event.orange,.calendar-unscheduled-card.orange,.calendar-month-event.orange){background:#4a321d;color:#ffd093;border-color:#79512a}
+:root[data-theme="dark"] :is(.warehouse-capacity span,.floor-space-box){background:#122b40;border-color:#31536e}
+:root[data-theme="dark"] .warehouse-history-row{border-color:var(--line)}
+:root[data-theme="dark"] :is(.arrival-files,.reception-empty){color:var(--muted)}
+:root[data-theme="dark"] input[type="date"]::-webkit-calendar-picker-indicator,:root[data-theme="dark"] input[type="datetime-local"]::-webkit-calendar-picker-indicator,:root[data-theme="dark"] input[type="time"]::-webkit-calendar-picker-indicator{filter:invert(1);opacity:.75}
+:root[data-theme="dark"] ::selection{background:#2f6fae;color:#fff}
+@media(max-width:720px){:root[data-theme="dark"] .mobile-nav{background:rgba(17,28,41,.96)}}:root[data-theme="dark"] .delivery-popup{background:#2c2418;border-color:#70552b}
+:root[data-theme="dark"] .delivery-popup b{color:var(--ink)}
+:root[data-theme="dark"] .delivery-popup p{color:var(--muted)}
+:root[data-theme="dark"] .delivery-popup small{color:#f2bd62}
