@@ -1472,3 +1472,14 @@
 :root[data-theme="dark"] .delivery-popup b{color:var(--ink)}
 :root[data-theme="dark"] .delivery-popup p{color:var(--muted)}
 :root[data-theme="dark"] .delivery-popup small{color:#f2bd62}
+/* Revisión final de facturas dentro del listado */
+.billing-table .table-head,.billing-table .table-row{grid-template-columns:minmax(175px,1fr) .58fr minmax(190px,1.05fr) .48fr .48fr .48fr minmax(245px,1.35fr) auto}
+.billing-final-revenue{display:grid;gap:2px}.billing-final-revenue small{color:#16805f;font-size:7px;font-weight:800;text-transform:uppercase}
+.billing-review-column{display:grid!important;justify-items:start;gap:6px!important;min-width:0}
+.billing-holded-review{width:100%;display:grid;grid-template-columns:auto minmax(0,1fr);gap:8px;align-items:start;padding:9px;border:1px solid #bfded1;border-radius:10px;background:#f5fcf8;color:#166b50}
+.billing-holded-review.pending{border-color:#d8e2ec;background:#f7f9fb;color:#60758b}.billing-holded-review.changed{border-color:#e9c980;background:#fff8e9;color:#926012}
+.billing-holded-review-icon{width:27px;height:27px;display:grid;place-items:center;border-radius:50%;background:#dff6ea;color:#14805c}.billing-holded-review.pending .billing-holded-review-icon{background:#e9eef4;color:#60758b}.billing-holded-review.changed .billing-holded-review-icon{background:#ffedc5;color:#a36a10}.billing-holded-review-icon svg{width:16px;height:16px;stroke-width:2.5}
+.billing-holded-review>span:last-child{min-width:0}.billing-holded-review b,.billing-holded-review small,.billing-holded-review em{display:block}.billing-holded-review b{font-size:9px}.billing-holded-review small{margin-top:2px;color:#6f8296;font-size:7px;line-height:1.35;white-space:normal}.billing-holded-review em{width:max-content;max-width:100%;margin-top:5px;padding:3px 6px;border-radius:999px;background:#dff6ea;color:#127452;font-size:7px;font-style:normal;font-weight:900}.billing-holded-review.changed em{background:#ffedc5;color:#926012}
+.billing-row-actions{flex-wrap:wrap}.billing-row-actions .button.compact{padding:8px 9px;font-size:9px}.billing-row-actions .button.compact svg{width:14px}
+:root[data-theme="dark"] .billing-holded-review{background:#14382d;border-color:#2d6d56;color:#74ddb6}:root[data-theme="dark"] .billing-holded-review.pending{background:#172433;border-color:#34475b;color:#a5b6c8}:root[data-theme="dark"] .billing-holded-review.changed{background:#3c2e19;border-color:#6d5226;color:#f2c26f}:root[data-theme="dark"] .billing-holded-review small{color:#9caec0}:root[data-theme="dark"] .billing-final-revenue small{color:#64d3a8}
+@media(max-width:720px){.billing-review-column{justify-items:stretch}.billing-holded-review{max-width:100%}.billing-table .table-row>span.billing-review-column{display:grid!important}}
