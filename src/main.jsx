@@ -193,6 +193,15 @@ const warehouseEntryCargoSummary=entry=>{
   }).join(' + ');
   return `${Number(entry?.bultos)||0} BULTO${Number(entry?.bultos)===1?'':'S'}${entry?.peso?` \u00B7 ${String(entry.peso).toUpperCase()}`:''}`;
 };
+const warehouseEntryTypeSummary=entry=>{
+  const lines=Array.isArray(entry?.mercancias)?entry.mercancias.filter(Boolean):[];
+  if(lines.length)return lines.map(piece=>{
+    const qty=Number(piece.cantidad)||1;
+    const type=String(piece.tipo||'BULTO').trim().toUpperCase();
+    return `${qty} ${type}${qty===1||type.endsWith('S')?'':'S'}`;
+  }).join(' + ');
+  return `${Number(entry?.bultos)||0} BULTO${Number(entry?.bultos)===1?'':'S'}`;
+};
 const warehouseWhatsappSummary=(entries=[],cases=[])=>{
   const active=entries.filter(activeWarehouseEntry).sort((a,b)=>String(a.buque||'').localeCompare(String(b.buque||''),'es')||(Date.parse(a.fechaRecepcion||a.fecha||a.entrada||'')||0)-(Date.parse(b.fechaRecepcion||b.fecha||b.entrada||'')||0));
   if(!active.length)return '';
@@ -550,12 +559,22 @@ const EURO_PALLET_FLOOR_M2=.96;
 const WAREHOUSE_PALLET_CAPACITY=30;
 const WAREHOUSE_OPERATIONAL_M2=WAREHOUSE_PALLET_CAPACITY*EURO_PALLET_FLOOR_M2;
 const floorNumber=value=>Math.max(0,Number(String(value??'').replace(',','.'))||0);
-const warehouseFloorArea=entry=>{
+const isPalletCargoType=value=>/^(?:EURO\s*)?PALL?ETS?$/.test(String(value||'').trim().toUpperCase());
+const warehouseDeclaredPallets=entry=>(entry.mercancias||[]).filter(line=>isPalletCargoType(line.tipo)).reduce((sum,line)=>sum+floorNumber(line.cantidad),0);
+const warehousePalletPositions=entry=>{
   const mode=entry.spaceType||'auto';
-  if(mode==='none')return 0;
-  if(mode==='pallet')return floorNumber(entry.spacePositions)*EURO_PALLET_FLOOR_M2;
-  if(mode==='long')return floorNumber(entry.spacePositions)*floorNumber(entry.spaceLength||3)*floorNumber(entry.spaceWidth||1);
-  return (entry.mercancias||[]).filter(line=>/PALL?ET/i.test(String(line.tipo||''))).reduce((sum,line)=>sum+floorNumber(line.cantidad)*EURO_PALLET_FLOOR_M2,0);
+  if(mode==='none'||mode==='long')return 0;
+  if(mode==='pallet')return floorNumber(entry.spacePositions);
+  return warehouseDeclaredPallets(entry);
+};
+const warehouseLongFloorArea=entry=>(entry.spaceType||'auto')==='long'?floorNumber(entry.spacePositions)*floorNumber(entry.spaceLength||3)*floorNumber(entry.spaceWidth||1):0;
+const warehouseFloorArea=entry=>warehousePalletPositions(entry)*EURO_PALLET_FLOOR_M2+warehouseLongFloorArea(entry);
+const warehouseOccupancyLabel=entry=>{
+  const pallets=warehousePalletPositions(entry);
+  const longArea=warehouseLongFloorArea(entry);
+  if(pallets)return `${pallets.toLocaleString('es-ES',{maximumFractionDigits:1})} pallet${pallets===1?'':'s'} computable${pallets===1?'':'s'}`;
+  if(longArea)return `Material largo · ${longArea.toLocaleString('es-ES',{maximumFractionDigits:2})} m² computables`;
+  return 'No computa · cajas, paquetes o bultos';
 };
 const warehouseOccupancyPercent=area=>area/WAREHOUSE_OPERATIONAL_M2*100;
 const warehouseEntryDates=entry=>{
@@ -3485,7 +3504,9 @@ function Almacen({items,cases,openCase,registerEntry,updateEntry,deleteEntry,sho
   const activeStock=warehouseItems.filter(activeWarehouseEntry);
   const totalPackages=activeStock.reduce((sum,item)=>sum+(Number(item.bultos)||0),0);
   const totalWeight=activeStock.reduce((sum,item)=>sum+(Number(String(item.peso).replace(/\./g,'').replace(',','.').replace(/[^\d.]/g,''))||0),0);
-  const occupiedArea=activeStock.reduce((sum,item)=>sum+warehouseFloorArea(item),0);
+  const occupiedPallets=activeStock.reduce((sum,item)=>sum+warehousePalletPositions(item),0);
+  const occupiedLongArea=activeStock.reduce((sum,item)=>sum+warehouseLongFloorArea(item),0);
+  const occupiedArea=occupiedPallets*EURO_PALLET_FLOOR_M2+occupiedLongArea;
   const occupationPercent=warehouseOccupancyPercent(occupiedArea);
   const monthlyOccupancy=warehouseMonthlyOccupancy(warehouseItems);
   const submit=form=>{registerEntry(form);setEntryOpen(false)};
@@ -3503,16 +3524,16 @@ function Almacen({items,cases,openCase,registerEntry,updateEntry,deleteEntry,sho
   };
   return <>
     <section className={'summary-strip '+(!showFinance?'summary-strip-three':'')}>
-      <Summary icon={Box} label="Bultos en stock" value={String(totalPackages)}/>
+      <Summary icon={Box} label="Piezas en stock" value={String(totalPackages)}/>
       <Summary icon={Scale} label="Peso total" value={totalWeight.toLocaleString('es-ES')+' kg'}/>
       <Summary icon={Layers3} label="Ocupación real" value={occupationPercent.toLocaleString('es-ES',{maximumFractionDigits:1})+'%'}/>
       {showFinance&&<Summary icon={CircleDollarSign} label="Storage acumulado" value={money(storageTotal)}/>}
     </section>
     <section className="panel warehouse-occupancy-panel">
-      <div className="warehouse-occupancy-heading"><div><span className="overline">75 m² de superficie total</span><h2>Ocupación real del almacén</h2><p>Capacidad operativa: 30 pallets equivalen al 100%, descontando estanterías y zonas de maniobra. Cajas, sobres, paquetes y bultos no suman porcentaje.</p></div><div className="warehouse-capacity"><span><b>{WAREHOUSE_PALLET_CAPACITY}</b><small>pallets = 100%</small></span><span><b>{WAREHOUSE_OPERATIONAL_M2.toLocaleString('es-ES',{maximumFractionDigits:1})} m²</b><small>superficie útil equivalente</small></span></div></div>
+      <div className="warehouse-occupancy-heading"><div><span className="overline">75 m² de superficie total</span><h2>Ocupación real del almacén</h2><p>Solo cuentan los pallets identificados y el material largo declarado. Cajas, sobres, paquetes y bultos permanecen en stock, pero ocupan 0% en esta estadística.</p></div><div className="warehouse-capacity"><span><b>{WAREHOUSE_PALLET_CAPACITY}</b><small>pallets = 100%</small></span><span><b>{WAREHOUSE_OPERATIONAL_M2.toLocaleString('es-ES',{maximumFractionDigits:1})} m²</b><small>superficie útil equivalente</small></span></div></div>
       <div className="warehouse-current-occupancy">
         <div className="occupancy-gauge"><div><strong>{occupationPercent.toLocaleString('es-ES',{maximumFractionDigits:1})}%</strong><small>{occupiedArea.toLocaleString('es-ES',{maximumFractionDigits:2})} m² computables · límite operativo {WAREHOUSE_OPERATIONAL_M2.toLocaleString('es-ES',{maximumFractionDigits:1})} m²</small></div><span className={occupationPercent>=100?'danger':occupationPercent>=70?'warning':'good'}><i style={{width:`${Math.min(100,occupationPercent)}%`}}/></span></div>
-        <div className="occupancy-equivalent"><small>EQUIVALENTE ACTUAL</small><b>{(occupiedArea/EURO_PALLET_FLOOR_M2).toLocaleString('es-ES',{maximumFractionDigits:1})} de {WAREHOUSE_PALLET_CAPACITY} pallets</b><span>El 100% ya descuenta estanterías, pasillos y zonas de maniobra.</span></div>
+        <div className="occupancy-equivalent"><small>SOLO PALLETS Y LARGOS</small><b>{occupiedPallets.toLocaleString('es-ES',{maximumFractionDigits:1})} pallets + {occupiedLongArea.toLocaleString('es-ES',{maximumFractionDigits:2})} m² de largos</b><span>Equivalente total: {(occupiedArea/EURO_PALLET_FLOOR_M2).toLocaleString('es-ES',{maximumFractionDigits:1})} de {WAREHOUSE_PALLET_CAPACITY}. El resto ocupa 0%.</span></div>
       </div>
       <div className="warehouse-history"><div className="warehouse-history-head"><span>Mes</span><span>Promedio</span><span>Máximo</span><span>≥ 30%</span><span>≥ 70%</span><span>≥ 100%</span></div>{monthlyOccupancy.map(month=><div className="warehouse-history-row" key={month.key}><span><b>{month.label}</b><small>{month.days} días medidos</small></span><span>{month.average.toLocaleString('es-ES',{maximumFractionDigits:1})}%</span><span>{month.max.toLocaleString('es-ES',{maximumFractionDigits:1})}%</span><span><b>{month.over30}</b> días</span><span><b>{month.over70}</b> días</span><span className={month.over100?'danger':''}><b>{month.over100}</b> días</span></div>)}</div>
     </section>
@@ -3530,7 +3551,7 @@ function Almacen({items,cases,openCase,registerEntry,updateEntry,deleteEntry,sho
           <span className="primary-cell"><label className="warehouse-select" onClick={event=>event.stopPropagation()}><input type="checkbox" disabled={!activeWarehouseEntry(item)} checked={selectedRefs.includes(item.ref)} onChange={event=>toggleWarehouseSelection(item.ref,event.target.checked)}/></label><span className="box-icon"><Box/></span><span><b>{item.buque}</b><small>{item.ref}  -  {item.expediente||'SIN EXPEDIENTE'}  -  {(item.fotos||[]).length} fotos</small></span></span>
           <span data-label="Ubicacion"><b>{item.zona}</b></span>
           <span data-label="Entrada">{item.entrada}</span>
-          <span data-label="Mercancia">{item.bultos} bultos<small>{item.peso} · {warehouseFloorArea(item).toLocaleString('es-ES',{maximumFractionDigits:2})} m²</small></span>
+          <span data-label="Mercancia">{warehouseEntryTypeSummary(item)}<small>{item.peso} · {warehouseOccupancyLabel(item)}</small></span>
           <span data-label="Storage">{storageDaysForEntry(item)} dia{storageDaysForEntry(item)===1?'':'s'}</span>
           <span data-label="Estado"><Badge>{item.expediente?item.estado:'Por vincular'}</Badge></span>
         </button>)}
