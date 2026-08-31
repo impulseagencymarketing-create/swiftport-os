@@ -743,3 +743,21 @@
 :root[data-theme="dark"] .multi-role-selector label:hover{background:#1a2a3b!important;border-color:#46627f!important}
 :root[data-theme="dark"] .multi-role-selector label.checked:hover{background:#1d4160!important;border-color:#5793cc!important}
 :root[data-theme="dark"] .file-picker:hover{background:#173653!important;border-color:#5fa8ff!important;color:#b9dcff!important}
+
+/* Dark theme: billing draft editor surfaces. */
+:root[data-theme="dark"] :is(
+  .invoice-locked,
+  .supplier-invoice-import,
+  .invoice-lines-editor,
+  .invoice-lines-title,
+  .invoice-total-box
+){background:#101c29!important;color:#f2f6fb!important;border-color:#314256!important}
+:root[data-theme="dark"] .invoice-lines-title{background:#142333!important}
+:root[data-theme="dark"] .invoice-line-row{background:#101c29!important;border-color:#2b3b4e!important}
+:root[data-theme="dark"] .invoice-line-row:nth-child(even){background:#0d1925!important}
+:root[data-theme="dark"] .invoice-total-box{background:#0d1824!important}
+:root[data-theme="dark"] .invoice-total-box strong{border-color:#314256!important}
+:root[data-theme="dark"] .invoice-modal input[readonly]{background:#0b1621!important;color:#c5d2df!important;border-color:#3a4e64!important}
+:root[data-theme="dark"] :is(.invoice-locked b,.supplier-import-head b,.invoice-lines-title b,.invoice-line-row>strong,.invoice-total-box b){color:#f5f8fc!important}
+:root[data-theme="dark"] :is(.invoice-locked small,.invoice-locked em,.supplier-import-head small,.invoice-lines-title small,.invoice-total-box span){color:#a8b5c5!important}
+:root[data-theme="dark"] .invoice-line-row .line-detail input{color:#dce8f5!important}
