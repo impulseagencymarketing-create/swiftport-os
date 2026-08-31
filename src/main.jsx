@@ -3476,6 +3476,8 @@ function Clientes({notify,clients,updateClient}){
 function Facturacion({openCase,notify,invoices,cases,warehouseEntries=[],transports=[],calendarEvents=[],clients=[],updateInvoice,syncInvoices,csrfToken,currentUser}){
   const [editing,setEditing]=useState(null);
   const [sendingHolded,setSendingHolded]=useState('');
+  const [checkingHolded,setCheckingHolded]=useState('');
+  const holdedAutoCheckRef=useRef(new Set());
   const [billingSort,setBillingSort]=useState('exp_desc');
   const [billingView,setBillingView]=useState('pending');
   const canAdmin=hasRole(currentUser,'admin');
@@ -3608,8 +3610,40 @@ function Facturacion({openCase,notify,invoices,cases,warehouseEntries=[],transpo
     .catch(reason=>notify([reason.message,reason.body?.holdedStatus,reason.body?.holdedReason].filter(Boolean).join(' · ')))
     .finally(()=>setSendingHolded(''));
   };
+  const verifyHoldedDocuments=async(items=sentInvoices,{silent=false}={})=>{
+    if(!csrfToken){if(!silent)notify('Inicia sesión en la web publicada para comprobar Holded.');return}
+    const candidates=items.filter(item=>item.holdedId);
+    if(!candidates.length){if(!silent)notify('Estos documentos no tienen un ID de Holded que se pueda comprobar.');return}
+    setCheckingHolded(candidates.length===1?candidates[0].id:'all');
+    try{
+      const result=await api('/api/holded/status.php',{method:'POST',headers:{'X-CSRF-Token':csrfToken},body:jsonBody({invoices:candidates.map(item=>({id:item.id,holdedId:item.holdedId,holdedDocType:item.holdedDocType||'proform',holdedAt:item.holdedAt||''}))})});
+      const checkedById=new Map((result.items||[]).map(status=>[status.id,status]));
+      const nextInvoices=invoices.map(invoice=>{
+        const status=checkedById.get(invoice.id);
+        if(!status)return invoice;
+        const nextState=status.billed&&!['Facturado','Cobrado'].includes(invoice.estado)?'Facturado':invoice.estado;
+        return {...invoice,estado:nextState,holdedStatus:status.holdedStatus||invoice.holdedStatus,holdedCheckedAt:status.holdedCheckedAt||result.checkedAt||new Date().toISOString(),holdedInvoiceId:status.holdedInvoiceId||invoice.holdedInvoiceId||'',holdedInvoiceNumber:status.holdedInvoiceNumber||invoice.holdedInvoiceNumber||''};
+      });
+      syncInvoices(nextInvoices);
+      if(result.billed>0)notify(`Holded verificado: ${result.billed} documento${result.billed===1?' ha':'s han'} pasado a Facturado.`);
+      else if(!silent)notify(`Holded verificado: ${result.checked||candidates.length} proforma${(result.checked||candidates.length)===1?'':'s'} todavía sin facturar.`);
+    }catch(reason){
+      if(!silent)notify([reason.message,reason.body?.holdedStatus,reason.body?.holdedReason].filter(Boolean).join(' · '));
+    }finally{
+      setCheckingHolded('');
+    }
+  };
+  const sentHoldedSignature=sentInvoices.map(item=>`${item.id}:${item.holdedId||''}`).sort().join('|');
+  useEffect(()=>{
+    if(!csrfToken||!sentHoldedSignature)return;
+    const candidates=sentInvoices.filter(item=>item.holdedId&&!holdedAutoCheckRef.current.has(`${item.id}:${item.holdedId}`));
+    if(!candidates.length)return;
+    candidates.forEach(item=>holdedAutoCheckRef.current.add(`${item.id}:${item.holdedId}`));
+    verifyHoldedDocuments(candidates,{silent:true});
+  },[csrfToken,sentHoldedSignature]);
   return <>
     <section className="billing-flow-panel panel"><SectionHeader title="Flujo de facturación" subtitle="Control interno antes de crear la proforma real en Holded"/><div className="billing-flow-steps">{groupedStatus.map((status,index)=><span key={status}><b>{index+1}</b><small>{status}</small></span>)}</div><div className="billing-rules"><div><b>Se puede modificar aquí</b><small>Cliente, concepto, importe, estado y vencimiento.</small></div><div><b>No se modifica aquí</b><small>Buque, mercancía, POD y evidencias: se corrigen desde Expediente.</small></div></div></section>
+    <section className="billing-flow-panel panel"><SectionHeader title="Doble verificación con Holded" subtitle="La app consulta el estado real de las proformas enviadas al abrir Facturación." action={<button className="button secondary" disabled={Boolean(checkingHolded)||!sentInvoices.some(item=>item.holdedId)} onClick={()=>verifyHoldedDocuments(sentInvoices)}><RefreshCw className={checkingHolded?'spinning':''}/> {checkingHolded?'Comprobando…':'Comprobar ahora'}</button>}/><div className="billing-rules"><div><b>Primera confirmación</b><small>Al crear la proforma se guarda su ID real de Holded.</small></div><div><b>Segunda confirmación</b><small>Holded indica si esa proforma sigue pendiente o ya está facturada; solo entonces cambia a Facturado.</small></div></div></section>
     {readyCases.length>0&&<section className="billing-ready-panel panel"><SectionHeader title="Listos para facturar" subtitle="Se crearán automáticamente con líneas habituales de operativa"/><div className="billing-ready-list">{readyCases.map(item=><article key={item.id} className="billing-ready-card"><span className="invoice-icon"><CheckCircle2/></span><div><b>{caseLabel(item)}</b><small>{item.cliente}  -  {item.puerto}  -  {isStorageOnly(item)?'salida/recogida verificada':'POD verificado'}</small><em>{invoiceCargoSummary(item,warehouseEntries)}  -  gastos {moneyExact(caseExpenseTotal(item))}  -  margen sugerido {moneyExact(suggestedTransportPrice(item,warehouseEntries)-caseExpenseTotal(item))}</em></div><div className="billing-ready-actions"><button className="button tertiary" onClick={()=>openCase(item.id)}>Ver expediente</button>{canAdmin&&<button className="button secondary danger compact" onClick={()=>archiveReadyCase(item)}><Archive/> Archivar</button>}<button className="button primary" onClick={()=>createDraft(item)}>Revisar borrador</button></div></article>)}</div></section>}
     {notReadyInvoices.length>0&&<section className="billing-hold-panel panel"><SectionHeader title="No listos / revisar" subtitle="Borradores guardados de expedientes que aún no están cerrados al 100%. No entran en el importe pendiente."/><div className="billing-ready-list">{notReadyInvoices.map(item=>{const related=relatedCaseForInvoice(item);return <article key={item.id} className="billing-ready-card warning"><span className="invoice-icon"><CircleAlert/></span><div><b>{item.expediente}  -  {related?.buque||item.buque||'BUQUE PENDIENTE'}</b><small>{item.cliente}  -  progreso {related?operationProgress(related):0}%  -  {related?.siguiente||'Expediente pendiente de completar'}</small><em>Este borrador queda reservado, pero no se considera listo para enviar.</em></div><div className="billing-ready-actions"><button className="button tertiary" onClick={()=>openCase(item.expediente)}>Ver expediente</button><button className="button secondary" onClick={()=>setEditing(item)}>Editar borrador</button>{canAdmin&&<button className="button secondary danger compact" onClick={()=>archiveInvoice(item)}><Archive/> Archivar</button>}</div></article>})}</div></section>}
     <section className="billing-hero"><div><span>Importe pendiente de gestión</span><strong>{money(total)}</strong><small>{activeInvoices.length} pendientes/enviados sin cerrar · facturados {invoicedInvoices.length} · costes {moneyExact(totalCosts)} · margen {moneyExact(total-totalCosts)}</small></div><div><span className="holded-mark">H</span><div><b>Holded conectado</b><small>El botón crea una proforma real. La factura final se hará cuando confirmemos el flujo.</small></div></div><button className="button primary" onClick={()=>notify('Holded listo: revisa un borrador y pulsa Enviar a Holded.')}><Download/> Proformas reales</button></section>
