@@ -1589,3 +1589,14 @@
 }
 .button.danger{background:#d92f4b;color:#fff;box-shadow:0 6px 14px rgba(217,47,75,.18)}
 .button.danger:hover{background:#ba253e}
+/* Sustituto estable del iframe retirado por VesselFinder */
+.ais-external-map{min-height:400px;padding:34px;display:flex;flex-direction:column;align-items:flex-start;justify-content:center;gap:16px;background:radial-gradient(circle at 18% 20%,rgba(65,151,255,.22),transparent 34%),linear-gradient(145deg,#0e2944,#081827);color:#eef6ff}
+.ais-external-map>svg{width:42px;height:42px;color:#65b5ff}
+.ais-external-map>span{display:grid;gap:4px}
+.ais-external-map small{font-size:9px;font-weight:900;letter-spacing:.1em;color:#77baff}
+.ais-external-map b{font:800 24px Manrope,sans-serif;color:#fff}
+.ais-external-map em{font-size:11px;font-style:normal;color:#9cb2c9}
+.ais-external-map .button{margin-top:3px;text-decoration:none}
+.ais-external-map>p{max-width:420px;margin:0;color:#9cb2c9;font-size:10px;line-height:1.55}
+:root[data-theme="dark"] .ais-external-map{background:radial-gradient(circle at 18% 20%,rgba(65,151,255,.17),transparent 34%),linear-gradient(145deg,#10253a,#07131e)}
+@media(max-width:720px){.ais-external-map{min-height:280px;padding:24px}.ais-external-map b{font-size:20px}}

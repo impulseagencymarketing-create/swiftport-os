@@ -2594,13 +2594,11 @@ function SectionHeader({title,subtitle,action}){return <div className="section-h
 function Empty({text}){return <div className="empty"><Search/><b>Sin resultados</b><p>{text}</p></div>}
 function PortCallPanel({item}){const schedule=portCallSchedule(item);const destination=item.deliveryMode==='barge'?'TRANSPORTE A GABARRA':item.deliveryMode==='vessel'?'TRANSPORTE A BUQUE':'';return <section className="port-call-panel"><div><Ship/><span><small>LLEGADA  -  ETA</small><b>{cleanCalendarText(schedule.eta)}</b></span></div><div><MapPin/><span><small>ATRAQUE  -  ETB</small><b>{schedule.etb}</b></span></div><div><Clock3/><span><small>SALIDA  -  ETD</small><b>{schedule.etd}</b></span></div><div><Timer/><span><small>ESTANCIA EN PUERTO</small><b>{item.portStay||'POR CONFIRMAR'}</b></span></div>{destination&&<footer><Truck/><span><small>DESTINO OPERATIVO</small><b>{destination}{item.operationLocation?`  -  ${item.operationLocation}`:''}</b></span></footer>}</section>}
 function VesselFinderMap({item}){
-  const imo=String(item.imo||'').replace(/\D/g,'');
-  const mmsi=String(item.mmsi||'').replace(/\D/g,'');
+  const imo=String(item.imo||'').replace(/D/g,'');
+  const mmsi=String(item.mmsi||'').replace(/D/g,'');
   if(imo.length!==7&&mmsi.length!==9)return null;
-  const params=new URLSearchParams({zoom:'undefined',lat:'undefined',lon:'undefined',width:'100%',height:'400',names:'true',track:'true',fleet:'false',fleet_name:'false',clicktoact:'false',store_pos:'true'});
-  if(imo.length===7)params.set('imo',imo);
-  else params.set('mmsi',mmsi);
-  return <div className="ais-map"><iframe title={'Mapa VesselFinder de '+item.buque} src={'https://www.vesselfinder.com/aismap?'+params.toString()} loading="eager" referrerPolicy="strict-origin-when-cross-origin"/></div>;
+  const vesselUrl=imo.length===7?'https://www.vesselfinder.com/vessels/details/'+imo:'https://www.vesselfinder.com/?mmsi='+mmsi;
+  return <div className="ais-map ais-external-map"><Navigation/><span><small>MAPA OFICIAL VESSELFINDER</small><b>{item.buque||'Buque'}</b><em>{imo.length===7?'IMO '+imo:'MMSI '+mmsi}</em></span><a className="button secondary" href={vesselUrl} target="_blank" rel="noreferrer">Abrir mapa oficial <ExternalLink/></a><p>VesselFinder ha dejado de aceptar su antiguo mapa embebido. El enlace abre la ficha y posición oficial sin mostrar el error “Bad request”.</p></div>;
 }
 function AisTrackingPanel({item,csrfToken,reloadOperational,notify}){
   const tracking=item.aisTracking;
