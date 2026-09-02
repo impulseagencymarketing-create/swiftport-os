@@ -30,6 +30,30 @@ $lines = $invoice['lines'] ?? [];
 if ($clientName === '' || $concept === '' || !is_array($lines) || count($lines) === 0) {
     respond(['error' => 'Faltan cliente, concepto o líneas de factura.'], 422);
 }
+function holded_append_pod_suffix(string $value): string
+{
+    $clean = trim((string) preg_replace('/\s+POD\s*$/i', '', $value));
+    return $clean === '' ? '' : $clean . ' POD';
+}
+
+if (stripos($clientName . ' ' . $clientFiscalName, 'limani') !== false) {
+    $concept = holded_append_pod_suffix($concept);
+    $referenceUpdated = false;
+    foreach ($lines as &$line) {
+        if (!is_array($line)) {
+            continue;
+        }
+        $lineId = strtolower(trim((string) ($line['id'] ?? '')));
+        $lineName = trim((string) ($line['item'] ?? ''));
+        $isReference = $lineId === 'ref' || (!$referenceUpdated && preg_match('/^SW-\d{4}-\d+/i', $lineName) === 1);
+        if (!$isReference) {
+            continue;
+        }
+        $line['item'] = holded_append_pod_suffix($lineName);
+        $referenceUpdated = true;
+    }
+    unset($line);
+}
 
 function holded_timestamp(?string $date): int
 {
