@@ -1600,3 +1600,15 @@
 .ais-external-map>p{max-width:420px;margin:0;color:#9cb2c9;font-size:10px;line-height:1.55}
 :root[data-theme="dark"] .ais-external-map{background:radial-gradient(circle at 18% 20%,rgba(65,151,255,.17),transparent 34%),linear-gradient(145deg,#10253a,#07131e)}
 @media(max-width:720px){.ais-external-map{min-height:280px;padding:24px}.ais-external-map b{font-size:20px}}
+/* Mapa AIS renderizado dentro de Swiftport, sin iframe externo */
+.ais-local-map{position:relative;min-height:400px;overflow:hidden;background:#071a2c}
+.ais-local-map>svg{display:block;width:100%;height:400px}
+.ais-map-context{position:absolute;left:14px;bottom:14px;display:flex;align-items:center;gap:9px;padding:9px 11px;border:1px solid rgba(163,205,235,.3);border-radius:10px;background:rgba(5,21,35,.86);color:#eef7ff;backdrop-filter:blur(8px)}
+.ais-map-context>i{width:9px;height:9px;border-radius:50%;background:#f3a623;box-shadow:0 0 0 5px rgba(243,166,35,.15)}
+.ais-map-context.live>i{background:#45d5a3;box-shadow:0 0 0 5px rgba(69,213,163,.15)}
+.ais-map-context b,.ais-map-context small{display:block}.ais-map-context b{font-size:9px}.ais-map-context small{margin-top:2px;color:#91abc0;font-size:8px}
+.ais-map-vessel-link{position:absolute;right:14px;bottom:14px;display:inline-flex;align-items:center;gap:5px;padding:8px 10px;border:1px solid rgba(163,205,235,.3);border-radius:9px;background:rgba(5,21,35,.86);color:#9fd1ff;text-decoration:none;font-size:9px;font-weight:800;backdrop-filter:blur(8px)}
+.ais-map-vessel-link svg{width:13px;height:13px}
+.ais-map-unavailable{min-height:400px;display:flex;align-items:center;justify-content:center;gap:12px;padding:24px;background:linear-gradient(145deg,#0e2944,#081827);color:#eef6ff}
+.ais-map-unavailable>svg{width:28px;color:#65b5ff}.ais-map-unavailable b,.ais-map-unavailable small{display:block}.ais-map-unavailable small{margin-top:4px;color:#9cb2c9}
+@media(max-width:720px){.ais-local-map,.ais-map-unavailable{min-height:280px}.ais-local-map>svg{height:280px}.ais-map-context{left:10px;bottom:10px}.ais-map-vessel-link{right:10px;bottom:10px}}
