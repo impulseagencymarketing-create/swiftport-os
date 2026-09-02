@@ -1543,3 +1543,49 @@
 .case-mail-picker{display:grid;gap:11px;margin:0 20px 18px;padding:13px;border:1px solid var(--line);border-radius:12px;background:#f7fafd}.case-mail-picker-head{display:flex;align-items:center;justify-content:space-between;gap:14px}.case-mail-picker-head b,.case-mail-picker-head small{display:block}.case-mail-picker-head b{font-size:11px}.case-mail-picker-head small{margin-top:3px;color:var(--muted);font-size:8px}.case-mail-picker-tools{display:grid;grid-template-columns:minmax(240px,1fr) auto auto;align-items:center;gap:10px}.case-mail-picker-tools .mail-filters{padding:0}.case-mail-picker-tools .text-button:disabled{opacity:.45}.case-mail-candidates{display:grid;gap:7px;max-height:370px;overflow:auto;padding-right:3px}.case-mail-candidate{display:grid;grid-template-columns:auto auto minmax(0,1fr) auto;align-items:start;gap:9px;padding:11px;border:1px solid var(--line);border-radius:10px;background:#fff;cursor:pointer}.case-mail-candidate:hover{border-color:#9fc7f1;background:#f5faff}.case-mail-candidate.selected{border-color:#4b9cf2;background:#eaf4ff;box-shadow:inset 3px 0 0 #3288e6}.case-mail-candidate.recommended:not(.selected){border-left:3px solid #24a777}.case-mail-candidate>input{width:16px;height:16px;margin-top:3px;accent-color:var(--blue)}.case-mail-candidate .mail-source{margin:0}.case-mail-candidate>span:nth-child(3){min-width:0}.case-mail-candidate b,.case-mail-candidate small{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.case-mail-candidate b{font-size:10px}.case-mail-candidate small{margin-top:3px;color:var(--muted);font-size:8px}.case-mail-candidate p{margin:6px 0 0;color:#66798e;font-size:8px;line-height:1.45}.case-mail-candidate em{align-self:center;padding:4px 7px;border-radius:999px;background:#e3f7ee;color:#167552;font-size:7px;font-style:normal;font-weight:900;white-space:nowrap}.case-linked-mail-head{display:flex;align-items:center;justify-content:space-between;margin:0 20px 9px;padding-top:2px}.case-linked-mail-head b{font-size:10px}.case-linked-mail-head small{color:var(--muted);font-size:8px}.case-mail-list details footer{display:flex;justify-content:flex-end;padding:9px 12px;border-top:1px solid var(--line)}.case-mails-empty.compact{margin:0}
 :root[data-theme="dark"] .case-mail-picker{background:#0d1824;border-color:var(--line)}:root[data-theme="dark"] .case-mail-candidate{background:#101c29;color:var(--ink);border-color:#314256}:root[data-theme="dark"] .case-mail-candidate:hover{background:#15283a;border-color:#466987}:root[data-theme="dark"] .case-mail-candidate.selected{background:#173653;border-color:#4b91d1}:root[data-theme="dark"] .case-mail-candidate p{color:#a8b5c5}:root[data-theme="dark"] .case-mail-candidate em{background:#14382d;color:#72dcb4}
 @media(max-width:720px){.case-layout:not(.mobile-detail-open) .case-mails-panel{display:none}.case-layout.mobile-detail-open .case-mails-panel{display:block;margin-top:12px}.case-mails-panel{grid-column:auto}.case-mail-picker{margin-inline:14px}.case-mail-picker-head{align-items:stretch;flex-direction:column}.case-mail-picker-head .button{width:100%}.case-mail-picker-tools{grid-template-columns:1fr}.case-mail-picker-tools .mail-filters{overflow:auto}.case-mail-picker-tools .text-button{justify-self:start}.case-mail-candidate{grid-template-columns:auto 1fr}.case-mail-candidate .mail-source{grid-column:2}.case-mail-candidate>span:nth-child(3){grid-column:2}.case-mail-candidate em{grid-column:2;justify-self:start}.case-linked-mail-head{margin-inline:14px}}
+
+/* Cancelación trazable de transportes */
+.transport-card.cancelled{border-color:#efb4bd;background:linear-gradient(180deg,#fff,#fff8f9)}
+.transport-card.cancelled .transport-route-detail{opacity:.72}
+.transport-cancellation-summary,.cancellation-callout{display:flex;align-items:flex-start;gap:10px;padding:12px;border:1px solid #efb4bd;border-radius:10px;background:#fff1f3;color:#9f263a}
+.transport-cancellation-summary{margin:14px 0}
+.transport-cancellation-summary svg,.cancellation-callout svg{flex:0 0 auto;width:18px}
+.transport-cancellation-summary b,.transport-cancellation-summary small,.cancellation-callout b,.cancellation-callout small{display:block}
+.transport-cancellation-summary b,.cancellation-callout b{font-size:11px}
+.transport-cancellation-summary small,.cancellation-callout small{margin-top:3px;font-size:9px;line-height:1.45}
+.cancellation-billable{display:flex;align-items:flex-start;gap:10px;padding:12px;border:1px solid var(--line);border-radius:10px;background:#f7fafc;color:var(--ink)}
+.cancellation-billable input{width:18px;height:18px;flex:0 0 auto}
+.cancellation-billable b,.cancellation-billable small{display:block}
+.cancellation-billable b{font-size:11px}.cancellation-billable small{margin-top:3px;color:var(--muted);font-size:9px}
+.case-service-list>article{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:center;border:1px solid var(--line);border-radius:10px;background:#fbfcfe;padding:6px}
+.case-service-main{display:grid;grid-template-columns:auto minmax(0,1fr) minmax(130px,.45fr) auto;align-items:center;gap:11px;width:100%;padding:7px;border:0;background:transparent;text-align:left;color:var(--ink)}
+.case-service-main b,.case-service-main small{display:block}.case-service-main b{font-size:10px}.case-service-main small{margin-top:3px;font-size:8px;color:var(--muted)}
+.case-service-main>svg{width:15px;color:#8a9bad}
+.case-service-cancel{display:inline-flex;align-items:center;gap:6px;border:1px solid #efb4bd;border-radius:8px;background:#fff1f3;color:#b52840;padding:8px 10px;font-size:9px;font-weight:800}
+.case-service-cancel svg{width:14px}
+.case-service-cancel:disabled{opacity:.45;cursor:not-allowed}
+.case-cancelled-services{margin:0 20px 20px;padding:14px;border:1px solid #efb4bd;border-radius:11px;background:#fff8f9}
+.case-cancelled-services>h3{display:flex;align-items:center;gap:7px;margin:0 0 10px;color:#a62b40;font-size:11px}
+.case-cancelled-services>h3 svg{width:16px}
+.case-cancelled-services>article{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:10px;align-items:center;padding:10px 0;border-top:1px solid #f3d6db}
+.case-cancelled-services>article:first-of-type{border-top:0}
+.case-cancelled-services b,.case-cancelled-services small,.case-cancelled-services em{display:block}
+.case-cancelled-services b{font-size:10px}.case-cancelled-services small{margin-top:3px;color:var(--muted);font-size:9px}.case-cancelled-services em{margin-top:4px;color:#a62b40;font-size:8px;font-style:normal}
+.case-service-icon.cancelled{background:#fdecef;color:#c53d53}
+:root[data-theme="dark"] .transport-card.cancelled{background:#201923;border-color:#663544}
+:root[data-theme="dark"] :is(.transport-cancellation-summary,.cancellation-callout,.case-service-cancel){background:#2b1920;border-color:#693444;color:#ff9faf}
+:root[data-theme="dark"] .cancellation-billable{background:#101b27;border-color:var(--line)}
+:root[data-theme="dark"] .case-service-list>article{background:#101b27;border-color:var(--line)}
+:root[data-theme="dark"] .case-service-main{color:var(--ink)}
+:root[data-theme="dark"] .case-cancelled-services{background:#201923;border-color:#663544}
+@media(max-width:720px){
+  .case-service-list>article{grid-template-columns:1fr}
+  .case-service-main{grid-template-columns:auto minmax(0,1fr) auto}
+  .case-service-main>span:nth-child(3){grid-column:2}
+  .case-service-cancel{justify-content:center}
+  .case-cancelled-services{margin-inline:14px}
+  .case-cancelled-services>article{grid-template-columns:auto minmax(0,1fr)}
+  .case-cancelled-services>article>.button{grid-column:2;justify-self:start}
+}
+.button.danger{background:#d92f4b;color:#fff;box-shadow:0 6px 14px rgba(217,47,75,.18)}
+.button.danger:hover{background:#ba253e}
