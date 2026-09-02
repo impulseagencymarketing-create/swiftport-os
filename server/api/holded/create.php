@@ -30,14 +30,29 @@ $lines = $invoice['lines'] ?? [];
 if ($clientName === '' || $concept === '' || !is_array($lines) || count($lines) === 0) {
     respond(['error' => 'Faltan cliente, concepto o líneas de factura.'], 422);
 }
-function holded_append_pod_suffix(string $value): string
+$purchaseOrder = strtoupper(trim((string) ($invoice['purchaseOrder'] ?? '')));
+$isLimaniInvoice = stripos($clientName . ' ' . $clientFiscalName, 'limani') !== false;
+
+function holded_with_purchase_order(string $value, string $purchaseOrder): string
 {
     $clean = trim((string) preg_replace('/\s+POD\s*$/i', '', $value));
-    return $clean === '' ? '' : $clean . ' POD';
+    if ($clean === '' || $purchaseOrder === '') {
+        return $clean;
+    }
+    if (str_ends_with(strtoupper($clean), ' ' . $purchaseOrder)) {
+        return $clean;
+    }
+    return $clean . ' ' . $purchaseOrder;
 }
 
-if (stripos($clientName . ' ' . $clientFiscalName, 'limani') !== false) {
-    $concept = holded_append_pod_suffix($concept);
+if ($isLimaniInvoice && $purchaseOrder === '') {
+    respond(['error' => 'Falta el PO / Purchase Order de LIMANI en el expediente.'], 422);
+}
+if (mb_strlen($purchaseOrder) > 80) {
+    respond(['error' => 'El PO / Purchase Order es demasiado largo.'], 422);
+}
+if ($purchaseOrder !== '') {
+    $concept = holded_with_purchase_order($concept, $purchaseOrder);
     $referenceUpdated = false;
     foreach ($lines as &$line) {
         if (!is_array($line)) {
@@ -49,12 +64,11 @@ if (stripos($clientName . ' ' . $clientFiscalName, 'limani') !== false) {
         if (!$isReference) {
             continue;
         }
-        $line['item'] = holded_append_pod_suffix($lineName);
+        $line['item'] = holded_with_purchase_order($lineName, $purchaseOrder);
         $referenceUpdated = true;
     }
     unset($line);
 }
-
 function holded_timestamp(?string $date): int
 {
     $date = trim((string) $date);
