@@ -1600,6 +1600,10 @@
 .ais-external-map>p{max-width:420px;margin:0;color:#9cb2c9;font-size:10px;line-height:1.55}
 :root[data-theme="dark"] .ais-external-map{background:radial-gradient(circle at 18% 20%,rgba(65,151,255,.17),transparent 34%),linear-gradient(145deg,#10253a,#07131e)}
 @media(max-width:720px){.ais-external-map{min-height:280px;padding:24px}.ais-external-map b{font-size:20px}}
+/* Mapa oficial de VesselFinder incrustado dentro de Swiftport */
+.ais-vesselfinder-embed{position:relative;min-height:400px;overflow:hidden;background:#dbe7f3}
+.ais-vesselfinder-embed iframe{background:#dbe7f3}
+.ais-vesselfinder-embed .ais-map-vessel-link{z-index:2}
 /* Mapa AIS renderizado dentro de Swiftport, sin iframe externo */
 .ais-local-map{position:relative;min-height:400px;overflow:hidden;background:#071a2c}
 .ais-local-map>svg{display:block;width:100%;height:400px}

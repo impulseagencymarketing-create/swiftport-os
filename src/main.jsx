@@ -2634,19 +2634,27 @@ function VesselFinderMap({item}){
   const portPosition=aisPortCoordinates(item.puerto);
   const position=hasLivePosition?[liveLat,liveLon]:portPosition;
   if(!position)return <div className="ais-map ais-map-unavailable"><Navigation/><span><b>Mapa pendiente de ubicación</b><small>Añade un puerto reconocido o actualiza la señal AIS del buque.</small></span></div>;
-  const centerLat=position[0];
-  const centerLon=position[1];
-  const spanLat=hasLivePosition?2.4:0.7;
-  const spanLon=hasLivePosition?3.6:1.05;
-  const project=coordinates=>({x:50+((coordinates[1]-centerLon)/spanLon)*82,y:50-((coordinates[0]-centerLat)/spanLat)*82});
-  const vesselPoint=project(position);
-  const portPoint=portPosition?project(portPosition):null;
-  const portVisible=portPoint&&portPoint.x>=4&&portPoint.x<=96&&portPoint.y>=5&&portPoint.y<=95;
-  const course=Number(tracking.course)||0;
+  const origin=typeof window!=='undefined'&&window.location?.origin?window.location.origin+'/':'https://app.swiftportlogistic.com/';
+  const params=new URLSearchParams({
+    zoom:hasLivePosition?'9':'11',
+    lat:String(position[0]),
+    lon:String(position[1]),
+    width:'100%',
+    height:'400',
+    names:'true',
+    track:'true',
+    fleet:'false',
+    fleet_name:'false',
+    fleet_hide_old_positions:'false',
+    clicktoact:'false',
+    store_pos:'true',
+    ra:origin
+  });
+  if(imo.length===7)params.set('imo',imo);
+  else if(mmsi.length===9)params.set('mmsi',mmsi);
   const vesselUrl=imo.length===7?'https://www.vesselfinder.com/vessels/details/'+imo:mmsi.length===9?'https://www.vesselfinder.com/?mmsi='+mmsi:'https://www.vesselfinder.com/';
-  return <div className="ais-map ais-local-map"><svg viewBox="0 0 100 100" role="img" aria-label={'Mapa AIS de '+(item.buque||'buque')} preserveAspectRatio="none"><defs><linearGradient id="ais-sea" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stopColor="#0a3453"/><stop offset="1" stopColor="#071a2c"/></linearGradient><pattern id="ais-grid" width="10" height="10" patternUnits="userSpaceOnUse"><path d="M 10 0 L 0 0 0 10" fill="none" stroke="#5ca9df" strokeOpacity=".16" strokeWidth=".22"/></pattern><filter id="ais-glow"><feGaussianBlur stdDeviation="1.1" result="blur"/><feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs><rect width="100" height="100" fill="url(#ais-sea)"/><rect width="100" height="100" fill="url(#ais-grid)"/><path d="M-5 78 C12 66 22 72 35 62 S60 56 72 42 S91 37 106 24" fill="none" stroke="#73b7d9" strokeOpacity=".2" strokeWidth=".65"/><path d="M-8 86 C18 77 27 84 47 69 S78 61 108 46" fill="none" stroke="#73b7d9" strokeOpacity=".12" strokeWidth=".45"/>{portVisible&&hasLivePosition&&<line x1={vesselPoint.x} y1={vesselPoint.y} x2={portPoint.x} y2={portPoint.y} stroke="#f4bd59" strokeWidth=".65" strokeDasharray="2 1.5"/>}{portVisible&&<g transform={'translate('+portPoint.x+' '+portPoint.y+')'}><circle r="3.1" fill="#f3a623" fillOpacity=".2"/><circle r="1.3" fill="#f3a623"/><text x="2.5" y="-1.5" fill="#f7d18b" fontSize="2.7" fontWeight="700">{String(item.puerto||'PUERTO').toUpperCase()}</text></g>}{hasLivePosition&&<g transform={'translate('+vesselPoint.x+' '+vesselPoint.y+') rotate('+course+')'} filter="url(#ais-glow)"><circle r="4.6" fill="#45d5a3" fillOpacity=".16"/><path d="M0 -4 L2.4 3 L0 2.1 L-2.4 3 Z" fill="#70f0c2" stroke="#d8fff0" strokeWidth=".35"/></g>}<text x="3" y="6" fill="#8bc8ee" fontSize="2.6" fontWeight="700">{hasLivePosition?'POSICIÓN AIS SWIFTPORT':'REFERENCIA DEL PUERTO'}</text><text x="3" y="10" fill="#ffffff" fontSize="3.8" fontWeight="800">{String(item.buque||'BUQUE').toUpperCase()}</text><text x="3" y="96" fill="#80a9c4" fontSize="2.4">{centerLat.toFixed(4)+'° · '+centerLon.toFixed(4)+'°'}</text></svg><div className={'ais-map-context '+(hasLivePosition?'live':'reference')}><i/><span><b>{hasLivePosition?'Última posición AIS':'Puerto previsto · posición de referencia'}</b><small>{hasLivePosition?(item.buque||'Buque'):(item.puerto||'Puerto')}</small></span></div><a className="ais-map-vessel-link" href={vesselUrl} target="_blank" rel="noreferrer">VesselFinder <ExternalLink/></a></div>;
-}
-function AisTrackingPanel({item,csrfToken,reloadOperational,notify}){
+  return <div className="ais-map ais-vesselfinder-embed"><iframe title={'Mapa VesselFinder de '+(item.buque||'buque')} src={'https://www.vesselfinder.com/aismap?'+params.toString()} loading="eager" referrerPolicy="strict-origin-when-cross-origin"/><a className="ais-map-vessel-link" href={vesselUrl} target="_blank" rel="noreferrer">Abrir en VesselFinder <ExternalLink/></a></div>;
+}function AisTrackingPanel({item,csrfToken,reloadOperational,notify}){
   const tracking=item.aisTracking;
   const hasIdentifier=String(item.imo||'').replace(/\D/g,'').length===7||String(item.mmsi||'').replace(/\D/g,'').length===9;
   const [refreshing,setRefreshing]=useState(false);
@@ -2673,11 +2681,11 @@ function AisTrackingPanel({item,csrfToken,reloadOperational,notify}){
   const refreshButton=<button className="button secondary ais-refresh" onClick={refresh} disabled={refreshing}><RefreshCw className={refreshing?'spinning':''}/>{refreshing?'Buscando señal AIS…':'Actualizar posición ahora'}</button>;
   const alertButton=<button className={'button '+(deviceAlerts?'device-alert-enabled':'tertiary')} onClick={enableDeviceAlerts} disabled={deviceAlerts}><Bell/>{deviceAlerts?'Avisos activos':'Activar avisos en este móvil'}</button>;
   if(!hasIdentifier)return <section className="ais-panel ais-empty"><Navigation/><div><small>SEGUIMIENTO DEL BUQUE</small><b>Añade el IMO o MMSI para localizarlo</b><p>Edita el expediente e introduce el IMO de 7 dígitos o el MMSI de 9 dígitos.</p></div></section>;
-  if(!tracking)return <section className="ais-panel"><VesselFinderMap item={item}/><div className="ais-info"><span className="overline"><Navigation/> MAPA OPERATIVO EN SWIFTPORT</span><div className="ais-status"><i className="stale"/><span><small>DATOS DE SWIFTPORT</small><b>Esperando señal propia</b></span></div><p>El mapa permanece dentro de Swiftport y muestra el puerto previsto mientras llega una señal AIS propia. Swiftport seguirá consultando AISStream para calcular métricas y alertas.</p><div className="ais-actions">{item.mmsi?refreshButton:<p>Añade también el MMSI para activar la actualización automática de Swiftport.</p>}{alertButton}</div></div></section>;
+  if(!tracking)return <section className="ais-panel"><VesselFinderMap item={item}/><div className="ais-info"><span className="overline"><Navigation/> MAPA OFICIAL VESSELFINDER</span><div className="ais-status"><i className="stale"/><span><small>DATOS DE SWIFTPORT</small><b>Esperando señal propia</b></span></div><p>El mapa oficial de VesselFinder permanece dentro de Swiftport y muestra el puerto y la última posición pública disponible. Swiftport seguirá consultando AISStream para calcular métricas y alertas.</p><div className="ais-actions">{item.mmsi?refreshButton:<p>Añade también el MMSI para activar la actualización automática de Swiftport.</p>}{alertButton}</div></div></section>;
   const last=tracking.sourceTimestamp||tracking.receivedAt;
   const stale=last&&Date.now()-new Date(last).getTime()>2*60*60*1000;
   const etaEstimate=tracking.estimatedArrivalAt?new Date(tracking.estimatedArrivalAt):null;
-  return <section className="ais-panel"><VesselFinderMap item={item}/><div className="ais-info"><span className="overline"><Navigation/> MAPA SWIFTPORT + AISSTREAM</span><div className="ais-status"><i className={stale?'stale':['Atracado','En fondeo','Atraque probable'].includes(tracking.status)?'moored':'live'}/><span><small>ESTADO ESTIMADO</small><b>{stale?'Señal sin actualizar':tracking.status}</b></span></div><div className="ais-metrics"><span><small>DISTANCIA AL PUERTO</small><b>{tracking.distanceToPortNm==null?'No calculada':tracking.distanceToPortNm+' mn'}</b></span><span><small>ETA ESTIMADA AIS</small><b>{etaEstimate&&!Number.isNaN(etaEstimate.getTime())?etaEstimate.toLocaleString('es-ES',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}):'Sin calcular'}</b></span><span><small>VELOCIDAD</small><b>{tracking.speed} kn</b></span><span><small>RUMBO</small><b>{tracking.course}°</b></span><span><small>ÚLTIMA SEÑAL</small><b>{last?new Date(last).toLocaleString('es-ES'):'—'}</b></span></div><div className="ais-actions">{refreshButton}{alertButton}<p>Automático cada 30 minutos  -  ETA AIS orientativa; confirma el atraque con el consignatario.</p></div></div></section>;
+  return <section className="ais-panel"><VesselFinderMap item={item}/><div className="ais-info"><span className="overline"><Navigation/> VESSELFINDER + AISSTREAM</span><div className="ais-status"><i className={stale?'stale':['Atracado','En fondeo','Atraque probable'].includes(tracking.status)?'moored':'live'}/><span><small>ESTADO ESTIMADO</small><b>{stale?'Señal sin actualizar':tracking.status}</b></span></div><div className="ais-metrics"><span><small>DISTANCIA AL PUERTO</small><b>{tracking.distanceToPortNm==null?'No calculada':tracking.distanceToPortNm+' mn'}</b></span><span><small>ETA ESTIMADA AIS</small><b>{etaEstimate&&!Number.isNaN(etaEstimate.getTime())?etaEstimate.toLocaleString('es-ES',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}):'Sin calcular'}</b></span><span><small>VELOCIDAD</small><b>{tracking.speed} kn</b></span><span><small>RUMBO</small><b>{tracking.course}°</b></span><span><small>ÚLTIMA SEÑAL</small><b>{last?new Date(last).toLocaleString('es-ES'):'—'}</b></span></div><div className="ais-actions">{refreshButton}{alertButton}<p>Automático cada 30 minutos  -  ETA AIS orientativa; confirma el atraque con el consignatario.</p></div></div></section>;
 }
 const isoDate=date=>date.toISOString().slice(0,10);
 const addDays=(date,days)=>{const next=new Date(date);next.setDate(next.getDate()+days);return next};
