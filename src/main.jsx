@@ -4066,7 +4066,11 @@ function Facturacion({openCase,notify,invoices,cases,warehouseEntries=[],transpo
     if(amount<=0&&!invoiceSentOrClosed(invoice))return {...base,stage:'incident',reason:'Importe pendiente o igual a 0 €. Revisar antes de enviar.'};
     if(invoice.holdedBilledVerified===true){
       if(invoice.holdedPriceVerified!==true)return {...base,stage:'verify',reason:'Factura localizada en Holded; falta leer o confirmar el importe final.'};
-      if(invoice.holdedPriceMatches===false)return {...base,stage:'incident',reason:'Facturada en Holded con una diferencia de '+moneyExact(Number(invoice.holdedPriceDifference)||0)+'.'};
+      if(invoice.holdedPriceMatches===false){
+        const difference=Number(invoice.holdedPriceDifference)||0;
+        if(difference>0)return {...base,stage:'confirmed',reason:'Factura confirmada por Holded · importe final superior en '+moneyExact(difference)+'.'};
+        return {...base,stage:'incident',reason:'Facturada en Holded por debajo de lo previsto: '+moneyExact(difference)+'.'};
+      }
       return {...base,stage:'confirmed',reason:'Factura confirmada por Holded'+(invoice.holdedInvoiceNumber?' · '+invoice.holdedInvoiceNumber:'')+'.'};
     }
     if(['Facturado','Cobrado'].includes(invoice.estado)){
