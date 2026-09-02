@@ -42,8 +42,9 @@ if (!is_array($data)
 }
 
 $encoded = json_encode($data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
-if (strlen($encoded) > 1000000) {
-    respond(['error' => 'Los datos operativos superan el tamaño permitido.'], 413);
+$maxOperationalStateBytes = 6 * 1024 * 1024;
+if (strlen($encoded) > $maxOperationalStateBytes) {
+    respond(['error' => 'Los datos operativos superan el límite de 6 MB. Contacta con soporte para archivarlos.'], 413);
 }
 
 $statement = db()->prepare(
