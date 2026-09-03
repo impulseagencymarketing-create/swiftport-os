@@ -1623,3 +1623,17 @@
 @media(max-width:720px){.billing-control-summary{margin-inline:14px}.billing-control-kpis{grid-template-columns:1fr 1fr;padding-inline:14px}.billing-control-kpis button:last-child{grid-column:1/-1}.billing-control-row{grid-template-columns:1fr;padding:14px;border-left-width:4px}.billing-control-money,.billing-control-actions{grid-column:auto}.billing-control-actions{justify-content:stretch}.billing-control-actions .button{flex:1}.billing-exception-modal{border-radius:0}}
 .billing-concept-cell{display:flex;flex-direction:column;gap:8px;align-items:stretch!important}.billing-po-inline{display:flex;flex-direction:column;gap:5px;padding:8px;border:1px solid var(--line);border-radius:10px;background:color-mix(in srgb,var(--panel) 82%,var(--blue) 18%)}.billing-po-inline.missing{border-color:#d99a2b;background:rgba(217,154,43,.12)}.billing-po-inline label{font-size:10px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}.billing-po-inline>div{display:flex;gap:6px;align-items:center}.billing-po-inline input{min-width:0;width:100%;height:34px;padding:0 9px;border:1px solid var(--line);border-radius:8px;background:var(--input-bg,var(--panel));color:var(--text);font-weight:700}.billing-po-inline small{color:#e8b75a;font-weight:700;line-height:1.3}.billing-po-inline .button{white-space:nowrap}
 @media(max-width:760px){.billing-po-inline>div{align-items:stretch;flex-direction:column}.billing-po-inline .button{width:100%}}
+/* El expediente comparte ancho con la lista lateral: responde a su contenedor, no solo a la ventana. */
+.case-detail{container-type:inline-size;container-name:case-detail}
+.detail-columns>*,.detail-side,.next-action,.document-box{min-width:0}
+.next-action>b,.next-action p{overflow-wrap:anywhere}
+.next-action .button{max-width:100%;white-space:normal;text-align:center;line-height:1.25}
+@container case-detail (max-width:900px){
+  .operation-checklist ol{grid-template-columns:repeat(3,minmax(0,1fr))}
+  .detail-columns{grid-template-columns:minmax(0,1fr)}
+  .detail-side{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+@container case-detail (max-width:560px){
+  .operation-checklist ol{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .detail-side{grid-template-columns:minmax(0,1fr)}
+}
