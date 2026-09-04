@@ -223,7 +223,7 @@ const warehouseWhatsappSummary=(entries=[],cases=[])=>{
     blocks.push('');
   });
   return blocks.join('\n').trim();
-};const warehouseEntriesForVessel=(entries,item)=>entries.filter(entry=>activeWarehouseEntry(entry)&&(entry.expediente===item.id||sameVessel(entry.buque,item.buque)));
+};const warehouseEntriesForVessel=(entries,item)=>entries.filter(entry=>activeWarehouseEntry(entry)&&(entry.expediente===item.id||(!entry.expediente&&sameVessel(entry.buque,item.buque))));
 const canAccess=(roles,id)=>{
   if(id==='correos')return hasRole(roles,'operations')||hasRole(roles,'admin');
   if(['transportes','aduanas'].includes(id))return false;
