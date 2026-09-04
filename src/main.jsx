@@ -1967,9 +1967,9 @@ function App({auth,finance,onFinanceChange,onLogout}){
   useEffect(()=>{
     if(!operationalLoaded||!team.length)return;
     const names=new Set(operationalTeam.map(member=>member.fullName));
-    const normalizedCalendar=calendarEvents.filter(isTransportCalendarEvent).map(event=>{const synced=calendarEventWithCaseSlot(event,cases);const asignado=synced.asignado!=='Sin asignar'&&!names.has(synced.asignado)?'Sin asignar':synced.asignado;return {...synced,asignado,tipoServicio:synced.tipoServicio||'Transporte',color:calendarTone(synced,cases)}});
-    const normalized=transports.map(item=>{const linked=normalizedCalendar.find(event=>event.transporte===item.id);if(isCancelledTransport(item)||isCancelledTransport(linked))return {...item,conductor:'Sin asignar',estado:'Cancelado',cancellation:item.cancellation||linked?.cancellation};const conductor=item.conductor!=='Sin asignar'&&!names.has(item.conductor)?'Sin asignar':linked?.asignado||item.conductor;return linked?{...item,conductor,fecha:linked.fecha,inicio:linked.inicio,fin:linked.fin,hora:formatSchedule(linked.fecha,linked.inicio,linked.fin),estado:conductor==='Sin asignar'?'Sin asignar':item.estado==='Sin asignar'?'Asignado':item.estado}:{...item,conductor,estado:conductor==='Sin asignar'?'Sin asignar':item.estado}});
-    const changed=normalized.some((item,index)=>JSON.stringify(item)!==JSON.stringify(transports[index]))||normalizedCalendar.some((item,index)=>item.color!==calendarEvents[index]?.color);
+    const normalizedCalendar=calendarEvents.filter(isTransportCalendarEvent).map(event=>{const related=cases.find(item=>item.id===event.expediente);const caseCancelled=isCancelledCase(related);const synced=calendarEventWithCaseSlot(event,cases);if(caseCancelled)return {...synced,estado:'Cancelado',asignado:'Sin asignar',scheduleStatus:'cancelled',scheduleNote:related.caseCancellation?.reason||'Expediente cancelado',cancellation:event.cancellation||caseCancellationForTransport(related,event.asignado),tipoServicio:synced.tipoServicio||'Transporte',color:'gray'};const asignado=synced.asignado!=='Sin asignar'&&!names.has(synced.asignado)?'Sin asignar':synced.asignado;return {...synced,asignado,tipoServicio:synced.tipoServicio||'Transporte',color:calendarTone(synced,cases)}});
+    const normalized=transports.map(item=>{const related=cases.find(entry=>entry.id===item.expediente);const linked=normalizedCalendar.find(event=>event.transporte===item.id);if(isCancelledCase(related)||isCancelledTransport(item)||isCancelledTransport(linked))return {...item,conductor:'Sin asignar',estado:'Cancelado',scheduleStatus:'cancelled',scheduleNote:related?.caseCancellation?.reason||item.scheduleNote||'Expediente cancelado',cancellation:item.cancellation||linked?.cancellation||caseCancellationForTransport(related,item.conductor)};const conductor=item.conductor!=='Sin asignar'&&!names.has(item.conductor)?'Sin asignar':linked?.asignado||item.conductor;return linked?{...item,conductor,fecha:linked.fecha,inicio:linked.inicio,fin:linked.fin,hora:formatSchedule(linked.fecha,linked.inicio,linked.fin),estado:conductor==='Sin asignar'?'Sin asignar':item.estado==='Sin asignar'?'Asignado':item.estado}:{...item,conductor,estado:conductor==='Sin asignar'?'Sin asignar':item.estado}});
+    const changed=JSON.stringify(normalized)!==JSON.stringify(transports)||JSON.stringify(normalizedCalendar)!==JSON.stringify(calendarEvents);
     if(changed){setTransports(normalized);setCalendarEvents(normalizedCalendar);saveOperational(cases,normalized,warehouseEntries,customs,normalizedCalendar)}
   },[operationalLoaded,team.length]);
   const openCase=id=>{setSelectedId(id);navigate('expedientes')};
@@ -2771,13 +2771,16 @@ function calendarTone(event,cases){const related=(cases||[]).find(item=>item.id=
 function formatSchedule(date,start,end){if(!date||!start)return 'Por programar';const label=new Date(date+'T12:00:00').toLocaleDateString('es-ES',{day:'2-digit',month:'short'}).replace('.','');return label+'  -  '+start+(end?'–'+end:'')}
 const isTransportCalendarEvent=event=>String(event?.tipoServicio||'').toLowerCase().startsWith('transporte')||Boolean(event?.transporte);
 const isCancelledTransport=item=>/^(cancelado|cancelada|cancelled|canceled)$/i.test(String(item?.estado||item?.status||''))||Boolean(item?.cancellation?.cancelledAt);
+const isCancelledCase=item=>Boolean(item)&&(/^(cancelado|cancelada|cancelled|canceled)$/i.test(String(item.estado||item.status||''))||Boolean(item.caseCancellation?.cancelledAt));
+const caseCancellationForTransport=(item,previousDriver='')=>({reason:`Expediente cancelado: ${item?.caseCancellation?.reason||'Cancelación registrada'}`,notes:item?.caseCancellation?.notes||'',expenseAmount:0,expenseProvider:'',billableToClient:false,cancelledAt:item?.caseCancellation?.cancelledAt||new Date().toISOString(),cancelledBy:item?.caseCancellation?.cancelledBy||'',previousDriver:previousDriver||''});
 const isActiveTransportCalendarEvent=event=>isTransportCalendarEvent(event)&&!isCancelledTransport(event);
 const calendarHasValidStart=event=>/^\d{2}:\d{2}$/.test(String(event?.inicio||''));
-const calendarNeedsTime=event=>!calendarHasValidStart(event)||String(event?.scheduleStatus||'')==='provisional';
+const calendarNeedsTime=event=>!isCancelledTransport(event)&&(!calendarHasValidStart(event)||String(event?.scheduleStatus||'')==='provisional');
 const isManualSchedule=item=>String(item?.scheduleSource||'').toLowerCase()==='manual';
 const calendarEventWithCaseSlot=(event,cases)=>{
   const related=(cases||[]).find(item=>item.id===event?.expediente);
   const color=portTone(related?.puerto||event?.puerto||event?.destino||event?.titulo);
+  if(isCancelledTransport(event)||isCancelledCase(related))return {...event,estado:'Cancelado',asignado:'Sin asignar',scheduleStatus:'cancelled',color:'gray'};
   if(isManualSchedule(event))return {...event,color};
   const slot=related?transportSlotFromCase(related):null;
   if(!slot?.date)return {...event,color};
@@ -2942,6 +2945,7 @@ const driverDueInfo=event=>{
 const calendarServiceStatus=(event,cases=[])=>{
   const related=(cases||[]).find(item=>item.id===event?.expediente);
   const flow=related?operationFlow(related):{};
+  if(isCancelledTransport(event)||isCancelledCase(related))return {className:'cancelled',label:'Cancelado',icon:<CircleAlert/>};
   const done=Boolean(flow.billingReady||flow.delivery||related?.estado==='Completado'||event?.estado==='Entregado');
   return done?{className:'done',label:'Terminado',icon:<CheckCircle2/>}:{className:'pending',label:'Pendiente',icon:<CircleAlert/>};
 };

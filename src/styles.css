@@ -370,6 +370,11 @@
   background:#fff0c7;
   color:#8a5b00;
 }
+.calendar-status-pill.cancelled{
+  background:#ffe1e5;
+  color:#a61b32;
+  border-color:#ff9eac;
+}
 .calendar-event.is-overlap .calendar-status-pill{
   right:5px;
   top:5px;
