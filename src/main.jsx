@@ -2355,7 +2355,7 @@ function App({auth,finance,onFinanceChange,onLogout}){
     const nextDeletedVesselKeys=[...new Set([...deletedVesselKeys,vesselKey(name)])];
     setDeletedVesselKeys(nextDeletedVesselKeys);setVessels(nextVessels);saveOperational(cases,transports,warehouseEntries,customs,calendarEvents,providers,nextVessels,nextDeletedVesselKeys);notify('Ficha de buque borrada');
   };
-  const completeCaseStep=(id,stepKey,note='',evidence=null)=>{
+  const completeCaseStep=async(id,stepKey,note='',evidence=null)=>{
   const target=cases.find(item=>item.id===id);
     if(!target)return false;
     const steps=operationStepsFor(target);
@@ -2424,8 +2424,10 @@ function App({auth,finance,onFinanceChange,onLogout}){
     const alreadyInWarehouse=warehouseEntries.some(item=>item.expediente===id&&!item.archivado&&item.estado!=='Expedido');
     const automaticWarehouseEntry=stepKey==='cargo'&&!surveyService&&!alreadyInWarehouse?{ref:cargoReference,source:'driver-flow',expediente:id,buque:target.buque,zona:'PENDIENTE',entrada:formatReceptionDate(now.toISOString()),fechaRecepcion:now.toISOString(),bultos:merchandiseCount(cargoMerchandise),peso:merchandiseWeightLabel(cargoMerchandise),mercancias:cargoMerchandise,fotos:cargoPhotos,documentosRecepcion:[],dias:0,estado:'En stock',archivado:false}:null;
     const nextWarehouse=ready?warehouseEntries.map(item=>deliveryWarehouseScope.includes(item)?{...item,expediente:item.expediente||id,estado:'Expedido',archivado:true,salida:new Date().toISOString()}:item):cargoHasWarehouse?warehouseEntries.map(entry=>selectedWarehouseRefs.includes(entry.ref)?{...entry,expediente:id,buque:target.buque,estado:entry.estado||'En stock',archivado:false}:entry):automaticWarehouseEntry?[automaticWarehouseEntry,...warehouseEntries]:warehouseEntries;
+    try{
+      await persistOperational(nextCases,nextTransports,nextWarehouse,customs,calendarEvents,providers,vessels,deletedVesselKeys,{action:'step.complete',details:{caseRef:id,vessel:target.buque,step:stepKey,title:selectedStep.title,readyForBilling:ready,podException}});
+    }catch(reason){notify('No se pudo guardar el paso: '+reason.message);return false}
     setCases(nextCases);setTransports(nextTransports);setWarehouseEntries(nextWarehouse);
-    saveOperational(nextCases,nextTransports,nextWarehouse,customs,calendarEvents,providers,vessels,deletedVesselKeys,{action:'step.complete',details:{caseRef:id,vessel:target.buque,step:stepKey,title:selectedStep.title,readyForBilling:ready,podException}});
     notify(ready?(surveyService?'Survey confirmado: expediente listo para facturar':storageOnly?'Salida confirmada: expediente listo para facturar':podException?'Entrega cerrada sin POD sellado: expediente listo para facturar':'POD registrado: expediente listo para facturar'):selectedStep.title+' registrado');
     return true;
   };
@@ -3514,7 +3516,7 @@ function CaseCancellationModal({item,close,submit}){
     <section className="panel merchandise-case-panel"><MerchandisePanel item={selected} updateCase={updateCase} deleteAttachment={deleteAttachment}/></section>
     {cancelOpen&&<CaseCancellationModal item={selected} close={()=>setCancelOpen(false)} submit={decision=>cancelCase(selected.id,decision)}/>}
     {editOpen&&<CaseEditModal item={selected} clientOptions={clientOptions} vessels={vessels} close={()=>setEditOpen(false)} submit={item=>{updateCase(item);setEditOpen(false)}}/>}
-    {flowOpen&&<OperationStepModal item={selected} warehouseEntries={warehouseEntries} transports={transports} csrfToken={csrfToken} currentUser={currentUser} onEvidenceUploaded={onEvidenceUploaded} initialStepKey={flowStep} close={()=>{setFlowOpen(false);setFlowStep(null)}} submit={(key,note,evidence)=>{if(completeCaseStep(selected.id,key,note,evidence)){setFlowOpen(false);setFlowStep(null)}}}/>}
+    {flowOpen&&<OperationStepModal item={selected} warehouseEntries={warehouseEntries} transports={transports} csrfToken={csrfToken} currentUser={currentUser} onEvidenceUploaded={onEvidenceUploaded} initialStepKey={flowStep} close={()=>{setFlowOpen(false);setFlowStep(null)}} submit={async(key,note,evidence)=>{if(await completeCaseStep(selected.id,key,note,evidence)){setFlowOpen(false);setFlowStep(null)}}}/>}
   </div>;
 }
 function CaseEmailsPanel({item,csrfToken,notify}){
