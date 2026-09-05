@@ -1796,11 +1796,12 @@ function App({auth,finance,onFinanceChange,onLogout}){
   const loadOperational=()=>operationalSaveInFlight.current?Promise.resolve():api('/api/operational.php').then(result=>{
     if(result.data){
       const loadedCases=result.data.cases.map(normalizeMerchandise);
-      const completedCaseIds=new Set(loadedCases.filter(item=>operationFlow(item).billingReady||item.estado==='Completado').map(item=>item.id));
-      const loadedTransports=(result.data.transports||[]).map(item=>completedCaseIds.has(item.expediente)?{...item,estado:'Entregado'}:item);
+      const relatedLoadedCase=reference=>loadedCases.find(item=>sameCaseReference(item.id,reference));
+      const loadedTransports=(result.data.transports||[]).map(item=>{const related=relatedLoadedCase(item.expediente);if(isCancelledCase(related)||isCancelledTransport(item))return {...item,expediente:related?.id||item.expediente,estado:'Cancelado',conductor:'Sin asignar',scheduleStatus:'cancelled',scheduleNote:related?.caseCancellation?.reason||item.scheduleNote||'Expediente cancelado',cancellation:item.cancellation||caseCancellationForTransport(related,item.conductor)};return related&&(operationFlow(related).billingReady||related.estado==='Completado')?{...item,expediente:related.id,estado:'Entregado'}:item});
+      const loadedCalendar=(result.data.calendarEvents||[]).filter(isTransportCalendarEvent).map(event=>{const related=relatedLoadedCase(event.expediente)||relatedLoadedCase(loadedTransports.find(item=>item.id===event.transporte)?.expediente);if(!isCancelledCase(related)&&!isCancelledTransport(event))return related?{...event,expediente:related.id}:event;return {...event,expediente:related?.id||event.expediente,estado:'Cancelado',asignado:'Sin asignar',scheduleStatus:'cancelled',scheduleNote:related?.caseCancellation?.reason||event.scheduleNote||'Expediente cancelado',cancellation:event.cancellation||caseCancellationForTransport(related,event.asignado),color:'gray'}});
       const hiddenVessels=Array.isArray(result.data.deletedVesselKeys)?result.data.deletedVesselKeys.filter(Boolean):[];
       const loadedVessels=mergeVesselCatalog(Array.isArray(result.data.vessels)?result.data.vessels:[],loadedCases).filter(vessel=>!hiddenVessels.includes(vesselKey(vessel.name)));
-      setDeletedVesselKeys(hiddenVessels);setCases(loadedCases.map(item=>hydrateCaseWithVessel(item,loadedVessels)));setVessels(loadedVessels);setTransports(loadedTransports);setWarehouseEntries(result.data.warehouseEntries);if(result.data.customs)setCustoms(result.data.customs);if(result.data.calendarEvents)setCalendarEvents(result.data.calendarEvents.filter(isTransportCalendarEvent));if(Array.isArray(result.data.providers))setProviders(result.data.providers)
+      setDeletedVesselKeys(hiddenVessels);setCases(loadedCases.map(item=>hydrateCaseWithVessel(item,loadedVessels)));setVessels(loadedVessels);setTransports(loadedTransports);setWarehouseEntries(result.data.warehouseEntries);if(result.data.customs)setCustoms(result.data.customs);if(result.data.calendarEvents)setCalendarEvents(loadedCalendar);if(Array.isArray(result.data.providers))setProviders(result.data.providers)
     }
     setOperationalLoaded(true)
   }).catch(reason=>{setOperationalLoaded(true);notify(reason.message)});
@@ -2771,7 +2772,8 @@ function calendarTone(event,cases){const related=(cases||[]).find(item=>item.id=
 function formatSchedule(date,start,end){if(!date||!start)return 'Por programar';const label=new Date(date+'T12:00:00').toLocaleDateString('es-ES',{day:'2-digit',month:'short'}).replace('.','');return label+'  -  '+start+(end?'–'+end:'')}
 const isTransportCalendarEvent=event=>String(event?.tipoServicio||'').toLowerCase().startsWith('transporte')||Boolean(event?.transporte);
 const isCancelledTransport=item=>/^(cancelado|cancelada|cancelled|canceled)$/i.test(String(item?.estado||item?.status||''))||Boolean(item?.cancellation?.cancelledAt);
-const isCancelledCase=item=>Boolean(item)&&(/^(cancelado|cancelada|cancelled|canceled)$/i.test(String(item.estado||item.status||''))||Boolean(item.caseCancellation?.cancelledAt));
+const sameCaseReference=(left,right)=>String(left||'').trim().toUpperCase()===String(right||'').trim().toUpperCase();
+const isCancelledCase=item=>Boolean(item)&&(/^(cancelado|cancelada|cancelled|canceled)$/i.test(String(item.estado||item.status||''))||Boolean(item.caseCancellation?.cancelledAt||item.caseCancellation?.sentToBilling));
 const caseCancellationForTransport=(item,previousDriver='')=>({reason:`Expediente cancelado: ${item?.caseCancellation?.reason||'Cancelación registrada'}`,notes:item?.caseCancellation?.notes||'',expenseAmount:0,expenseProvider:'',billableToClient:false,cancelledAt:item?.caseCancellation?.cancelledAt||new Date().toISOString(),cancelledBy:item?.caseCancellation?.cancelledBy||'',previousDriver:previousDriver||''});
 const isActiveTransportCalendarEvent=event=>isTransportCalendarEvent(event)&&!isCancelledTransport(event);
 const calendarHasValidStart=event=>/^\d{2}:\d{2}$/.test(String(event?.inicio||''));
@@ -3030,7 +3032,7 @@ function Calendario({events,team,cases,transports,providers,warehouseEntries,sav
   const movePeriod=direction=>setWeekStart(current=>viewMode==='month'?addMonths(current,direction):addDays(current,direction*(viewMode==='day'?1:7)));
   const goToday=()=>setWeekStart(viewMode==='week'?startOfWeek(new Date()):new Date());
   const newEvent=()=>setEditing({id:'EV-'+Date.now(),titulo:'',tipoServicio:'Transporte',fecha:isoDate(days[0]),inicio:'',fin:'',asignado:'Sin asignar',expediente:'',transporte:'',color:'gray',scheduleStatus:'missing_time'});
-  const baseEvents=(mineOnly?events.filter(event=>samePerson(event.asignado,currentUser.fullName)):events).filter(isActiveTransportCalendarEvent).map(event=>calendarEventWithCaseSlot(event,cases));
+  const baseEvents=(mineOnly?events.filter(event=>samePerson(event.asignado,currentUser.fullName)):events).filter(isTransportCalendarEvent).map(event=>calendarEventWithCaseSlot(event,cases));
   const timedEvents=baseEvents.filter(event=>!calendarNeedsTime(event));
   const missingTimeEvents=baseEvents.filter(calendarNeedsTime);
   const canDeleteEvent=hasRole(currentUser,'operations')||hasRole(currentUser,'admin');
