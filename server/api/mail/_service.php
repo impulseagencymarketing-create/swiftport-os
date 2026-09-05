@@ -3,6 +3,31 @@ declare(strict_types=1);
 require_once __DIR__ . '/_correlation.php';
 
 const SWIFTPORT_WAREHOUSE_ADDRESS = 'Bluespace, Carrer del Roure, 2, 08820 El Prat de Llobregat, Barcelona';
+function mail_convert_to_utf8(string $text, string $declaredCharset): string
+{
+    $charset = strtoupper(trim($declaredCharset, " \t\n\r\0\x0B\"'"));
+    if ($text === '' || in_array($charset, ['', 'DEFAULT', 'UTF-8', 'UTF8', 'US-ASCII', 'ASCII'], true)) {
+        return $text;
+    }
+
+    $supported = array_map('strtoupper', mb_list_encodings());
+    if (in_array($charset, $supported, true)) {
+        return mb_convert_encoding($text, 'UTF-8', $charset);
+    }
+
+    if (function_exists('iconv')) {
+        $converted = @iconv($charset, 'UTF-8//IGNORE', $text);
+        if ($converted !== false) {
+            return $converted;
+        }
+    }
+
+    if (mb_check_encoding($text, 'UTF-8')) {
+        return $text;
+    }
+
+    return mb_convert_encoding($text, 'UTF-8', 'Windows-1252');
+}
 
 function mail_decode_header_value(string $value): string
 {
@@ -13,9 +38,7 @@ function mail_decode_header_value(string $value): string
     foreach (imap_mime_header_decode($value) as $part) {
         $charset = strtoupper((string) ($part->charset ?? 'UTF-8'));
         $text = (string) ($part->text ?? '');
-        if (!in_array($charset, ['DEFAULT', 'UTF-8'], true)) {
-            $text = mb_convert_encoding($text, 'UTF-8', $charset);
-        }
+        $text = mail_convert_to_utf8($text, $charset);
         $result .= $text;
     }
     return trim($result);
@@ -99,9 +122,7 @@ function mail_extract_text($imap, int $uid, object $part, string $partNumber = '
         : imap_fetchbody($imap, $uid, $partNumber, FT_UID | FT_PEEK);
     $text = mail_decode_body((string) $raw, (int) ($part->encoding ?? 0));
     $charset = mail_part_charset($part);
-    if (strtoupper($charset) !== 'UTF-8') {
-        $text = mb_convert_encoding($text, 'UTF-8', $charset);
-    }
+    $text = mail_convert_to_utf8($text, $charset);
     if ($subtype === 'HTML') {
         $text = html_entity_decode(
             strip_tags(preg_replace('/<(br|\/p|\/div|\/li)>/i', "\n", $text)),
