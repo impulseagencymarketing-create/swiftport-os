@@ -1667,3 +1667,19 @@
   color:#ffd980;
   border-color:#8d6924;
 }
+/* Edición de expediente: espacio suficiente para tipos de servicio y formulario */
+.case-edit-modal{width:min(960px,calc(100vw - 36px));max-height:calc(100vh - 36px);overflow:hidden}
+.case-edit-modal .modal-head{padding:22px 26px 17px}
+.case-edit-modal form{grid-template-columns:repeat(2,minmax(0,1fr));gap:15px 18px;max-height:calc(100vh - 142px);overflow-y:auto;overflow-x:hidden;padding:20px 26px 0}
+.case-edit-modal form>*{min-width:0;max-width:100%}
+.case-edit-modal form>.wide{grid-column:1/-1}
+.case-edit-modal .service-type-selector{grid-template-columns:repeat(4,minmax(0,1fr));gap:11px;margin-bottom:4px}
+.case-edit-modal .service-type-selector label{min-height:132px;padding:14px 12px}
+.case-edit-modal .service-type-selector span{min-width:0}
+.case-edit-modal .service-type-selector b{font-size:10px;line-height:1.25;overflow-wrap:anywhere}
+.case-edit-modal .service-type-selector small{font-size:8px;line-height:1.45}
+.case-edit-modal .field input,.case-edit-modal .field select{width:100%;min-width:0}
+.case-edit-modal .modal-actions{position:sticky;bottom:0;z-index:3;margin:8px -26px 0;padding:16px 26px;background:#fff;border-top:1px solid var(--line);box-shadow:0 -10px 22px rgba(15,43,74,.06)}
+:root[data-theme="dark"] .case-edit-modal .modal-actions{background:#152231;border-color:var(--line)}
+@media(max-width:820px){.case-edit-modal .service-type-selector{grid-template-columns:repeat(2,minmax(0,1fr))}.case-edit-modal .service-type-selector label{min-height:112px}}
+@media(max-width:720px){.case-edit-modal{width:100%;max-height:92vh}.case-edit-modal form{grid-template-columns:1fr;max-height:calc(92vh - 112px);padding-inline:18px}.case-edit-modal form>.wide{grid-column:auto}.case-edit-modal .service-type-selector{grid-template-columns:1fr}.case-edit-modal .service-type-selector label{min-height:0}.case-edit-modal .modal-actions{margin-inline:-18px;padding-inline:18px}}
