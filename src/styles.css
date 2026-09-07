@@ -1683,3 +1683,17 @@
 :root[data-theme="dark"] .case-edit-modal .modal-actions{background:#152231;border-color:var(--line)}
 @media(max-width:820px){.case-edit-modal .service-type-selector{grid-template-columns:repeat(2,minmax(0,1fr))}.case-edit-modal .service-type-selector label{min-height:112px}}
 @media(max-width:720px){.case-edit-modal{width:100%;max-height:92vh}.case-edit-modal form{grid-template-columns:1fr;max-height:calc(92vh - 112px);padding-inline:18px}.case-edit-modal form>.wide{grid-column:auto}.case-edit-modal .service-type-selector{grid-template-columns:1fr}.case-edit-modal .service-type-selector label{min-height:0}.case-edit-modal .modal-actions{margin-inline:-18px;padding-inline:18px}}
+/* Resumen de actividad del calendario para Operaciones */
+.calendar-period-summary{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px;margin:0 0 14px}
+.calendar-period-summary article{display:flex;align-items:center;gap:11px;min-width:0;padding:13px 14px;border:1px solid var(--line);border-radius:13px;background:#fff;box-shadow:0 5px 18px rgba(23,35,56,.04)}
+.calendar-period-summary article>svg{width:21px;height:21px;flex:0 0 auto;color:var(--blue)}
+.calendar-period-summary span,.calendar-period-summary small,.calendar-period-summary b,.calendar-period-summary em{display:block;min-width:0}
+.calendar-period-summary small{color:var(--muted);font-size:8px;font-weight:850;text-transform:uppercase;letter-spacing:.05em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.calendar-period-summary b{margin-top:1px;color:var(--ink);font:850 22px/1.05 Manrope,sans-serif}
+.calendar-period-summary em{margin-top:3px;color:var(--muted);font-size:8px;font-style:normal}
+.calendar-period-summary .completed>svg{color:var(--success)}
+.calendar-period-summary .pending>svg{color:var(--warning)}
+.calendar-period-summary .cancelled>svg{color:var(--danger)}
+:root[data-theme="dark"] .calendar-period-summary article{background:#131f2c;border-color:var(--line);box-shadow:0 8px 22px rgba(0,0,0,.16)}
+@media(max-width:1050px){.calendar-period-summary{grid-template-columns:repeat(3,1fr)}}
+@media(max-width:720px){.calendar-period-summary{display:flex;overflow-x:auto;gap:8px;padding-bottom:3px;scrollbar-width:none}.calendar-period-summary article{min-width:155px;padding:11px 12px}.calendar-period-summary b{font-size:19px}}

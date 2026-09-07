@@ -3035,6 +3035,18 @@ function Calendario({events,team,cases,transports,providers,warehouseEntries,sav
   const goToday=()=>setWeekStart(viewMode==='week'?startOfWeek(new Date()):new Date());
   const newEvent=()=>setEditing({id:'EV-'+Date.now(),titulo:'',tipoServicio:'Transporte',fecha:isoDate(days[0]),inicio:'',fin:'',asignado:'Sin asignar',expediente:'',transporte:'',color:'gray',scheduleStatus:'missing_time'});
   const baseEvents=(mineOnly?events.filter(event=>samePerson(event.asignado,currentUser.fullName)):events).filter(isTransportCalendarEvent).map(event=>calendarEventWithCaseSlot(event,cases));
+  const periodEvents=baseEvents.filter(event=>{
+    if(!event.fecha)return false;
+    if(viewMode==='month')return event.fecha.startsWith(`${periodStart.getFullYear()}-${String(periodStart.getMonth()+1).padStart(2,'0')}-`);
+    return days.some(day=>isoDate(day)===event.fecha);
+  });
+  const periodCancelled=periodEvents.filter(event=>calendarServiceStatus(event,cases).className==='cancelled');
+  const periodActive=periodEvents.filter(event=>calendarServiceStatus(event,cases).className!=='cancelled');
+  const periodCompleted=periodActive.filter(event=>calendarServiceStatus(event,cases).className==='done');
+  const periodPending=periodActive.filter(event=>calendarServiceStatus(event,cases).className==='pending');
+  const periodVessels=new Set(periodActive.map(event=>normalizePortKey(cases.find(item=>item.id===event.expediente)?.buque||event.titulo)).filter(Boolean));
+  const periodCompletedVessels=new Set(periodCompleted.map(event=>normalizePortKey(cases.find(item=>item.id===event.expediente)?.buque||event.titulo)).filter(Boolean));
+  const periodLabel=viewMode==='day'?'este día':viewMode==='week'?'esta semana':'este mes';
   const timedEvents=baseEvents.filter(event=>!calendarNeedsTime(event));
   const missingTimeEvents=baseEvents.filter(calendarNeedsTime);
   const canDeleteEvent=hasRole(currentUser,'operations')||hasRole(currentUser,'admin');
@@ -3110,6 +3122,7 @@ function Calendario({events,team,cases,transports,providers,warehouseEntries,sav
       <div className="calendar-nav"><button className="button tertiary calendar-nav-icon" type="button" aria-label="Periodo anterior" title="Periodo anterior" onClick={()=>movePeriod(-1)}><ChevronLeft aria-hidden="true" size={18}/></button><button className="button tertiary" type="button" onClick={goToday}>Hoy</button><button className="button tertiary calendar-nav-icon" type="button" aria-label="Periodo siguiente" title="Periodo siguiente" onClick={()=>movePeriod(1)}><ChevronRight aria-hidden="true" size={18}/></button><h2>{calendarTitle}</h2></div>
       <div className="calendar-actions"><div className="calendar-view-switch">{['day','week','month'].map(mode=><button key={mode} className={viewMode===mode?'active':''} onClick={()=>{setViewMode(mode);setWeekStart(current=>mode==='week'?startOfWeek(current):mode==='month'?startOfMonth(current):localDay(current))}}>{mode==='day'?'Día':mode==='week'?'Semana':'Mes'}</button>)}</div>{hasRole(currentUser,'operations')&&<button className={'button '+(mineOnly?'secondary':'tertiary')} onClick={()=>setMineOnly(!mineOnly)}><UserRound/> Mis servicios</button>}<button className="button primary" onClick={newEvent}><Plus/> Nuevo transporte</button></div>
     </section>
+    <section className="calendar-period-summary" aria-label={`Resumen de servicios de ${periodLabel}`}><article className="vessels"><Ship/><span><small>Buques programados</small><b>{periodVessels.size}</b><em>{periodCompletedVessels.size} atendidos</em></span></article><article><CalendarDays/><span><small>Servicios {periodLabel}</small><b>{periodActive.length}</b><em>sin cancelados</em></span></article><article className="completed"><CheckCircle2/><span><small>Realizados</small><b>{periodCompleted.length}</b><em>{periodActive.length?Math.round(periodCompleted.length/periodActive.length*100):0}% completado</em></span></article><article className="pending"><Clock3/><span><small>Pendientes</small><b>{periodPending.length}</b><em>por realizar</em></span></article><article className="cancelled"><CircleAlert/><span><small>Cancelados</small><b>{periodCancelled.length}</b><em>fuera del total</em></span></article></section>
     {viewMode==='month'?<CalendarMonthView days={days} monthDate={periodStart} events={baseEvents} cases={cases} setEditing={setEditing} openCase={openCase}/>:<section className="calendar-shell panel" style={{'--calendar-days':days.length,'--calendar-min-width':`${70+(days.length*260)}px`}}>
       <div className="calendar-help"><span><CalendarDays/> Solo transportes a ETB/ETA</span><small>Las recepciones quedan en expediente/almacén. Si falta hora ETB/ETA, el transporte queda arriba del día como “Falta horario”.</small></div>
       <div className="calendar-scroll">
