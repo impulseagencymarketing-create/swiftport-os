@@ -1563,10 +1563,19 @@ function apply_thread_update_to_state(
     if (trim((string) ($data['eta'] ?? '')) !== '') {
         $case['eta'] = (string) $data['eta'];
     }
-    $case['portCall'] = merge_port_call_schedule(
-        is_array($case['portCall'] ?? null) ? $case['portCall'] : [],
-        $data
-    );
+    $previousPortCall = is_array($case['portCall'] ?? null) ? $case['portCall'] : [];
+    $case['portCall'] = merge_port_call_schedule($previousPortCall, $data);
+    $scheduleChanges = [];
+    foreach ([['ETA', 'etaDate', 'etaTime'], ['ETB', 'etbDate', 'etbTime'], ['ETD', 'etdDate', 'etdTime']] as [$label, $dateKey, $timeKey]) {
+        $before = trim((string) ($previousPortCall[$dateKey] ?? '') . ' ' . (string) ($previousPortCall[$timeKey] ?? ''));
+        $after = trim((string) ($case['portCall'][$dateKey] ?? '') . ' ' . (string) ($case['portCall'][$timeKey] ?? ''));
+        if ($before !== $after && $after !== '') {
+            $scheduleChanges[] = $label . ': ' . ($before !== '' ? $before : 'sin fecha') . ' -> ' . $after;
+        }
+    }
+    if ($scheduleChanges !== []) {
+        $case['portCall']['previous'] = $previousPortCall;
+    }
     if (trim((string) ($data['port'] ?? '')) !== '') {
         $case['puerto'] = mb_strtoupper(trim((string) $data['port']));
     }
@@ -1612,6 +1621,28 @@ function apply_thread_update_to_state(
     $sourceIds[] = $mailId;
     $case['sourceEmailIds'] = array_values(array_unique($sourceIds));
     $timeline = is_array($case['timelineCustom'] ?? null) ? $case['timelineCustom'] : [];
+    if ($scheduleChanges !== []) {
+        $changeId = 'EMAIL-SCHEDULE-' . $mailId;
+        $alreadyRecorded = false;
+        foreach ($timeline as $timelineEntry) {
+            if (($timelineEntry['id'] ?? '') === $changeId) {
+                $alreadyRecorded = true;
+                break;
+            }
+        }
+        if (!$alreadyRecorded) {
+            array_unshift($timeline, [
+                'id' => $changeId,
+                'fecha' => date('d/m/Y'),
+                'hora' => date('H:i'),
+                'titulo' => 'Cambio de escala detectado por correo',
+                'detalle' => mb_substr(implode(' · ', $scheduleChanges), 0, 300),
+                'actor' => 'Bandeja de entrada',
+                'estado' => 'warning',
+                'sourceEmailId' => $mailId,
+            ]);
+        }
+    }
     $scheduleLabel = port_call_schedule_label($case);
     $updateDetail = trim((string) ($data['operational_notes'] ?? ''));
     if ($scheduleLabel !== '') {
