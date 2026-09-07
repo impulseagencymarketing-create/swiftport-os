@@ -1123,6 +1123,23 @@ const invoiceTransportServices=(item,transports=[],calendarEvents=[])=>{
   return (transports||[]).filter(entry=>entry.expediente===caseId&&!/cancel|anulad/i.test(String(entry.estado||'')));
 };
 const invoiceTransportUnits=(item,transports=[],calendarEvents=[])=>Math.max(1,invoiceTransportServices(item,transports,calendarEvents).length);
+const INVOICE_LEGAL_OBSERVATION='Exención de IVA según ART 22 de la ley 37/1992 y 10.2 del real decreto ley 1624/92 de Diciembre';
+const invoiceTransportObservation=(item,transports=[],calendarEvents=[])=>{
+  const caseId=item?.id;
+  if(!caseId)return INVOICE_LEGAL_OBSERVATION;
+  const linkedTransports=(transports||[]).filter(entry=>entry.expediente===caseId&&!isCancelledTransport(entry));
+  const linkedEvents=(calendarEvents||[]).filter(entry=>entry.expediente===caseId&&isTransportCalendarEvent(entry)&&!isCancelledTransport(entry));
+  const records=[...linkedTransports.map(transport=>({...transport,...(linkedEvents.find(event=>event.transporte===transport.id)||{}),origen:linkedEvents.find(event=>event.transporte===transport.id)?.origen||transport.origen,destino:linkedEvents.find(event=>event.transporte===transport.id)?.destino||transport.destino})),...linkedEvents.filter(event=>!linkedTransports.some(transport=>transport.id===event.transporte))];
+  const unique=[...new Map(records.map(record=>{const route=routeParts(record);const key=record.transporte||record.id||[record.fecha,record.inicio,route.origen,route.destino].join('|');return [key,record]})).values()];
+  if(!unique.length)return INVOICE_LEGAL_OBSERVATION;
+  const lines=unique.sort((a,b)=>String(a.fecha||'').localeCompare(String(b.fecha||''))||String(a.inicio||'').localeCompare(String(b.inicio||''))).map(record=>{const route=routeParts(record);const parsed=record.fecha?new Date(`${record.fecha}T12:00:00`):null;const date=parsed&&!Number.isNaN(parsed.getTime())?parsed.toLocaleDateString('es-ES'):(record.fecha||'Fecha pendiente');const time=record.inicio?`${record.inicio}${record.fin?`–${record.fin}`:''}`:'Hora pendiente';return `• ${date} · ${time} · ${String(route.origen||'ORIGEN PENDIENTE').toUpperCase()} → ${String(route.destino||'DESTINO PENDIENTE').toUpperCase()}`});
+  return `${INVOICE_LEGAL_OBSERVATION}\n\nTRANSPORTES REALIZADOS:\n${lines.join('\n')}`;
+};
+const mergeInvoiceTransportObservation=(existing,generated)=>{
+  const base=String(existing||'').split(/\n\s*TRANSPORTES REALIZADOS:/i)[0].trim()||INVOICE_LEGAL_OBSERVATION;
+  const transportBlock=String(generated||'').match(/TRANSPORTES REALIZADOS:[\s\S]*$/i)?.[0]||'';
+  return [base,transportBlock].filter(Boolean).join('\n\n');
+};
 const invoiceTransportDetail=(cargo,item,transports=[],calendarEvents=[])=>{
   const units=invoiceTransportUnits(item,transports,calendarEvents);
   return units>1?`${units} TRANSPORTES - ${cargo}`:cargo;
@@ -1138,7 +1155,7 @@ const draftInvoiceFromCase=(item,warehouseEntries=[],transports=[],calendarEvent
       {id:'survey',item:'SURVEY / BALLAST WATER SAMPLES',detail,price:surveyPrice,units:1,tax:'0%'}
     ];
     const due=new Date(Date.now()+30*86400000).toISOString().slice(0,10);
-    const invoice={id:'BOR-'+item.id.replace('SW-',''),expediente:item.id,cliente:item.cliente,concepto:invoiceHeaderTitle(item,transports,calendarEvents),importe:0,estado:'Borrador',vencimiento:due,buque:item.buque,puerto:item.puerto,purchaseOrder:purchaseOrderOf(item),proforma:`PRO${String(260000+numericRef(item.id)).slice(-6)}`,observaciones:'Exenci\u00f3n de IVA seg\u00fan ART 22 de la ley 37/1992 y 10.2 del real decreto ley 1624/92 de Diciembre',payment:'BANK ACCOUNT: ES06 0182 4775 5102 0174 1635\\nSWIFT: BBVAESMMXXX',lines};
+    const invoice={id:'BOR-'+item.id.replace('SW-',''),expediente:item.id,cliente:item.cliente,concepto:invoiceHeaderTitle(item,transports,calendarEvents),importe:0,estado:'Borrador',vencimiento:due,buque:item.buque,puerto:item.puerto,purchaseOrder:purchaseOrderOf(item),proforma:`PRO${String(260000+numericRef(item.id)).slice(-6)}`,observaciones:invoiceTransportObservation(item,transports,calendarEvents),payment:'BANK ACCOUNT: ES06 0182 4775 5102 0174 1635\\nSWIFT: BBVAESMMXXX',lines};
     const importe=invoiceTotal(invoice);
     const coste=caseExpenseTotal(item);
     return {...invoice,importe,coste,margen:importe-coste};
@@ -1146,7 +1163,7 @@ const draftInvoiceFromCase=(item,warehouseEntries=[],transports=[],calendarEvent
   if(isUmeAlgecirasCase(item)){
     const lines=umeAlgecirasLines(item,warehouseEntries,transports,calendarEvents,{includeRef:true});
     const due=new Date(Date.now()+30*86400000).toISOString().slice(0,10);
-    const invoice={id:'BOR-'+item.id.replace('SW-',''),expediente:item.id,cliente:item.cliente,concepto:invoiceHeaderTitle(item,transports,calendarEvents),importe:0,estado:'Borrador',vencimiento:due,buque:item.buque,puerto:item.puerto,purchaseOrder:purchaseOrderOf(item),proforma:`PRO${String(260000+numericRef(item.id)).slice(-6)}`,observaciones:'Exenci\u00f3n de IVA seg\u00fan ART 22 de la ley 37/1992 y 10.2 del real decreto ley 1624/92 de Diciembre',payment:'BANK ACCOUNT: ES06 0182 4775 5102 0174 1635\\nSWIFT: BBVAESMMXXX',lines};
+    const invoice={id:'BOR-'+item.id.replace('SW-',''),expediente:item.id,cliente:item.cliente,concepto:invoiceHeaderTitle(item,transports,calendarEvents),importe:0,estado:'Borrador',vencimiento:due,buque:item.buque,puerto:item.puerto,purchaseOrder:purchaseOrderOf(item),proforma:`PRO${String(260000+numericRef(item.id)).slice(-6)}`,observaciones:invoiceTransportObservation(item,transports,calendarEvents),payment:'BANK ACCOUNT: ES06 0182 4775 5102 0174 1635\\nSWIFT: BBVAESMMXXX',lines};
     const importe=invoiceTotal(invoice);
     const coste=caseExpenseTotal(item);
     return {...invoice,importe,coste,margen:importe-coste};
@@ -1170,7 +1187,7 @@ const draftInvoiceFromCase=(item,warehouseEntries=[],transports=[],calendarEvent
   if(Number(item.billing?.waitingHours||0)>0)lines.push({id:'waiting',item:'WAITING TIME',detail:`${item.billing.waitingHours} HOURS WAITING FOR ARRIVE`,price:suggestedWaitingPrice(item),units:Number(item.billing.waitingHours),tax:'0%'});
   (item.billingAdjustments||[]).filter(entry=>Number(entry.price)>0).forEach(entry=>lines.push({...entry,tax:entry.tax||'0%'}));
   const due=new Date(Date.now()+30*86400000).toISOString().slice(0,10);
-  const invoice={id:'BOR-'+item.id.replace('SW-',''),expediente:item.id,cliente:item.cliente,concepto:invoiceHeaderTitle(item,transports,calendarEvents),importe:0,estado:'Borrador',vencimiento:due,buque:item.buque,puerto:item.puerto,purchaseOrder:purchaseOrderOf(item),proforma:`PRO${String(260000+numericRef(item.id)).slice(-6)}`,observaciones:'Exenci\u00f3n de IVA seg\u00fan ART 22 de la ley 37/1992 y 10.2 del real decreto ley 1624/92 de Diciembre',payment:'BANK ACCOUNT: ES06 0182 4775 5102 0174 1635\\nSWIFT: BBVAESMMXXX',lines};
+  const invoice={id:'BOR-'+item.id.replace('SW-',''),expediente:item.id,cliente:item.cliente,concepto:invoiceHeaderTitle(item,transports,calendarEvents),importe:0,estado:'Borrador',vencimiento:due,buque:item.buque,puerto:item.puerto,purchaseOrder:purchaseOrderOf(item),proforma:`PRO${String(260000+numericRef(item.id)).slice(-6)}`,observaciones:invoiceTransportObservation(item,transports,calendarEvents),payment:'BANK ACCOUNT: ES06 0182 4775 5102 0174 1635\\nSWIFT: BBVAESMMXXX',lines};
   const importe=invoiceTotal(invoice);
   const coste=caseExpenseTotal(item);
   return {...invoice,importe,coste,margen:importe-coste};
@@ -4044,6 +4061,20 @@ function Facturacion({openCase,notify,invoices,cases,warehouseEntries=[],transpo
     const standardSet=new Set(standardIds);
     let changed=false;
     let nextInvoices=[...invoices];
+    const closedCaseRefs=new Set(nextInvoices.filter(invoice=>['Enviado a Holded','Facturado','Cobrado'].includes(invoice.estado)||hasHoldedProof(invoice)).map(invoice=>invoice.expediente).filter(Boolean));
+    const editableGroups=new Map();
+    nextInvoices.filter(invoice=>invoice.expediente&&!['Enviado a Holded','Facturado','Cobrado','Archivado'].includes(invoice.estado)&&!hasHoldedProof(invoice)).forEach(invoice=>{const group=editableGroups.get(invoice.expediente)||[];group.push(invoice);editableGroups.set(invoice.expediente,group)});
+    const discardedDrafts=new Set();
+    editableGroups.forEach((group,caseRef)=>{
+      if(closedCaseRefs.has(caseRef)){group.forEach(invoice=>discardedDrafts.add(invoice));return}
+      if(group.length<2)return;
+      const ordered=[...group].sort((a,b)=>invoiceLinesOf(b.lines).length-invoiceLinesOf(a.lines).length);
+      const primary=ordered[0];
+      const lineMap=new Map();ordered.flatMap(invoice=>invoiceLinesOf(invoice.lines)).forEach(line=>{const key=String(line.id||[line.item,line.detail,Number(line.price)||0,Number(line.units)||0].join('|'));if(!lineMap.has(key))lineMap.set(key,line)});const mergedLines=[...lineMap.values()];
+      nextInvoices=nextInvoices.map(invoice=>invoice===primary?{...primary,lines:mergedLines,observaciones:ordered.map(entry=>entry.observaciones).find(Boolean)||primary.observaciones}:invoice);
+      ordered.slice(1).forEach(invoice=>discardedDrafts.add(invoice));
+    });
+    if(discardedDrafts.size){nextInvoices=nextInvoices.filter(invoice=>!discardedDrafts.has(invoice));changed=true}
     billableCases.forEach(item=>{
       const existing=nextInvoices.find(invoice=>invoice.expediente===item.id);
       const draft=draftInvoiceFromCase(item,warehouseEntries,transports,calendarEvents);
@@ -4068,6 +4099,7 @@ function Facturacion({openCase,notify,invoices,cases,warehouseEntries=[],transpo
         String(existing.buque||'')!==String(draft.buque||'')||
         String(existing.puerto||'')!==String(draft.puerto||'')||
         Number(existing.coste||0)!==Number(draft.coste||0)||
+        String(existing.observaciones||'')!==String(mergeInvoiceTransportObservation(existing.observaciones,draft.observaciones)||'')||
         JSON.stringify(currentStandard)!==JSON.stringify(draftStandard)||
         JSON.stringify(invoiceLinesOf(existing.lines).filter(line=>String(line.id||'').startsWith('cancel-')).map(line=>[line.id,line.item,line.detail,Number(line.price)||0,Number(line.units)||0]))!==JSON.stringify((draft.lines||[]).filter(line=>String(line.id||'').startsWith('cancel-')).map(line=>[line.id,line.item,line.detail,Number(line.price)||0,Number(line.units)||0]));
       if(!needsRefresh)return;
@@ -4079,7 +4111,7 @@ function Facturacion({openCase,notify,invoices,cases,warehouseEntries=[],transpo
         estado:existing.estado||draft.estado,
         vencimiento:existing.vencimiento||draft.vencimiento,
         proforma:existing.proforma||draft.proforma,
-        observaciones:existing.observaciones||draft.observaciones,
+        observaciones:mergeInvoiceTransportObservation(existing.observaciones,draft.observaciones),
         payment:existing.payment||draft.payment,
         supplierInvoices:existing.supplierInvoices||[],
         supplierText:existing.supplierText||'',
