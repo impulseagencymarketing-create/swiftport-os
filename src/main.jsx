@@ -17,6 +17,7 @@ import {
 } from './data';
 import './styles.css';
 import './fixes.css';
+import './captains.css';
 pdfjsLib.GlobalWorkerOptions.workerSrc=pdfWorkerUrl;
 const LOCAL_DESIGN_MODE=import.meta.env.DEV&&['localhost','127.0.0.1'].includes(window.location.hostname);
 const THEME_STORAGE_KEY='swiftport-color-theme';
@@ -102,6 +103,7 @@ const NAV = [
   ['calendario','Calendario',CalendarDays],
   ['expedientes','Expedientes',FolderKanban],
   ['correos','Correos',Mail],
+  ['capitanes','Capitanes',UsersRound],
   ['almacen','Almacén',WarehouseIcon],
   ['buques','Buques',Ship],
   ['clientes','Clientes / Tarifas',UsersRound],
@@ -119,6 +121,7 @@ const TITLES = {
   transportes:['Transportes','Planificación y asignación de conductores'],
   aduanas:['Aduanas','Documentación y control de despachos'],
   correos:['Correos','Bandeja de operations@ e info@ vinculada a expedientes'],
+  capitanes:['Agenda de capitanes','Contactos de buques y acceso directo a WhatsApp'],
   clientes:['Clientes y tarifas','Condiciones comerciales por cliente'],
   facturacion:['Facturación','Servicios listos para revisar y exportar'],
   auditoria:['Auditoría','Registro de movimientos por usuario'],
@@ -227,7 +230,7 @@ const warehouseWhatsappSummary=(entries=[],cases=[])=>{
   return blocks.join('\n').trim();
 };const warehouseEntriesForVessel=(entries,item)=>entries.filter(entry=>activeWarehouseEntry(entry)&&(entry.expediente===item.id||(!entry.expediente&&sameVessel(entry.buque,item.buque))));
 const canAccess=(roles,id)=>{
-  if(id==='correos')return hasRole(roles,'operations')||hasRole(roles,'admin');
+  if(['correos','capitanes'].includes(id))return hasRole(roles,'operations')||hasRole(roles,'admin');
   if(['transportes','aduanas'].includes(id))return false;
   if(isDriverOnly(roles))return ['calendario','almacen'].includes(id);
   if (['clientes','facturacion'].includes(id)) return hasRole(roles,'finance')||hasRole(roles,'admin');
@@ -2597,6 +2600,7 @@ No se borrarán documentos ni fotos. El expediente volverá a este punto para co
         {tab==='transportes'&&<Transportes items={transports} update={updateTransport} openCase={openCase} team={operationalTeam} providers={providers} saveProvider={saveProvider}/>}
         {tab==='aduanas'&&<Aduanas items={customs} update={updateCustom} openCase={openCase} notify={notify}/>}
         {tab==='correos'&&<Correos csrfToken={auth.csrfToken} notify={notify} openCase={openCase} cases={casesWithFinance}/>}
+        {tab==='capitanes'&&<Capitanes csrfToken={auth.csrfToken} notify={notify} cases={casesWithFinance}/>}
         {tab==='clientes'&&showFinance&&<Clientes notify={notify} clients={finance.clients} updateClient={updateClient}/>}
         {tab==='facturacion'&&showFinance&&<Facturacion openCase={openCase} notify={notify} invoices={finance.invoices} cases={casesWithFinance} warehouseEntries={warehouseEntries} transports={transports} calendarEvents={calendarEvents} clients={finance.clients} updateInvoice={updateInvoice} updateCase={updateCase} syncInvoices={syncInvoices} csrfToken={auth.csrfToken} currentUser={visibleUser}/>}
         {tab==='auditoria'&&hasRole(user,'admin')&&!previewUser&&<Auditoria csrfToken={auth.csrfToken} notify={notify}/>}
@@ -4424,6 +4428,7 @@ function Facturacion({openCase,notify,invoices,cases,warehouseEntries=[],transpo
 }
 const MAIL_STATUS={review:'Pendiente',processed:'Procesado',ignored:'Descartado',error:'Error'};
 const MAIL_SERVICE_LABELS={reception:'RECEPCIÓN',pickup:'RECOGIDA',delivery:'ENTREGA',reception_and_delivery:'RECEPCIÓN + ENTREGA',customs:'ADUANAS',other:'OTRO SERVICIO',none:'SIN SERVICIO'};
+function Capitanes({csrfToken,notify,cases=[]}){const empty={id:null,vesselName:'',captainName:'',phone:'',imo:'',mmsi:'',language:'',notes:''};const[contacts,setContacts]=useState([]);const[form,setForm]=useState(empty);const[search,setSearch]=useState('');const[busy,setBusy]=useState(false);const load=()=>api('/api/captains.php').then(result=>setContacts(result.contacts||[])).catch(reason=>notify(reason.message));useEffect(()=>{load()},[]);const vesselOptions=useMemo(()=>[...new Map(cases.map(item=>[vesselKey(item.buque),item]).filter(([key])=>key)).values()].sort((a,b)=>String(a.buque).localeCompare(String(b.buque),'es')),[cases]);const filtered=contacts.filter(contact=>personKey([contact.vesselName,contact.captainName,contact.phone,contact.imo,contact.mmsi].join(' ')).includes(personKey(search)));const update=event=>setForm(current=>({...current,[event.target.name]:event.target.value}));const chooseVessel=event=>{const vessel=vesselOptions.find(item=>sameVessel(item.buque,event.target.value));setForm(current=>({...current,vesselName:event.target.value.toUpperCase(),imo:vessel?.imo||current.imo,mmsi:vessel?.mmsi||current.mmsi}))};const save=async event=>{event.preventDefault();setBusy(true);try{const method=form.id?'PUT':'POST';const result=await api('/api/captains.php',{method,headers:{'X-CSRF-Token':csrfToken},body:jsonBody(form)});setContacts(result.contacts||[]);setForm(empty);notify(form.id?'Contacto actualizado':'Capitán guardado en la agenda')}catch(reason){notify(reason.message)}finally{setBusy(false)}};const archive=async contact=>{if(!window.confirm(`¿Archivar el contacto de ${contact.vesselName}?`))return;try{const result=await api('/api/captains.php',{method:'DELETE',headers:{'X-CSRF-Token':csrfToken},body:jsonBody({id:contact.id})});setContacts(result.contacts||[]);if(form.id===contact.id)setForm(empty);notify('Contacto archivado')}catch(reason){notify(reason.message)}};const whatsapp=contact=>`https://wa.me/${digitsOnly(contact.phone)}?text=${encodeURIComponent(`Hola capitán, le escribimos de Swiftport Logistics en relación con el buque ${contact.vesselName}.`)}`;return <div className="captain-directory"><section className="panel captain-list"><SectionHeader title="Directorio de capitanes" subtitle={`${contacts.length} contacto(s) · teléfonos privados de uso operativo`}/><div className="captain-toolbar"><label className="search-box"><Search/><input value={search} onChange={event=>setSearch(event.target.value)} placeholder="Buscar buque, capitán, teléfono, IMO o MMSI…"/></label><button className="button secondary" onClick={load}><RefreshCw/> Actualizar</button></div>{filtered.length?<div className="captain-grid">{filtered.map(contact=><article className="captain-card" key={contact.id}><header><span><Ship/></span><div><h3>{contact.vesselName}</h3><small>{contact.captainName||'Capitán · nombre pendiente'}{contact.language?` · ${contact.language}`:''}</small></div><button className="icon-button" onClick={()=>setForm(contact)} aria-label="Editar contacto"><PencilLine/></button></header><div className="captain-identifiers">{contact.imo&&<span>IMO {contact.imo}</span>}{contact.mmsi&&<span>MMSI {contact.mmsi}</span>}</div><a className="captain-phone" href={`tel:${contact.phone}`}>{contact.phone}</a>{contact.notes&&<p>{contact.notes}</p>}<div className="captain-actions"><a className="button primary" href={whatsapp(contact)} target="_blank" rel="noreferrer"><ExternalLink/> Abrir WhatsApp</a><button className="icon-button danger" onClick={()=>archive(contact)} aria-label="Archivar contacto"><Archive/></button></div></article>)}</div>:<div className="captain-empty">No hay contactos que coincidan con la búsqueda.</div>}</section><section className="panel captain-editor"><SectionHeader title={form.id?'Editar contacto':'Añadir capitán'} subtitle="Relaciona el teléfono con la identidad permanente del buque"/><form onSubmit={save}><label className="field wide"><span>Buque *</span><input name="vesselName" list="captain-vessels" value={form.vesselName} onChange={chooseVessel} required placeholder="Ej. ESKE"/><datalist id="captain-vessels">{vesselOptions.map(item=><option key={item.id} value={item.buque}/>)}</datalist></label><label className="field wide"><span>Nombre del capitán</span><input name="captainName" value={form.captainName} onChange={update} placeholder="Puede dejarse pendiente"/></label><label className="field wide"><span>WhatsApp con prefijo internacional *</span><input name="phone" type="tel" value={form.phone} onChange={update} required placeholder="Ej. +90 534 500 78 30"/></label><label className="field"><span>IMO</span><input name="imo" inputMode="numeric" value={form.imo} onChange={update}/></label><label className="field"><span>MMSI</span><input name="mmsi" inputMode="numeric" value={form.mmsi} onChange={update}/></label><label className="field wide"><span>Idioma</span><input name="language" value={form.language} onChange={update} placeholder="Ej. Inglés, turco…"/></label><label className="field wide"><span>Notas</span><textarea name="notes" rows="3" value={form.notes} onChange={update} placeholder="Horario, relevo, preferencias de contacto…"/></label><div className="captain-privacy"><ShieldCheck/> Datos de contacto de uso estrictamente operativo. Archiva el contacto cuando cambie el capitán y evita incluir información personal innecesaria.</div><div className="captain-form-actions">{form.id&&<button type="button" className="button tertiary" onClick={()=>setForm(empty)}>Cancelar edición</button>}<button className="button primary" disabled={busy}><Save/> {busy?'Guardando…':'Guardar contacto'}</button></div></form></section></div>}
 function Correos({csrfToken,notify,openCase,cases=[]}){
   const [items,setItems]=useState([]);
   const [counts,setCounts]=useState({review:0,processed:0,ignored:0,error:0,linked:0,unlinked:0,total:0});
