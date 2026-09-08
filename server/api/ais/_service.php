@@ -80,6 +80,50 @@ function ais_estimated_arrival(?float $distance, float $speed, string $timestamp
     ];
 }
 
+function ais_send_discord_alert(array $case, array $tracking): bool
+{
+    $webhook = trim(config('discord_webhook_url'));
+    if ($webhook === '' || !str_starts_with($webhook, 'https://discord.com/api/webhooks/')) return false;
+    $etaLabel = 'Sin calcular';
+    try {
+        $eta = trim((string) ($tracking['estimatedArrivalAt'] ?? ''));
+        if ($eta !== '') $etaLabel = (new DateTimeImmutable($eta))->setTimezone(new DateTimeZone('Europe/Madrid'))->format('d/m/Y H:i');
+    } catch (Throwable) {}
+    $distance = $tracking['distanceToPortNm'] ?? null;
+    $colors = ['eta' => 3447003, 'anchorage' => 16753920, 'pilot' => 10181046, 'berth' => 3066993, 'departure' => 15844367, 'approach' => 3447003];
+    $payload = [
+        'username' => 'Swiftport AIS',
+        'content' => '🚢 **ACTUALIZACIÓN DE BUQUE**',
+        'allowed_mentions' => ['parse' => []],
+        'embeds' => [[
+            'title' => trim((string) ($case['buque'] ?? 'BUQUE')) . ' · ' . (string) ($tracking['status'] ?? 'Actualización AIS'),
+            'description' => (string) ($tracking['alertMessage'] ?? ''),
+            'url' => 'https://app.swiftportlogistic.com/',
+            'color' => $colors[(string) ($tracking['alertType'] ?? '')] ?? 3447003,
+            'fields' => [
+                ['name' => 'Expediente', 'value' => (string) ($case['id'] ?? '—'), 'inline' => true],
+                ['name' => 'Puerto', 'value' => (string) ($case['puerto'] ?? '—'), 'inline' => true],
+                ['name' => 'ETA estimada AIS', 'value' => $etaLabel, 'inline' => true],
+                ['name' => 'Distancia', 'value' => $distance === null ? 'Sin calcular' : round((float) $distance, 1) . ' mn', 'inline' => true],
+                ['name' => 'Velocidad', 'value' => round((float) ($tracking['speed'] ?? 0), 1) . ' kn', 'inline' => true],
+                ['name' => 'Última señal', 'value' => (string) ($tracking['sourceTimestamp'] ?? $tracking['receivedAt'] ?? '—'), 'inline' => true],
+            ],
+            'footer' => ['text' => 'Swiftport OS · Seguimiento AIS estimado'],
+            'timestamp' => gmdate(DATE_ATOM),
+        ]],
+    ];
+    $handle = curl_init($webhook);
+    if ($handle === false) return false;
+    curl_setopt_array($handle, [CURLOPT_POST => true, CURLOPT_HTTPHEADER => ['Content-Type: application/json'], CURLOPT_POSTFIELDS => json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR), CURLOPT_RETURNTRANSFER => true, CURLOPT_CONNECTTIMEOUT => 4, CURLOPT_TIMEOUT => 8]);
+    $response = curl_exec($handle);
+    $statusCode = (int) curl_getinfo($handle, CURLINFO_RESPONSE_CODE);
+    curl_close($handle);
+    if ($response === false || $statusCode < 200 || $statusCode >= 300) {
+        error_log('Swiftport Discord AIS alert failed: HTTP ' . $statusCode);
+        return false;
+    }
+    return true;
+}
 function ais_operational_cases(): array
 {
     $stateRow = db()->query('SELECT data FROM app_operational_state WHERE id = 1')->fetch();
@@ -158,6 +202,7 @@ function ais_save_positions(array $positions): int
         $alertMessage = (string) ($previous['alertMessage'] ?? '');
         $alertType = (string) ($previous['alertType'] ?? '');
         $statusChangedAt = (string) ($previous['statusChangedAt'] ?? '');
+        $discordAlertCreated = false;
         if ($statusChanged || $etaChanged) {
             $statusChangedAt = gmdate(DATE_ATOM);
             $vessel = trim((string) ($cases[$caseRef]['buque'] ?? 'El buque'));
@@ -172,11 +217,13 @@ function ais_save_positions(array $positions): int
                 $alertKey = $caseRef . '-' . $alertType . '-' . time();
                 $distanceLabel = $distance === null ? '' : ' a ' . round($distance, 1) . ' mn del puerto';
                 $alertMessage = $vessel . ': ' . mb_strtolower($status) . $distanceLabel . '. Estado estimado mediante AIS.';
+                $discordAlertCreated = true;
             } elseif ($etaChanged) {
                 $alertType = 'eta';
                 $alertKey = $caseRef . '-eta-' . strtotime((string) $estimatedArrival['at']);
                 $etaLabel = (new DateTimeImmutable((string) $estimatedArrival['at']))->setTimezone(new DateTimeZone('Europe/Madrid'))->format('d/m H:i');
                 $alertMessage = $vessel . ': ETA AIS actualizada a ' . $etaLabel . ' (variación aproximada de ' . $etaShiftMinutes . ' min).';
+                $discordAlertCreated = true;
             }
         }
         $tracking = [
@@ -207,6 +254,7 @@ function ais_save_positions(array $positions): int
             $mmsi,
             json_encode($tracking, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR),
         ]);
+        if ($discordAlertCreated) ais_send_discord_alert($cases[$caseRef], $tracking);
         $complete = db()->prepare(
             "UPDATE app_ais_refresh_requests
              SET status = 'completed', processed_at = CURRENT_TIMESTAMP
