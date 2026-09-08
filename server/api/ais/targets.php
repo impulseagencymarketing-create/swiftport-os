@@ -13,6 +13,11 @@ if ($cronToken === '' || config('setup_token') === '' || !hash_equals(config('se
 $row = db()->query('SELECT data FROM app_operational_state WHERE id = 1')->fetch();
 $state = $row ? json_decode((string) $row['data'], true) : [];
 $targets = [];
+$storedPositions = [];
+foreach (db()->query('SELECT case_ref, data FROM app_ais_positions')->fetchAll() as $positionRow) {
+    $stored = json_decode((string) ($positionRow['data'] ?? ''), true);
+    if (is_array($stored)) $storedPositions[(string) $positionRow['case_ref']] = $stored;
+}
 $events = is_array($state['calendarEvents'] ?? null) ? $state['calendarEvents'] : [];
 $transports = is_array($state['transports'] ?? null) ? $state['transports'] : [];
 $windowStart = strtotime('-12 hours');
@@ -46,6 +51,7 @@ foreach (is_array($state['cases'] ?? null) ? $state['cases'] : [] as $case) {
         'vessel' => (string) ($case['buque'] ?? ''),
         'port' => (string) ($case['puerto'] ?? ''),
         'transportAt' => gmdate(DATE_ATOM, $nearbyTransportAt),
+        'lastTracking' => $storedPositions[$caseRef] ?? null,
     ];
 }
 

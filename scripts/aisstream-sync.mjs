@@ -8,16 +8,21 @@ const discordTestSnapshot = process.env.DISCORD_TEST_SNAPSHOT === 'true';
 const sendDiscordSnapshots = async (targets, positions) => {
   if (!discordTestSnapshot || !discordWebhook) return;
   for (const target of targets) {
-    const position = positions.get(String(target.mmsi));
+    const livePosition = positions.get(String(target.mmsi));
+    const storedPosition = target.lastTracking && Number.isFinite(Number(target.lastTracking.latitude))
+      && Number.isFinite(Number(target.lastTracking.longitude)) ? target.lastTracking : null;
+    const position = livePosition || storedPosition;
+    const signalLabel = livePosition ? 'Señal recibida ahora' : storedPosition ? 'Última señal guardada' : 'Sin posición disponible';
     const fields = [
       {name: 'Expediente', value: String(target.caseRef || '—'), inline: true},
       {name: 'Puerto', value: String(target.port || '—'), inline: true},
       {name: 'Transporte próximo', value: target.transportAt ? new Date(target.transportAt).toLocaleString('es-ES', {timeZone: 'Europe/Madrid'}) : 'Sin fecha', inline: true},
       {name: 'Velocidad AIS', value: position ? `${Number(position.speed || 0).toFixed(1)} kn` : 'Sin señal nueva', inline: true},
       {name: 'Rumbo', value: position ? `${Number(position.course || 0).toFixed(0)}°` : '—', inline: true},
-      {name: 'Última señal', value: position?.timestamp ? new Date(position.timestamp).toLocaleString('es-ES', {timeZone: 'Europe/Madrid'}) : 'No recibida en esta consulta', inline: true},
+      {name: 'Última señal', value: position ? new Date(position.timestamp || position.sourceTimestamp || position.receivedAt).toLocaleString('es-ES', {timeZone: 'Europe/Madrid'}) : 'Todavía no registrada', inline: true},
+      {name: 'Origen', value: signalLabel, inline: true},
     ];
-    const response = await fetch(discordWebhook, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({username: 'Swiftport AIS', content: '🧪 **PRUEBA · ESTADO ACTUAL**', allowed_mentions: {parse: []}, embeds: [{title: `🚢 ${target.vessel || 'BUQUE'}`, description: position ? 'Expediente abierto con transporte cercano. Posición AIS recibida en la comprobación actual.' : 'Expediente abierto con transporte cercano, pero AISStream no entregó una posición nueva durante esta comprobación.', color: position ? 3447003 : 9807270, fields, footer: {text: 'Swiftport OS · Prueba manual, no es una alerta operativa'}, timestamp: new Date().toISOString()}]})});
+    const response = await fetch(discordWebhook, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({username: 'Swiftport AIS', content: '🧪 **PRUEBA · ESTADO ACTUAL**', allowed_mentions: {parse: []}, embeds: [{title: `🚢 ${target.vessel || 'BUQUE'}`, description: position ? `Expediente abierto con transporte cercano. ${signalLabel}.` : 'Expediente abierto con transporte cercano, pero todavía no existe ninguna posición registrada para este MMSI.', color: position ? 3447003 : 9807270, fields, footer: {text: 'Swiftport OS · Prueba manual, no es una alerta operativa'}, timestamp: new Date().toISOString()}]})});
     if (!response.ok) throw new Error(`Discord rechazó la prueba (${response.status}).`);
     await new Promise(resolve => setTimeout(resolve, 450));
   }
