@@ -4,6 +4,12 @@ on:
   schedule:
     - cron: "7,37 * * * *"
   workflow_dispatch:
+    inputs:
+      discord_test:
+        description: Enviar a Discord una prueba de los buques vigilados actualmente
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -29,4 +35,6 @@ jobs:
           AISSTREAM_API_KEY: ${{ secrets.AISSTREAM_API_KEY }}
           CRON_TOKEN: ${{ secrets.APP_SETUP_TOKEN }}
           APP_URL: https://app.swiftportlogistic.com
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          DISCORD_TEST_SNAPSHOT: ${{ inputs.discord_test || 'false' }}
         run: node scripts/aisstream-sync.mjs

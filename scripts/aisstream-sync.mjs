@@ -3,6 +3,26 @@ const cronToken = process.env.CRON_TOKEN || '';
 const appUrl = (process.env.APP_URL || 'https://app.swiftportlogistic.com').replace(/\/$/, '');
 const targetsEndpoint = process.env.TARGETS_ENDPOINT || '/api/ais/targets.php';
 const waitMs = Math.max(10000, Math.min(70000, Number(process.env.AIS_WAIT_MS) || 70000));
+const discordWebhook = process.env.DISCORD_WEBHOOK_URL || '';
+const discordTestSnapshot = process.env.DISCORD_TEST_SNAPSHOT === 'true';
+const sendDiscordSnapshots = async (targets, positions) => {
+  if (!discordTestSnapshot || !discordWebhook) return;
+  for (const target of targets) {
+    const position = positions.get(String(target.mmsi));
+    const fields = [
+      {name: 'Expediente', value: String(target.caseRef || '—'), inline: true},
+      {name: 'Puerto', value: String(target.port || '—'), inline: true},
+      {name: 'Transporte próximo', value: target.transportAt ? new Date(target.transportAt).toLocaleString('es-ES', {timeZone: 'Europe/Madrid'}) : 'Sin fecha', inline: true},
+      {name: 'Velocidad AIS', value: position ? `${Number(position.speed || 0).toFixed(1)} kn` : 'Sin señal nueva', inline: true},
+      {name: 'Rumbo', value: position ? `${Number(position.course || 0).toFixed(0)}°` : '—', inline: true},
+      {name: 'Última señal', value: position?.timestamp ? new Date(position.timestamp).toLocaleString('es-ES', {timeZone: 'Europe/Madrid'}) : 'No recibida en esta consulta', inline: true},
+    ];
+    const response = await fetch(discordWebhook, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({username: 'Swiftport AIS', content: '🧪 **PRUEBA · ESTADO ACTUAL**', allowed_mentions: {parse: []}, embeds: [{title: `🚢 ${target.vessel || 'BUQUE'}`, description: position ? 'Expediente abierto con transporte cercano. Posición AIS recibida en la comprobación actual.' : 'Expediente abierto con transporte cercano, pero AISStream no entregó una posición nueva durante esta comprobación.', color: position ? 3447003 : 9807270, fields, footer: {text: 'Swiftport OS · Prueba manual, no es una alerta operativa'}, timestamp: new Date().toISOString()}]})});
+    if (!response.ok) throw new Error(`Discord rechazó la prueba (${response.status}).`);
+    await new Promise(resolve => setTimeout(resolve, 450));
+  }
+  console.log(`${targets.length} prueba(s) de buques enviadas a Discord.`);
+};
 
 if (!apiKey || !cronToken) {
   console.log('Seguimiento AIS pendiente de configurar; no se realiza ninguna consulta.');
@@ -88,6 +108,7 @@ for (const [mmsi, position] of latest) {
 }
 if (!positions.length) {
   console.log(`Sin señal AIS nueva para ${targets.length} expediente(s).`);
+  await sendDiscordSnapshots(targets, latest);
   process.exit(process.env.RETRY_ON_EMPTY === '1' ? 10 : 0);
 }
 
@@ -99,3 +120,4 @@ const updateResponse = await fetch(`${appUrl}/api/ais/update.php`, {
 if (!updateResponse.ok) throw new Error(`No se pudieron guardar las posiciones (${updateResponse.status}).`);
 const result = await updateResponse.json();
 console.log(`${result.saved || 0} posición(es) AIS actualizadas.`);
+await sendDiscordSnapshots(targets, latest);
