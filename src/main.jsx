@@ -1854,10 +1854,11 @@ function App({auth,finance,onFinanceChange,onLogout}){
     aisAlertSnapshotRef.current=current;
     try{localStorage.setItem(storageKey,JSON.stringify(current))}catch{}
     if(!alerts.length)return;
-    const {item,tracking}=alerts[0];
-    const message=tracking.alertMessage||`${item.buque}: ${tracking.status}.`;
-    notify(message);
-    if(localStorage.getItem('swiftport-device-alerts')==='1')showDeviceNotification(`Swiftport  -  ${item.buque}`,message,tracking.alertKey).catch(()=>{});
+    const now=new Date();
+    const entries=alerts.map(({item,tracking})=>({id:`${tracking.alertKey}-${now.getTime()}`,alertKey:tracking.alertKey,type:'ais',title:`Seguimiento AIS · ${item.buque}`,message:tracking.alertMessage||`${item.buque}: ${tracking.status}.`,createdAt:tracking.statusChangedAt||now.toISOString(),caseId:item.id,vessel:item.buque,status:tracking.status,unread:true}));
+    setNotificationLog(history=>{const next=[...entries,...history.filter(entry=>!entries.some(fresh=>fresh.alertKey===entry.alertKey))].slice(0,100);try{localStorage.setItem(`swiftport-notification-log-${user.id}`,JSON.stringify(next))}catch{}return next});
+    notify(entries.length===1?entries[0].message:`${entries.length} buques tienen una actualización AIS.`);
+    if(localStorage.getItem('swiftport-device-alerts')==='1')alerts.forEach(({item,tracking})=>showDeviceNotification(`Swiftport  -  ${item.buque}`,tracking.alertMessage||`${item.buque}: ${tracking.status}.`,tracking.alertKey).catch(()=>{}));
   },[cases,calendarEvents,operationalLoaded]);
   const rawDeliveryAlerts=useMemo(()=>deliveryAlertsForSchedule(calendarEvents,cases,visibleUser,new Date(alertTick)),[calendarEvents,cases,visibleUser,alertTick]);
   const deliveryAlerts=useMemo(()=>rawDeliveryAlerts.filter(alert=>!acknowledgedDeliveryAlerts[alert.key]),[rawDeliveryAlerts,acknowledgedDeliveryAlerts]);
@@ -2565,7 +2566,9 @@ No se borrarán documentos ni fotos. El expediente volverá a este punto para co
   const assignedAlerts=(hasRole(effectiveRoles,'operations')||hasRole(effectiveRoles,'driver'))
     ? calendarEvents.filter(event=>samePerson(event.asignado,visibleUser.fullName)&&cases.find(item=>item.id===event.expediente)?.estado!=='Completado')
     : calendarEvents.filter(event=>!event.asignado||event.asignado==='Sin asignar');
-  const notificationCount=assignedAlerts.length+activeNotifications.length;
+  const unreadAisAlerts=notificationLog.filter(item=>item.type==='ais'&&item.unread).length;
+  const notificationCount=assignedAlerts.length+activeNotifications.length+unreadAisAlerts;
+  const openNotificationCenter=()=>{setNotificationOpen(true);setNotificationLog(previous=>{const next=previous.map(item=>item.type==='ais'?{...item,unread:false}:item);try{localStorage.setItem(`swiftport-notification-log-${user.id}`,JSON.stringify(next))}catch{}return next})};
   const clearNotificationLog=()=>{setNotificationLog([]);try{localStorage.removeItem(`swiftport-notification-log-${user.id}`)}catch{}};
   return <div className="shell">
     <Sidebar tab={tab} open={menuOpen} navigate={navigate} close={()=>setMenuOpen(false)} nav={availableNav} user={visibleUser} onLogout={onLogout}/>
@@ -2578,7 +2581,7 @@ No se borrarán documentos ni fotos. El expediente volverá a este punto para co
         </div>
         <div className="topbar-actions">
           <button className="icon-button theme-toggle" aria-label={colorTheme==='dark'?'Activar modo claro':'Activar modo oscuro'} title={colorTheme==='dark'?'Modo claro':'Modo oscuro'} onClick={()=>setColorTheme(current=>current==='dark'?'light':'dark')}>{colorTheme==='dark'?<Sun/>:<Moon/>}</button>
-          <button className="icon-button notification" aria-label="Notificaciones" onClick={()=>setNotificationOpen(true)}><Bell/>{notificationCount>0&&<i>{notificationCount}</i>}</button>
+          <button className="icon-button notification" aria-label="Notificaciones" onClick={openNotificationCenter}><Bell/>{notificationCount>0&&<i>{notificationCount}</i>}</button>
           {!driverOnly&&<button className="button primary" aria-label="Nuevo expediente" onClick={()=>setNewOpen(true)}><Plus/> <span>Nuevo expediente</span></button>}
           <div className="avatar" title={visibleUser.fullName+'  -  '+roleLabel(visibleUser)}>{initials(visibleUser.fullName)}</div>
         </div>

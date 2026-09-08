@@ -50,6 +50,7 @@ function ais_operational_status(?float $distance, float $speed, int $navigationS
 {
     if ($distance !== null && $distance <= 3 && $navigationStatus === 5) return 'Atracado';
     if ($distance !== null && $distance <= 20 && $navigationStatus === 1) return 'En fondeo';
+    if ($distance !== null && $distance <= 4 && $speed >= 0.8 && $speed <= 12 && $approaching) return 'Entrada con práctico probable';
     if ($distance !== null && $distance <= 1.5 && $speed <= 0.5) return 'Atraque probable';
     if ($distance !== null && $distance <= 5) return 'En zona portuaria';
     if ($distance !== null && $distance <= 20) return 'Cerca del puerto';
@@ -131,22 +132,53 @@ function ais_save_positions(array $positions): int
             || ($bearing !== null && ais_course_difference($course, $bearing) <= 50)
         );
         $status = ais_operational_status($distance, $speed, $navigationStatus, $approaching);
-        $alertStatuses = ['Rumbo al puerto', 'Cerca del puerto', 'En zona portuaria', 'En fondeo', 'Atracado'];
-        $statusChanged = $status !== (string) ($previous['status'] ?? '')
+        $previousStatus = (string) ($previous['status'] ?? '');
+        $departingFromPort = in_array($previousStatus, ['Atracado', 'Atraque probable', 'En zona portuaria', 'En fondeo', 'Ha zarpado'], true)
+            && $previousDistance !== null && $distance !== null && $distance >= $previousDistance + 0.4
+            && $speed >= 2 && !$approaching;
+        if ($departingFromPort) $status = 'Ha zarpado';
+
+        $sourceTimestamp = trim((string) ($position['timestamp'] ?? ''));
+        $estimatedArrival = ais_estimated_arrival($distance, $speed, $sourceTimestamp);
+        $previousEtaAt = trim((string) ($previous['estimatedArrivalAt'] ?? ''));
+        $etaShiftMinutes = null;
+        if ($estimatedArrival['at'] !== '' && $previousEtaAt !== '') {
+            $previousEtaTimestamp = strtotime($previousEtaAt);
+            $currentEtaTimestamp = strtotime((string) $estimatedArrival['at']);
+            if ($previousEtaTimestamp !== false && $currentEtaTimestamp !== false) {
+                $etaShiftMinutes = (int) round(abs($currentEtaTimestamp - $previousEtaTimestamp) / 60);
+            }
+        }
+        $etaChanged = $etaShiftMinutes !== null && $etaShiftMinutes >= 30
+            && !in_array($status, ['Atracado', 'Ha zarpado'], true);
+        $alertStatuses = ['Rumbo al puerto', 'Cerca del puerto', 'En zona portuaria', 'En fondeo', 'Entrada con práctico probable', 'Atraque probable', 'Atracado', 'Ha zarpado'];
+        $statusChanged = $status !== $previousStatus
             || (empty($previous['alertKey']) && in_array($status, $alertStatuses, true));
         $alertKey = (string) ($previous['alertKey'] ?? '');
         $alertMessage = (string) ($previous['alertMessage'] ?? '');
+        $alertType = (string) ($previous['alertType'] ?? '');
         $statusChangedAt = (string) ($previous['statusChangedAt'] ?? '');
-        if ($statusChanged) {
+        if ($statusChanged || $etaChanged) {
             $statusChangedAt = gmdate(DATE_ATOM);
-            if (in_array($status, $alertStatuses, true)) {
-                $alertKey = $caseRef . '-' . mb_strtolower(str_replace(' ', '-', $status)) . '-' . time();
+            $vessel = trim((string) ($cases[$caseRef]['buque'] ?? 'El buque'));
+            if ($statusChanged && in_array($status, $alertStatuses, true)) {
+                $alertType = match ($status) {
+                    'En fondeo' => 'anchorage',
+                    'Entrada con práctico probable' => 'pilot',
+                    'Atracado', 'Atraque probable' => 'berth',
+                    'Ha zarpado' => 'departure',
+                    default => 'approach',
+                };
+                $alertKey = $caseRef . '-' . $alertType . '-' . time();
                 $distanceLabel = $distance === null ? '' : ' a ' . round($distance, 1) . ' mn del puerto';
-                $alertMessage = trim((string) ($cases[$caseRef]['buque'] ?? 'El buque')) . ': ' . mb_strtolower($status) . $distanceLabel . '.';
+                $alertMessage = $vessel . ': ' . mb_strtolower($status) . $distanceLabel . '. Estado estimado mediante AIS.';
+            } elseif ($etaChanged) {
+                $alertType = 'eta';
+                $alertKey = $caseRef . '-eta-' . strtotime((string) $estimatedArrival['at']);
+                $etaLabel = (new DateTimeImmutable((string) $estimatedArrival['at']))->setTimezone(new DateTimeZone('Europe/Madrid'))->format('d/m H:i');
+                $alertMessage = $vessel . ': ETA AIS actualizada a ' . $etaLabel . ' (variación aproximada de ' . $etaShiftMinutes . ' min).';
             }
         }
-        $sourceTimestamp = trim((string) ($position['timestamp'] ?? ''));
-        $estimatedArrival = ais_estimated_arrival($distance, $speed, $sourceTimestamp);
         $tracking = [
             'mmsi' => $mmsi,
             'latitude' => round((float) $latitude, 6),
@@ -163,6 +195,8 @@ function ais_save_positions(array $positions): int
             'estimatedArrivalConfidence' => $estimatedArrival['confidence'],
             'alertKey' => $alertKey,
             'alertMessage' => $alertMessage,
+            'alertType' => $alertType,
+            'etaShiftMinutes' => $etaShiftMinutes,
             'statusChangedAt' => $statusChangedAt,
             'sourceTimestamp' => $sourceTimestamp,
             'receivedAt' => gmdate(DATE_ATOM),
