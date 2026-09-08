@@ -374,7 +374,7 @@ function ais_fetch_position(string $apiKey, string $mmsi, int $waitSeconds = 35)
     }
 
     $subscription = json_encode([
-        'Apikey' => $apiKey,
+        'APIKey' => $apiKey,
         'BoundingBoxes' => [[[-90, -180], [90, 180]]],
         'FiltersShipMMSI' => [$mmsi],
         'FilterMessageTypes' => ['PositionReport', 'StandardClassBPositionReport', 'ExtendedClassBPositionReport'],
@@ -397,10 +397,14 @@ function ais_fetch_position(string $apiKey, string $mmsi, int $waitSeconds = 35)
             continue;
         }
         if ($frame['opcode'] === 8) break;
-        if ($frame['opcode'] !== 1) continue;
+        if (!in_array($frame['opcode'], [1, 2], true)) continue;
         $packet = json_decode($frame['payload'], true);
         if (!is_array($packet)) continue;
-        $metadata = is_array($packet['Metadata'] ?? null) ? $packet['Metadata'] : [];
+        if (!empty($packet['error'])) {
+            fclose($socket);
+            throw new RuntimeException('AISStream rechazó la suscripción: ' . (string) $packet['error']);
+        }
+        $metadata = is_array($packet['Metadata'] ?? null) ? $packet['Metadata'] : (is_array($packet['MetaData'] ?? null) ? $packet['MetaData'] : []);
         if (preg_replace('/\D/', '', (string) ($metadata['MMSI'] ?? '')) !== $mmsi) continue;
         $messageType = (string) ($packet['MessageType'] ?? '');
         $message = is_array($packet['Message'] ?? null) ? $packet['Message'] : [];

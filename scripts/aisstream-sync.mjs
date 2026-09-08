@@ -60,7 +60,7 @@ await new Promise((resolve, reject) => {
 
   socket.addEventListener('open', () => {
     socket.send(JSON.stringify({
-      Apikey: apiKey,
+      APIKey: apiKey,
       BoundingBoxes: [[[-90, -180], [90, 180]]],
       FiltersShipMMSI: [...targetByMmsi.keys()],
       FilterMessageTypes: ['PositionReport', 'StandardClassBPositionReport', 'ExtendedClassBPositionReport'],
@@ -69,8 +69,14 @@ await new Promise((resolve, reject) => {
 
   socket.addEventListener('message', event => {
     let packet;
-    try { packet = JSON.parse(event.data); } catch { return; }
-    const metadata = packet.Metadata || {};
+    try { packet = JSON.parse(typeof event.data === 'string' ? event.data : Buffer.from(event.data).toString('utf8')); } catch { return; }
+    if (packet?.error) {
+      clearTimeout(timer);
+      socket.close();
+      reject(new Error(`AISStream rechazó la suscripción: ${packet.error}`));
+      return;
+    }
+    const metadata = packet.Metadata || packet.MetaData || {};
     const mmsi = String(metadata.MMSI || '');
     if (!targetByMmsi.has(mmsi)) return;
     const messageType = packet.MessageType || '';
