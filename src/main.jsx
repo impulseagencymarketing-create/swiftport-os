@@ -18,6 +18,7 @@ import {
 import './styles.css';
 import './fixes.css';
 import './captains.css';
+import './photo-viewer.css';
 pdfjsLib.GlobalWorkerOptions.workerSrc=pdfWorkerUrl;
 const LOCAL_DESIGN_MODE=import.meta.env.DEV&&['localhost','127.0.0.1'].includes(window.location.hostname);
 const THEME_STORAGE_KEY='swiftport-color-theme';
