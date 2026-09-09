@@ -1389,6 +1389,8 @@ async function playAlertSound(settings=loadAlertSoundSettings()){
   return true;
 }
 async function uploadAttachment(file,category,csrfToken){
+  const maxBytes=50*1024*1024;
+  if(file.size>maxBytes)throw new Error(`El archivo ${file.name} supera el límite de 50 MB.`);
   const data=new FormData();
   data.append('file',file);
   data.append('category',category);

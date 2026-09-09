@@ -30,14 +30,29 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'GET') {
     exit;
 }
 
+$maxUploadBytes = 50 * 1024 * 1024;
+$uploadErrors = [
+    UPLOAD_ERR_INI_SIZE => 'El archivo supera el límite permitido por el servidor (50 MB).',
+    UPLOAD_ERR_FORM_SIZE => 'El archivo supera el límite permitido (50 MB).',
+    UPLOAD_ERR_PARTIAL => 'La subida quedó incompleta. Comprueba la conexión y vuelve a intentarlo.',
+    UPLOAD_ERR_NO_FILE => 'Selecciona un archivo válido.',
+];
+if (isset($_FILES['file']) && (int) ($_FILES['file']['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) {
+    $code = (int) $_FILES['file']['error'];
+    respond(['error' => $uploadErrors[$code] ?? 'No se pudo recibir el archivo. Vuelve a intentarlo.'], 422);
+}
+if ((int) ($_SERVER['CONTENT_LENGTH'] ?? 0) > $maxUploadBytes + 1048576 && !isset($_FILES['file'])) {
+    respond(['error' => 'El documento supera el límite permitido de 50 MB.'], 413);
+}
+
 require_method('POST');
 verify_csrf();
 if (!isset($_FILES['file']) || !is_uploaded_file($_FILES['file']['tmp_name'])) {
     respond(['error' => 'Selecciona un archivo válido.'], 422);
 }
 $upload = $_FILES['file'];
-if ((int) $upload['error'] !== UPLOAD_ERR_OK || (int) $upload['size'] < 1 || (int) $upload['size'] > 10485760) {
-    respond(['error' => 'El archivo debe ocupar menos de 10 MB.'], 422);
+if ((int) $upload['size'] < 1 || (int) $upload['size'] > $maxUploadBytes) {
+    respond(['error' => 'El archivo debe ocupar menos de 50 MB.'], 422);
 }
 $finfo = new finfo(FILEINFO_MIME_TYPE);
 $mime = (string) $finfo->file($upload['tmp_name']);
