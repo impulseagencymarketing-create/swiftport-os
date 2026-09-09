@@ -1,0 +1,17 @@
+.expense-scan-modal{width:min(1100px,96vw);max-height:94dvh;display:flex;flex-direction:column;background:var(--white,#fff);color:var(--ink);border:1px solid var(--line);border-radius:16px;overflow:hidden;box-shadow:0 24px 80px #0005}
+.expense-scan-modal>header{display:flex;justify-content:space-between;gap:16px;padding:22px;border-bottom:1px solid var(--line)}
+.expense-scan-modal h2{margin:4px 0;font-size:22px}.expense-scan-modal h3{font-size:16px;margin:22px 0 12px}.expense-scan-modal header p,.expense-scan-hint{font-size:12px;color:var(--muted);line-height:1.6}
+.expense-scan-body{padding:22px;overflow-y:auto;min-height:0}.expense-scan-modal fieldset{border:0;padding:0;margin:20px 0 0;min-width:0}.expense-scan-modal legend{font-weight:700;font-size:16px;margin-bottom:16px}
+.expense-scan-fields{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}.expense-scan-modal .field{margin-bottom:12px}.expense-scan-modal .field input,.expense-scan-modal .field select,.expense-scan-modal .field textarea{width:100%;min-width:0}
+.expense-scan-modal input[type=file]{width:200px;max-width:100%;font-size:11px}.expense-scan-original{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-top:12px}.expense-scan-original a{color:var(--blue);overflow-wrap:anywhere;font-size:12px}
+.expense-scan-suggestions{display:flex;flex-wrap:wrap;gap:10px}.expense-scan-suggestions button{flex-direction:column;white-space:normal;text-align:left;align-items:start}.expense-scan-suggestions small{font-size:10px;font-weight:400}
+.expense-scan-cases{max-height:250px;overflow:auto;border:1px solid var(--line);border-radius:10px;margin-top:10px}.expense-scan-cases label{display:flex;gap:12px;padding:12px;border-bottom:1px solid var(--line);cursor:pointer}.expense-scan-cases small{display:block;font-size:11px;color:var(--muted);margin-top:4px}.expense-scan-cases b{font-size:12px}.expense-scan-cases input,.expense-scan-confirm input{accent-color:var(--blue)}
+.expense-scan-split{display:grid;grid-template-columns:1fr 1fr;gap:12px}.expense-scan-confirm{display:flex;align-items:center;gap:10px;padding:16px;background:var(--soft);border:1px solid var(--line);border-radius:10px;font-size:13px}.expense-scan-modal footer{padding:16px 22px;display:flex;justify-content:flex-end;gap:12px;border-top:1px solid var(--line)}
+[data-theme=dark] .expense-scan-modal{background:#101d2a;color:#eef5fc}[data-theme=dark] .expense-scan-confirm{background:#193348}
+@media(max-width:700px){.expense-scan-modal{width:100vw;max-height:100dvh;height:100dvh;border-radius:0}.expense-scan-fields,.expense-scan-split{grid-template-columns:1fr}.expense-scan-original{align-items:start;flex-direction:column}.expense-scan-body{padding:16px}.expense-scan-modal footer{padding:12px;flex-wrap:wrap}.expense-scan-modal footer .button{flex:1;white-space:normal}}
+.expense-scan-backdrop{z-index:200}
+@media(max-width:700px){.expense-scan-backdrop{padding:0}}
+.expense-scan-modal>header,.expense-scan-modal>footer{flex-shrink:0}
+.expense-scan-modal .field>span{font-size:11px;color:var(--muted);line-height:1.5}
+.expense-scan-modal .field input,.expense-scan-modal .field select,.expense-scan-modal .field textarea{font-size:14px}
+@media(max-width:700px){.expense-scan-modal .field input,.expense-scan-modal .field select,.expense-scan-modal .field textarea{font-size:16px}}

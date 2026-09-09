@@ -32,3 +32,7 @@ jobs:
         run: find server -name '*.php' -print0 | xargs -0 -n1 php -l
       - name: Probar correlación de correos
         run: php server/tests/mail_correlation_test.php
+      - name: Probar reparto de gastos
+        run: |
+          node --test tests/expenseMath.test.mjs
+          php tests/expense-service.test.php

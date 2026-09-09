@@ -2,9 +2,11 @@
 declare(strict_types=1);
 require __DIR__ . '/_bootstrap.php';
 require_once __DIR__ . '/mail/_service.php';
+require_once __DIR__ . '/_expense_service.php';
 
 ensure_schema();
 $user = require_auth();
+expense_schema(db());
 
 if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'GET') {
     $scheduleCoherence = ['disabled' => true];
@@ -12,6 +14,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'GET') {
     $row = $statement->fetch();
     $data = $row ? json_decode($row['data'], true, 512, JSON_THROW_ON_ERROR) : null;
     if (is_array($data) && is_array($data['cases'] ?? null)) {
+        $data = expense_project($data, expense_load_imports(db()));
         $positions = [];
         foreach (db()->query('SELECT case_ref, data FROM app_ais_positions')->fetchAll() as $position) {
             $positions[(string) $position['case_ref']] = json_decode((string) $position['data'], true);
@@ -41,23 +44,32 @@ if (!is_array($data)
     respond(['error' => 'Los datos operativos no son válidos.'], 422);
 }
 
-$encoded = json_encode($data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
-$maxOperationalStateBytes = 6 * 1024 * 1024;
-if (strlen($encoded) > $maxOperationalStateBytes) {
-    respond(['error' => 'Los datos operativos superan el límite de 6 MB. Contacta con soporte para archivarlos.'], 413);
-}
-
-$statement = db()->prepare(
-    'INSERT INTO app_operational_state (id, data, updated_by)
-     VALUES (1, ?, ?)
-     ON DUPLICATE KEY UPDATE data = VALUES(data), updated_by = VALUES(updated_by)'
-);
-$statement->execute([$encoded, $user['id']]);
-$audit = $payload['audit'] ?? null;
-if (is_array($audit) && isset($audit['action']) && is_string($audit['action']) && $audit['action'] !== '') {
-    $details = $audit['details'] ?? [];
-    audit((int) $user['id'], substr($audit['action'], 0, 80), is_array($details) ? $details : []);
-} else {
-    audit((int) $user['id'], 'operational.update');
+$pdo = db();
+try {
+    $pdo->beginTransaction();
+    $pdo->query('SELECT id FROM app_operational_state WHERE id = 1 FOR UPDATE')->fetch();
+    $data = expense_project($data, expense_load_imports($pdo));
+    $encoded = json_encode($data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
+    if (strlen($encoded) > 6 * 1024 * 1024) {
+        $pdo->rollBack();
+        respond(['error' => 'Los datos operativos superan el límite de 6 MB. Contacta con soporte para archivarlos.'], 413);
+    }
+    $statement = $pdo->prepare(
+        'INSERT INTO app_operational_state (id, data, updated_by)
+         VALUES (1, ?, ?)
+         ON DUPLICATE KEY UPDATE data = VALUES(data), updated_by = VALUES(updated_by)'
+    );
+    $statement->execute([$encoded, $user['id']]);
+    $audit = $payload['audit'] ?? null;
+    if (is_array($audit) && isset($audit['action']) && is_string($audit['action']) && $audit['action'] !== '') {
+        $details = $audit['details'] ?? [];
+        audit((int) $user['id'], substr($audit['action'], 0, 80), is_array($details) ? $details : []);
+    } else {
+        audit((int) $user['id'], 'operational.update');
+    }
+    $pdo->commit();
+} catch (Throwable $error) {
+    if ($pdo->inTransaction()) $pdo->rollBack();
+    respond(['error' => 'No se pudieron guardar los datos operativos. Reintenta.'], 500);
 }
 respond(['ok' => true]);

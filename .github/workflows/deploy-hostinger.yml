@@ -46,6 +46,11 @@ jobs:
       - name: Validar la API PHP
         run: find server -name '*.php' -print0 | xargs -0 -n1 php -l
 
+      - name: Probar reparto de gastos
+        run: |
+          node --test tests/expenseMath.test.mjs
+          php tests/expense-service.test.php
+
       - name: Preparar configuración privada
         env:
           DB_HOST: ${{ secrets.DB_HOST }}
