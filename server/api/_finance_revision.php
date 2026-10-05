@@ -11,7 +11,8 @@ function protect_manual_finance(array $incoming, array $stored): void
     }
     if (($incoming['manualEditedAt'] ?? '') !== ($stored['manualEditedAt'] ?? '')) return;
     foreach (['lines', 'concepto', 'cliente', 'observaciones'] as $field) {
-        if (($incoming[$field] ?? null) !== ($stored[$field] ?? null)) {
+        // MySQL JSON may reorder object keys; compare values, not PHP key order.
+        if (($incoming[$field] ?? null) != ($stored[$field] ?? null)) {
             throw new FinanceConflict('Una actualización automática intentó cambiar tu edición manual. Se conserva la versión guardada.');
         }
     }

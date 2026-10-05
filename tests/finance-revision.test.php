@@ -11,6 +11,7 @@ foreach ([[], ['financeRevision'=>1], ['financeRevision'=>8]] as $stale) {
 echo "OK: finance revision rejects stale writes, including old tabs without revision\n";
 $manual=['manualEdited'=>true,'manualEditedAt'=>'saved','lines'=>[['item'=>'STORAGE','price'=>25,'detail'=>'875 KGS']],'concepto'=>'Manual'];
 protect_manual_finance($manual, $manual);
+protect_manual_finance(array_replace($manual,['lines'=>[['detail'=>'875 KGS','price'=>25.0,'item'=>'STORAGE']]]), $manual);
 try { protect_manual_finance(array_replace($manual,['lines'=>[]]),$manual); throw new RuntimeException('Automatic reset accepted'); }
 catch (FinanceConflict $error) {}
 try { protect_manual_finance(['lines'=>[]],$manual); throw new RuntimeException('Legacy overwrite accepted'); }
