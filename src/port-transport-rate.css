@@ -1,0 +1,7 @@
+.port-transport-rate{padding:14px;border:1px solid #92b6dd;border-radius:10px;background:#edf5ff;color:#173e68;display:grid;gap:8px;min-width:0;overflow-wrap:anywhere}
+.port-transport-rate p{margin:0;font-size:12px;line-height:1.5}
+.port-transport-rate small{font-size:11px;line-height:1.5}
+.port-transport-rate .button{justify-self:start;max-width:100%;white-space:normal;text-align:left}
+.port-transport-rate.missing{border-color:#d5a749;background:#fff5dd;color:#714e0c}
+:root[data-theme="dark"] .port-transport-rate{background:#122b40;border-color:#315a7b;color:#c3e1ff}
+:root[data-theme="dark"] .port-transport-rate.missing{background:#352913;border-color:#916d2f;color:#ffdda1}

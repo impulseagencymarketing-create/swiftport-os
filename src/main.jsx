@@ -1,4 +1,11 @@
+import {reconcileWarehouseArchive} from './warehouseArchive.mjs';
 import React, {useEffect, useMemo, useRef, useState} from 'react';
+import {savedInvoiceLines, editInvoiceLine} from './invoiceDraftLines.mjs';
+import {placeTransportDescription, splitTransportNotes} from './invoiceTransportDescription.mjs';
+import {LIMANI_LOCAL_RATES, quoteLimaniTransport, isPortTransportLine, applyPortRate} from './limaniPortRates.mjs';
+import PortTransportRateNotice from './PortTransportRateNotice.jsx';
+import {warehouseMatchesSearch} from './warehouseSearch.mjs';
+import './warehouse-search.css';
 import {createRoot} from 'react-dom/client';
 import * as pdfjsLib from 'pdfjs-dist/legacy/build/pdf.mjs';
 import pdfWorkerUrl from 'pdfjs-dist/legacy/build/pdf.worker.mjs?url';
@@ -21,6 +28,8 @@ import './captains.css';
 import './photo-viewer.css';
 import './expenses.css';
 import ExpenseScanner from './ExpenseScanner.jsx';
+import {applyOvertime,isAutoOvertime,overtimeLocked} from './overtime.mjs';
+import OvertimeReview from './OvertimeReview.jsx';
 pdfjsLib.GlobalWorkerOptions.workerSrc=pdfWorkerUrl;
 const LOCAL_DESIGN_MODE=import.meta.env.DEV&&['localhost','127.0.0.1'].includes(window.location.hostname);
 const THEME_STORAGE_KEY='swiftport-color-theme';
@@ -36,14 +45,21 @@ const DEMO_TEAM=[
 const clientCodeFromName=name=>'CLI-'+String(name||'CLIENTE').toUpperCase().replace(/[^A-Z0-9]+/g,'-').replace(/^-|-$/g,'').slice(0,24);
 const LIMANI_FREE_STORAGE_LABEL='GRATIS · Sin coste por días ni peso';
 const normalizeClientProfile=client=>{
+  // Migrate only the former built-in tariff labels, never custom agreed prices.
+  if(/limani/i.test(client?.nombre||client?.name||'')){
+    client={...client};
+    if(client.tarifaActiva==='LIMANI Barcelona 2026')client.tarifaActiva='LIMANI Barcelona / Valencia / A Coruña 2026';
+    if(['0-35 kg 15€ · 35-250 kg 60€ · 251-500 kg 130€ · 501-2500 kg 245€','0-35 kg 15€ - 35-250 kg 60€ - 251-500 kg 130€ - 501-2500 kg 245€'].includes(client.recepcion))client.recepcion=client.recepcion.replace('245€','235€');
+    if(client.transporte==='Warehouse→Vessel: 45€ / 95€ / 250€ / 350€ por peso')client.transporte='Local Barcelona / Valencia / A Coruña: 40€ / 70€ / 210€ / 350€ por peso';
+  }
   const name=client?.nombre||client?.name||'CLIENTE SIN NOMBRE';
   const isLimani=/limani/i.test(name);
   const isAls=/\bals\b|algeciras logistics solution/i.test(name);
   const isUme=/\bume\b/i.test(name);
-  const tarifaActiva=client?.tarifaActiva&&!/sin tarifa|pendiente/i.test(String(client.tarifaActiva))?client.tarifaActiva:(isLimani?'LIMANI Barcelona 2026':isAls?'ALS Barcelona 2026':isUme?'UME Algeciras 2026':'Sin tarifa automática');
-  const recepcion=client?.recepcion&&!/sin tarifa|pendiente/i.test(String(client.recepcion))?client.recepcion:(isLimani?'0-35 kg 15€ - 35-250 kg 60€ - 251-500 kg 130€ - 501-2500 kg 245€':isAls?'LOAD / UNLOAD: 0,12 €/kg por separado':isUme?'Coordination 66€ + handling 0,0363€/kg (min. 19,80€ >50 kg)':'Pendiente de tarifa');
+  const tarifaActiva=client?.tarifaActiva&&!/sin tarifa|pendiente/i.test(String(client.tarifaActiva))?client.tarifaActiva:(isLimani?'LIMANI Barcelona / Valencia / A Coruña 2026':isAls?'ALS Barcelona 2026':isUme?'UME Algeciras 2026':'Sin tarifa automática');
+  const recepcion=client?.recepcion&&!/sin tarifa|pendiente/i.test(String(client.recepcion))?client.recepcion:(isLimani?'0-35 kg 15€ - 35-250 kg 60€ - 251-500 kg 130€ - 501-2500 kg 235€':isAls?'LOAD / UNLOAD: 0,12 €/kg por separado':isUme?'Coordination 66€ + handling 0,0363€/kg (min. 19,80€ >50 kg)':'Pendiente de tarifa');
   const storage=isLimani?LIMANI_FREE_STORAGE_LABEL:(client?.storage&&!/sin tarifa|pendiente/i.test(String(client.storage))?client.storage:(isAls?'3 días gratis · 36-100 kg 2,50€/día · 101-500 kg 3,50€/día · 500+ kg 7,50€/día':isUme?'Warehousing 0,715€/kg/día · min. 9,90€ · storage min. 99€':'Pendiente de tarifa'));
-  const transporte=client?.transporte&&!/sin tarifa|pendiente/i.test(String(client.transporte))?client.transporte:(isLimani?'Warehouse→Vessel: 45€ / 95€ / 250€ / 350€ por peso':isAls?'Añadir manual según servicio: aeropuerto, recogidas o transporte especial':isUme?'Delivery to vessel <50 kg 71,50€ · >50 kg 71,50€/h':'Pendiente de tarifa');
+  const transporte=client?.transporte&&!/sin tarifa|pendiente/i.test(String(client.transporte))?client.transporte:(isLimani?'Local Barcelona / Valencia / A Coruña: 40€ / 70€ / 210€ / 350€ por peso':isAls?'Añadir manual según servicio: aeropuerto, recogidas o transporte especial':isUme?'Delivery to vessel <50 kg 71,50€ · >50 kg 71,50€/h':'Pendiente de tarifa');
   const recargo=client?.recargo&&!/sin tarifa|pendiente/i.test(String(client.recargo))?client.recargo:(isLimani||isAls||isUme?'+30% overtime / holidays':'Pendiente');
   return {
     codigo:client?.codigo||client?.id||clientCodeFromName(name),
@@ -476,7 +492,7 @@ const invoiceLineTotal=line=>(Number(line.price)||0)*(Number(line.units)||0);
 const asArray=value=>Array.isArray(value)?value:(value&&typeof value==='object'?Object.values(value):[]);
 const invoiceLinesOf=value=>asArray(value).flatMap(line=>Array.isArray(line)?line:[line]).filter(line=>line&&typeof line==='object');
 const invoiceText=value=>['string','number'].includes(typeof value)?String(value):'';
-const invoiceLineForEditor=(line,index=0)=>({...(line&&typeof line==='object'?line:{}),id:invoiceText(line?.id)||`line-${index+1}`,item:invoiceText(line?.item||line?.concepto)||'SERVICIO',detail:invoiceText(line?.detail||line?.detalle),price:Number(line?.price??line?.precio)||0,units:Number(line?.units??line?.unidades)||1,tax:invoiceText(line?.tax||line?.iva)||'0%'});
+const invoiceLineForEditor=(line,index=0)=>({...(line&&typeof line==='object'?line:{}),id:invoiceText(line?.id)||`line-${index+1}`,item:invoiceText(line?.item||line?.concepto)||'SERVICIO',detail:invoiceText(line?.detail||line?.detalle),price:Number(line?.price??line?.precio)||0,units:Number(line?.units??line?.unidades??1)||0,tax:invoiceText(line?.tax||line?.iva)||'0%'});
 const invoiceTotal=invoice=>invoiceLinesOf(invoice?.lines).reduce((sum,line)=>sum+invoiceLineTotal(line),0);
 const expenseAmount=value=>{const clean=String(value??'').replace(/\s/g,'').replace(/[^\d,.-]/g,'');if(clean.includes(',')&&clean.includes('.'))return Number(clean.replace(/\./g,'').replace(',','.'))||0;if(clean.includes(','))return Number(clean.replace(',','.'))||0;return Number(clean)||0};
 const caseExpenses=item=>Array.isArray(item?.gastos)?item.gastos:[];
@@ -484,17 +500,7 @@ const caseExpenseTotal=item=>caseExpenses(item).reduce((sum,expense)=>sum+expens
 const invoiceRevenue=item=>Number(item?.importe||invoiceTotal(item)||0);
 const invoiceFinalRevenue=item=>item?.holdedBilledVerified===true&&item?.holdedPriceVerified===true&&item?.holdedInvoicedAmount!=null?Number(item.holdedInvoicedAmount):invoiceRevenue(item);
 const invoiceMargin=(invoice,relatedCase)=>invoiceRevenue(invoice)-caseExpenseTotal(relatedCase);
-const LIMANI_BARCELONA_RATES={
-  reception:[[35,15],[250,60],[500,130],[2500,245]],
-  storage:[[Infinity,0]],
-  airportToWarehouse:[[35,60],[250,145],[500,260],[2500,350]],
-  warehouseToVessel:[[35,45],[250,95],[500,250],[2500,350]],
-  forkliftHour:50,
-  craneHour:150,
-  waitingHour:30,
-  handlingHour:25,
-  overtimeSurcharge:0.3
-};
+const LIMANI_BARCELONA_RATES={...LIMANI_LOCAL_RATES,forkliftHour:50,craneHour:150};
 const ALS_BARCELONA_RATES={
   loadUnloadPerKg:0.12,
   freeStorageDays:3,
@@ -699,13 +705,16 @@ const ensurePurchaseOrderReferenceLines=(lines,item)=>{
   });
 };
 const invoiceHeaderTitle=(item,transports=[],calendarEvents=[])=>withPurchaseOrderSuffix([item.id,item.buque,invoiceScheduleLabel(item,transports,calendarEvents),item.puerto].filter(Boolean).join(' ').toUpperCase(),item);
-const suggestedTransportPrice=(item,warehouseEntries=[],route='warehouseToVessel')=>{
-  const weight=invoiceCargoWeight(item,warehouseEntries);
-  if(isLimaniCase(item)){
-    const table=route==='airportToWarehouse'?LIMANI_BARCELONA_RATES.airportToWarehouse:LIMANI_BARCELONA_RATES.warehouseToVessel;
-    return priceByWeight(weight,table);
-  }
-  return 0;
+const limaniPortQuote=(item,warehouseEntries=[],transports=[],calendarEvents=[],weightOverride=null)=>{
+  if(!isLimaniCase(item))return null;
+  const records=[...transports,...calendarEvents.filter(isTransportCalendarEvent)].filter(record=>record.expediente===item.id&&!isCancelledTransport(record));
+  const origins=records.map(record=>record.origen||String(record.ruta||'').split(/\s*(?:→|->|\bTO\b)\s*/i)[0]).filter(Boolean);
+  return quoteLimaniTransport({port:item.puerto,weight:weightOverride??invoiceCargoWeight(item,warehouseEntries),origins});
+};
+const suggestedTransportPrice=(item,warehouseEntries=[],route='warehouseToVessel',transports=[],calendarEvents=[])=>{
+  if(!isLimaniCase(item))return 0;
+  if(route==='airportToWarehouse')return priceByWeight(invoiceCargoWeight(item,warehouseEntries),LIMANI_BARCELONA_RATES.airportToWarehouse);
+  return limaniPortQuote(item,warehouseEntries,transports,calendarEvents)?.price??0;
 };
 const suggestedReceptionPrice=(item,warehouseEntries=[])=>{
   const weight=invoiceCargoWeight(item,warehouseEntries);
@@ -816,7 +825,7 @@ const invoiceTariffConceptOptions=(item,warehouseEntries=[],transports=[],calend
       make('als-unload','UNLOAD (RECEPTION)','UNLOAD (RECEPTION)',cargo,Number((weight*ALS_BARCELONA_RATES.unloadPerKg).toFixed(2))),
       make('als-storage','STORAGE','STORAGE',`${Math.max(storageDays,1)} DAYS - ${cargo}`,Number((Math.max(storageDays-ALS_BARCELONA_RATES.freeStorageDays,0)*storagePriceByWeight(weight,ALS_BARCELONA_RATES.storageTiers)).toFixed(2)),Math.max(storageDays-ALS_BARCELONA_RATES.freeStorageDays,0)),
       make('als-load','LOAD (SALIDA)','LOAD (SALIDA)',cargo,Number((weight*ALS_BARCELONA_RATES.loadPerKg).toFixed(2))),
-      make('als-transport','TRANSPORT','TRANSPORT',invoiceTransportDetail(item,transports,calendarEvents)||cargo,0),
+      make('als-transport','TRANSPORT','TRANSPORT',invoiceTransportDetail(cargo,item,transports,calendarEvents)||cargo,0),
       make('als-extra','EXTRA SERVICE','EXTRA SERVICE',cargo,0)
     ];
   }
@@ -826,7 +835,7 @@ const invoiceTariffConceptOptions=(item,warehouseEntries=[],transports=[],calend
       make('limani-reception','RECEPTION','RECEPTION',cargo,suggestedReceptionPrice(item,warehouseEntries)),
       make('limani-handling','HANDLING','HANDLING',cargo,suggestedHandlingPrice(item,warehouseEntries)),
       make('limani-storage','STORAGE','STORAGE',`${Math.max(storageDays,0)} DAYS - ${cargo}`,suggestedStoragePrice(item,warehouseEntries),Math.max(storageDays,0)),
-      make('limani-transport','TRANSPORT FROM WAREHOUSE TO VESSEL','TRANSPORT FROM WAREHOUSE TO VESSEL',invoiceTransportDetail(item,transports,calendarEvents)||cargo,suggestedTransportPrice(item,warehouseEntries,transports,calendarEvents),transportUnits),
+      make('limani-transport','TRANSPORT FROM WAREHOUSE TO VESSEL','TRANSPORT FROM WAREHOUSE TO VESSEL',invoiceTransportDetail(cargo,item,transports,calendarEvents)||cargo,limaniPortQuote(item,warehouseEntries,transports,calendarEvents,weight)?.price??0,transportUnits),
       make('limani-waiting','WAITING TIME','WAITING TIME',`${Number(item.billing?.waitingHours||1)} HOURS WAITING`,suggestedWaitingPrice(item),Number(item.billing?.waitingHours||1)),
       make('limani-extra','EXTRA SERVICE','EXTRA SERVICE',cargo,0)
     ];
@@ -836,7 +845,7 @@ const invoiceTariffConceptOptions=(item,warehouseEntries=[],transports=[],calend
     make('manual-reception','RECEPTION','RECEPTION',cargo,0),
     make('manual-handling','HANDLING','HANDLING',cargo,0),
     make('manual-storage','STORAGE','STORAGE',`${Math.max(storageDays,0)} DAYS - ${cargo}`,0,Math.max(storageDays,0)),
-    make('manual-transport','TRANSPORT','TRANSPORT',invoiceTransportDetail(item,transports,calendarEvents)||cargo,0,transportUnits),
+    make('manual-transport','TRANSPORT','TRANSPORT',invoiceTransportDetail(cargo,item,transports,calendarEvents)||cargo,0,transportUnits),
     make('manual-extra','EXTRA SERVICE','EXTRA SERVICE',cargo,0)
   ];
 };
@@ -1077,7 +1086,7 @@ const invoiceDetailWeight=detail=>{
   return matches.reduce((sum,match)=>sum+Number(String(match[1]).replace(',','.')),0);
 };
 const isStandardInvoiceLine=line=>['ref','reception','handling','storage','transport'].includes(line?.id);
-const repriceLimaniInvoiceLines=(lines,weight,detail)=>{
+const repriceLimaniInvoiceLines=(lines,weight,detail,context={})=>{
   const kilos=Number(weight)||0;
   return lines.map(line=>{
     if(!isStandardInvoiceLine(line))return line;
@@ -1090,7 +1099,7 @@ const repriceLimaniInvoiceLines=(lines,weight,detail)=>{
       const storageDetail=String(line.detail||'').replace(/\s-\s.*$/,'');
       return {...next,detail:`${storageDetail||`${days} DAYS`} - ${detail}`,price:0};
     }
-    if(line.id==='transport')return {...next,price:priceByWeight(kilos,LIMANI_BARCELONA_RATES.warehouseToVessel)};
+    if(line.id==='transport')return {...next,price:quoteLimaniTransport({port:context.puerto,weight:kilos}).price??line.price};
     return next;
   });
 };
@@ -1119,7 +1128,7 @@ const invoiceAutoPriceLine=(line,context,warehouseEntries=[],transports=[],calen
     if(/RECEPTION|RECEPCION/.test(label))return priceByWeight(kilos,LIMANI_BARCELONA_RATES.reception);
     if(/HANDLING|MANIPULACION/.test(label))return kilos>0?LIMANI_BARCELONA_RATES.handlingHour:0;
     if(/STORAGE|ALMACENAJE/.test(label))return 0;
-    if(/TRANSPORT|TRANSPORTE|DELIVERY|VESSEL|BUQUE/.test(label))return priceByWeight(kilos,LIMANI_BARCELONA_RATES.warehouseToVessel);
+    if(/TRANSPORT|TRANSPORTE|DELIVERY|VESSEL|BUQUE/.test(label))return limaniPortQuote(context,warehouseEntries,transports,calendarEvents,kilos)?.price??null;
     if(/WAITING|ESPERA/.test(label))return LIMANI_BARCELONA_RATES.waitingHour;
     return null;
   }
@@ -1146,15 +1155,15 @@ const invoiceTransportObservation=(item,transports=[],calendarEvents=[])=>{
   return `${INVOICE_LEGAL_OBSERVATION}\n\nTRANSPORTES REALIZADOS:\n${lines.join('\n')}`;
 };
 const mergeInvoiceTransportObservation=(existing,generated)=>{
-  const base=String(existing||'').split(/\n\s*TRANSPORTES REALIZADOS:/i)[0].trim()||INVOICE_LEGAL_OBSERVATION;
-  const transportBlock=String(generated||'').match(/TRANSPORTES REALIZADOS:[\s\S]*$/i)?.[0]||'';
-  return [base,transportBlock].filter(Boolean).join('\n\n');
+  const base=splitTransportNotes(existing).notes||INVOICE_LEGAL_OBSERVATION;
+  const services=splitTransportNotes(generated).services;
+  return [base,services?`TRANSPORTES REALIZADOS:\n${services}`:''].filter(Boolean).join('\n\n');
 };
 const invoiceTransportDetail=(cargo,item,transports=[],calendarEvents=[])=>{
   const units=invoiceTransportUnits(item,transports,calendarEvents);
   return units>1?`${units} TRANSPORTES - ${cargo}`:cargo;
 };
-const draftInvoiceFromCase=(item,warehouseEntries=[],transports=[],calendarEvents=[])=>{
+const baseDraftInvoiceFromCase=(item,warehouseEntries=[],transports=[],calendarEvents=[])=>{
   const cargo=invoiceCargoSummary(item,warehouseEntries);
   const date=invoiceScheduleLabel(item,transports,calendarEvents);
   if(isSurveyService(item)){
@@ -1192,7 +1201,7 @@ const draftInvoiceFromCase=(item,warehouseEntries=[],transports=[],calendarEvent
   if(billOwnTransport){
     const transportUnits=Math.max(1,transportServices.length);
     const transportDetail=invoiceTransportDetail(cargo,item,transports,calendarEvents);
-    lines.push({id:'transport',item:'TRANSPORT FROM WAREHOUSE TO VESSEL',detail:transportDetail,price:suggestedTransportPrice(item,warehouseEntries),units:transportUnits,tax:'0%'});
+    lines.push({id:'transport',item:'TRANSPORT FROM WAREHOUSE TO VESSEL',detail:transportDetail,price:suggestedTransportPrice(item,warehouseEntries,'warehouseToVessel',transports,calendarEvents),units:transportUnits,tax:'0%'});
   }
   if(Number(item.billing?.waitingHours||0)>0)lines.push({id:'waiting',item:'WAITING TIME',detail:`${item.billing.waitingHours} HOURS WAITING FOR ARRIVE`,price:suggestedWaitingPrice(item),units:Number(item.billing.waitingHours),tax:'0%'});
   (item.billingAdjustments||[]).filter(entry=>Number(entry.price)>0).forEach(entry=>lines.push({...entry,tax:entry.tax||'0%'}));
@@ -1202,6 +1211,9 @@ const draftInvoiceFromCase=(item,warehouseEntries=[],transports=[],calendarEvent
   const coste=caseExpenseTotal(item);
   return {...invoice,importe,coste,margen:importe-coste};
 };
+const invoiceWithTransportDescription=(invoice,item,transports=[],calendarEvents=[])=>placeTransportDescription(invoice,invoiceTransportObservation(item,transports,calendarEvents));
+const invoiceWithOvertime=(invoice,item,transports=[],calendarEvents=[])=>applyOvertime(invoice,invoiceTransportServices(item,transports,calendarEvents),{cancelled:isCancelledCase(item)});
+const draftInvoiceFromCase=(item,warehouseEntries=[],transports=[],calendarEvents=[])=>invoiceWithOvertime(invoiceWithTransportDescription(baseDraftInvoiceFromCase(item,warehouseEntries,transports,calendarEvents),item,transports,calendarEvents),item,transports,calendarEvents);
 const CP1252_BYTE_MAP={
   '\u20ac':0x80,'\u201a':0x82,'\u0192':0x83,'\u201e':0x84,'\u2026':0x85,'\u2020':0x86,'\u2021':0x87,'\u02c6':0x88,'\u2030':0x89,'\u0160':0x8a,'\u2039':0x8b,'\u0152':0x8c,'\u017d':0x8e,
   '\u2018':0x91,'\u2019':0x92,'\u201c':0x93,'\u201d':0x94,'\u2022':0x95,'\u2013':0x96,'\u2014':0x97,'\u02dc':0x98,'\u2122':0x99,'\u0161':0x9a,'\u203a':0x9b,'\u0153':0x9c,'\u017e':0x9e,'\u0178':0x9f
@@ -1790,7 +1802,8 @@ function App({auth,finance,onFinanceChange,onLogout}){
   const [cases,setCases]=useState(expedientesIniciales.map(normalizeMerchandise));
   const [selectedId,setSelectedId]=useState(expedientesIniciales[0].id);
   const [transports,setTransports]=useState(transportesIniciales);
-  const [warehouseEntries,setWarehouseEntries]=useState(movimientosAlmacen);
+  const [storedWarehouseEntries,setWarehouseEntries]=useState(movimientosAlmacen);
+  const warehouseEntries=useMemo(()=>reconcileWarehouseArchive(storedWarehouseEntries,cases),[storedWarehouseEntries,cases]);
   const [customs,setCustoms]=useState(tramitesAduana);
   const [calendarEvents,setCalendarEvents]=useState(eventosCalendarioIniciales);
   const [providers,setProviders]=useState(proveedoresIniciales);
@@ -1941,6 +1954,7 @@ function App({auth,finance,onFinanceChange,onLogout}){
     }
   },[billingAlerts,operationalLoaded,user.id,alertSoundSettings]);
   const persistOperational=async(nextCases=cases,nextTransports=transports,nextWarehouse=warehouseEntries,nextCustoms=customs,nextCalendar=calendarEvents,nextProviders=providers,nextVessels=vessels,nextDeletedVesselKeys=deletedVesselKeys,auditEvent=null)=>{
+    nextWarehouse=reconcileWarehouseArchive(nextWarehouse,nextCases);
     operationalSaveInFlight.current=true;
     try{
       if(auth.demo)return {ok:true};
@@ -2451,7 +2465,7 @@ function App({auth,finance,onFinanceChange,onLogout}){
         : ready
           ? {...existingDocs,podDisponible:storageOnly||surveyService?Boolean(mergedPodFiles?.length):true,podNoSellado:podException||existingDocs.podNoSellado,podObservacion:podException?podExceptionReason:(existingDocs.podObservacion||''),podArchivo:mergedPodFiles?.[0]||existingDocs.podArchivo||null,podArchivos:mergedPodFiles||[],fotosEntrega:mergedDeliveryPhotos||[]}
           : existingDocs;
-      return normalizeMerchandise({...item,mercancias:stepKey==='cargo'&&!surveyService?cargoMerchandise:item.mercancias,operationalFlow:flow,progreso:ready?100:Math.round(steps.filter(step=>flow[step.key]).length/steps.length*100),siguiente:ready?'Listo para facturar':nextStep?.next||'',estado:ready?'Completado':'En curso',recepciones:cargoReceptions.length?[...cargoReceptions,...(item.recepciones||[])]:item.recepciones,documentacionMercancia:nextDocumentation,timelineCustom:[timelineEntry,...(item.timelineCustom||[])]});
+      return normalizeMerchandise({...item,mercancias:stepKey==='cargo'&&!surveyService?cargoMerchandise:item.mercancias,operationalFlow:flow,deliveryConfirmedAt:ready?now.toISOString():item.deliveryConfirmedAt,progreso:ready?100:Math.round(steps.filter(step=>flow[step.key]).length/steps.length*100),siguiente:ready?'Listo para facturar':nextStep?.next||'',estado:ready?'Completado':'En curso',recepciones:cargoReceptions.length?[...cargoReceptions,...(item.recepciones||[])]:item.recepciones,documentacionMercancia:nextDocumentation,timelineCustom:[timelineEntry,...(item.timelineCustom||[])]});
     });
     const nextTransports=ready?transports.map(item=>item.expediente===id?{...item,estado:'Entregado'}:item):transports;
     const alreadyInWarehouse=warehouseEntries.some(item=>item.expediente===id&&!item.archivado&&item.estado!=='Expedido');
@@ -4023,11 +4037,15 @@ function Almacen({items,cases,openCase,registerEntry,updateEntry,deleteEntry,sho
   const [entryOpen,setEntryOpen]=useState(false);
   const [editing,setEditing]=useState(null);
   const [view,setView]=useState('Activos');
+  const [search,setSearch]=useState('');
+  const casesById=useMemo(()=>new Map(cases.map(item=>[item.id,item])),[cases]);
   const [copyStatus,setCopyStatus]=useState('');
   const [selectedRefs,setSelectedRefs]=useState([]);
   const warehouseCases=cases.filter(item=>!isSurveyService(item));
   const warehouseItems=items.filter(item=>!isSurveyWarehouseEntry(item,cases));
-  const visibleItems=warehouseItems.filter(item=>view==='Archivados'?item.archivado||item.estado==='Expedido':!item.archivado&&item.estado!=='Expedido');
+  const viewItems=warehouseItems.filter(item=>view==='Archivados'?item.archivado||item.estado==='Expedido':!item.archivado&&item.estado!=='Expedido');
+  const visibleItems=viewItems.filter(item=>warehouseMatchesSearch(item,search,casesById.get(item.expediente)));
+  const hiddenSelected=selectedRefs.filter(ref=>!visibleItems.some(item=>item.ref===ref)).length;
   const activeVisibleItems=visibleItems.filter(activeWarehouseEntry);
   const allVisibleSelected=activeVisibleItems.length>0&&activeVisibleItems.every(item=>selectedRefs.includes(item.ref));
   useEffect(()=>{setSelectedRefs(current=>current.filter(ref=>warehouseItems.some(item=>item.ref===ref&&activeWarehouseEntry(item))))},[warehouseItems.map(item=>`${item.ref}:${item.estado}:${item.archivado}`).join('|')]);
@@ -4074,7 +4092,8 @@ function Almacen({items,cases,openCase,registerEntry,updateEntry,deleteEntry,sho
         <button className={view==='Activos'?'active':''} onClick={()=>setView('Activos')}>En almacen <span>{warehouseItems.filter(item=>!item.archivado&&item.estado!=='Expedido').length}</span></button>
         <button className={view==='Archivados'?'active':''} onClick={()=>setView('Archivados')}>Archivados <span>{warehouseItems.filter(item=>item.archivado||item.estado==='Expedido').length}</span></button>
       </div>
-      {view==='Activos'&&<div className="warehouse-selection-bar"><label><input type="checkbox" checked={allVisibleSelected} onChange={toggleVisibleSelection}/> Seleccionar visibles</label><span>{selectedRefs.length} seleccionada{selectedRefs.length===1?'':'s'}</span></div>}
+      <div className="warehouse-search-toolbar"><label className="search-box"><Search/><input type="search" aria-label="Buscar en almacén" placeholder="Buscar buque, expediente, referencia, mercancía o seguimiento…" value={search} onChange={event=>setSearch(event.target.value)} onKeyDown={event=>{if(event.key==='Escape')setSearch('')}}/>{search&&<button type="button" className="icon-button" aria-label="Limpiar búsqueda de almacén" onClick={()=>setSearch('')}><X/></button>}</label><span role="status" aria-live="polite">{visibleItems.length} de {viewItems.length} entradas</span></div>
+      {view==='Activos'&&<div className="warehouse-selection-bar"><label><input type="checkbox" checked={allVisibleSelected} onChange={toggleVisibleSelection}/> Seleccionar visibles</label><span>{selectedRefs.length} seleccionada{selectedRefs.length===1?'':'s'}{hiddenSelected>0&&` (${hiddenSelected} fuera del filtro)`}</span></div>}
       <div className="responsive-table warehouse-table">
         <div className="table-head"><span>Referencia / expediente</span><span>Ubicacion</span><span>Entrada</span><span>Mercancia</span><span>Storage</span><span>Estado</span></div>
         {visibleItems.map(item=><button className={'table-row '+(selectedRefs.includes(item.ref)?'selected':'')} key={item.ref} onClick={()=>setEditing(item)}>
@@ -4085,6 +4104,7 @@ function Almacen({items,cases,openCase,registerEntry,updateEntry,deleteEntry,sho
           <span data-label="Storage">{storageDaysForEntry(item)} dia{storageDaysForEntry(item)===1?'':'s'}</span>
           <span data-label="Estado"><Badge>{item.expediente?item.estado:'Por vincular'}</Badge></span>
         </button>)}
+        {!visibleItems.length&&<Empty text={search.trim()?'No hay entradas que coincidan con la búsqueda.':'No hay entradas en esta vista.'}/>}
       </div>
     </section>
     {entryOpen&&<WarehouseEntryModal cases={warehouseCases} existingItems={warehouseItems} csrfToken={csrfToken} close={()=>setEntryOpen(false)} submit={submit}/>}
@@ -4172,7 +4192,6 @@ function Facturacion({openCase,notify,invoices,cases,warehouseEntries=[],transpo
   const readyCases=billableCases.filter(item=>!invoices.some(invoice=>invoice.expediente===item.id));
   useEffect(()=>{
     const standardIds=['ref','reception','handling','storage','transport','waiting','survey','coordination','delivery','load-unload','warehouse','customs','delivery-vessel','open-file','docs-cession-dhl','docs-cession-tnt','airport-expenses','airport-agency','transport-agp','transport-svq','reception-t1','open-warehouse-night'];
-    const standardSet=new Set(standardIds);
     let changed=false;
     let nextInvoices=[...invoices];
     const closedCaseRefs=new Set(nextInvoices.filter(invoice=>['Enviado a Holded','Facturado','Cobrado'].includes(invoice.estado)||hasHoldedProof(invoice)).map(invoice=>invoice.expediente).filter(Boolean));
@@ -4192,19 +4211,20 @@ function Facturacion({openCase,notify,invoices,cases,warehouseEntries=[],transpo
     billableCases.forEach(item=>{
       const existing=nextInvoices.find(invoice=>invoice.expediente===item.id);
       const draft=draftInvoiceFromCase(item,warehouseEntries,transports,calendarEvents);
-      const locked=existing&&['Enviado a Holded','Facturado','Cobrado','Archivado'].includes(existing.estado);
+      const locked=existing&&overtimeLocked(existing);
       if(locked)return;
       if(!existing){
         nextInvoices=[draft,...nextInvoices];
         changed=true;
         return;
       }
+      const nextLines=savedInvoiceLines(invoiceLinesOf(existing.lines),draft.lines);
       const currentStandard=standardIds.map(id=>{
         const line=invoiceLinesOf(existing.lines).find(entry=>entry.id===id);
         return line?[id,line.item,line.detail,Number(line.price)||0,Number(line.units)||0,line.tax||'0%']:null;
       }).filter(Boolean);
       const draftStandard=standardIds.map(id=>{
-        const line=(draft.lines||[]).find(entry=>entry.id===id);
+        const line=nextLines.find(entry=>entry.id===id);
         return line?[id,line.item,line.detail,Number(line.price)||0,Number(line.units)||0,line.tax||'0%']:null;
       }).filter(Boolean);
       const needsRefresh=
@@ -4215,11 +4235,11 @@ function Facturacion({openCase,notify,invoices,cases,warehouseEntries=[],transpo
         Number(existing.coste||0)!==Number(draft.coste||0)||
         String(existing.observaciones||'')!==String(mergeInvoiceTransportObservation(existing.observaciones,draft.observaciones)||'')||
         JSON.stringify(currentStandard)!==JSON.stringify(draftStandard)||
-        JSON.stringify(invoiceLinesOf(existing.lines).filter(line=>String(line.id||'').startsWith('cancel-')).map(line=>[line.id,line.item,line.detail,Number(line.price)||0,Number(line.units)||0]))!==JSON.stringify((draft.lines||[]).filter(line=>String(line.id||'').startsWith('cancel-')).map(line=>[line.id,line.item,line.detail,Number(line.price)||0,Number(line.units)||0]));
+        JSON.stringify(invoiceLinesOf(existing.lines).filter(line=>String(line.id||'').startsWith('cancel-')).map(line=>[line.id,line.item,line.detail,Number(line.price)||0,Number(line.units)||0]))!==JSON.stringify(nextLines.filter(line=>String(line.id||'').startsWith('cancel-')).map(line=>[line.id,line.item,line.detail,Number(line.price)||0,Number(line.units)||0]));
       if(!needsRefresh)return;
-      const customLines=invoiceLinesOf(existing.lines).filter(line=>!standardSet.has(line.id)&&!String(line.id||'').startsWith('cancel-'));
       const refreshed={
         ...draft,
+        ...existing,
         id:existing.id,
         cliente:draft.cliente,
         estado:existing.estado||draft.estado,
@@ -4229,12 +4249,19 @@ function Facturacion({openCase,notify,invoices,cases,warehouseEntries=[],transpo
         payment:existing.payment||draft.payment,
         supplierInvoices:existing.supplierInvoices||[],
         supplierText:existing.supplierText||'',
-        lines:[...draft.lines,...customLines]
+        lines:nextLines
       };
+      refreshed.importe=invoiceTotal(refreshed);
       refreshed.coste=draft.coste;
       refreshed.margen=invoiceRevenue(refreshed)-Number(draft.coste||0);
       nextInvoices=nextInvoices.map(invoice=>invoice.id===existing.id?refreshed:invoice);
       changed=true;
+    });
+    nextInvoices=nextInvoices.map(invoice=>{
+      const related=cases.find(entry=>entry.id===invoice.expediente);
+      const next=invoiceWithOvertime(invoiceWithTransportDescription(invoice,related,transports,calendarEvents),related,transports,calendarEvents);
+      if(JSON.stringify(next)!==JSON.stringify(invoice))changed=true;
+      return next;
     });
     if(changed)syncInvoices(nextInvoices);
   },[billableCases.map(item=>`${item.id}:${serviceTypeOf(item)}:${item.buque}:${item.puerto}:${item.eta}:${item.portCall?.etaDate||''}:${item.portCall?.etbDate||item.etbDate||item.etb||''}:${item.portCall?.etdDate||item.etdDate||item.etd||''}:${item.cliente}:${item.purchaseOrder||''}:${item.updatedAt||''}:${caseExpenseTotal(item)}:${caseExpenses(item).map(expense=>[expense.id,expense.fecha,expense.proveedor,expense.concepto,expense.importe].join(':')).join(',')}`).join('|'),invoices.map(item=>`${item.id}:${item.expediente}:${item.estado}:${item.cliente}:${item.concepto}:${item.buque}:${item.puerto}:${item.coste||0}:${invoiceLinesOf(item.lines).map(line=>[line.id,line.item,line.detail,line.price,line.units,line.tax].join(':')).join('|')}`).join('||'),warehouseEntries.map(item=>`${item.ref}:${item.expediente}:${item.dias}:${item.estado}:${item.archivado}:${item.salida||''}:${item.updatedAt||''}`).join('|'),transports.map(item=>`${item.id}:${item.expediente}:${item.fecha}:${item.inicio}:${item.fin}:${item.estado||''}`).join('|'),calendarEvents.map(item=>`${item.id}:${item.expediente}:${item.transporte}:${item.tipoServicio}:${item.fecha}:${item.inicio}:${item.fin}`).join('|')]);
@@ -4303,6 +4330,7 @@ function Facturacion({openCase,notify,invoices,cases,warehouseEntries=[],transpo
     }
   };
   const sendHolded=item=>{
+    if(overtimeLocked(item)){notify('Este documento ya fue enviado o está cerrado. No se recalcula ni reenvía.');return}
     if(!csrfToken){notify('Inicia sesión en la web publicada para enviar a Holded.');return}
     const related=cases.find(entry=>entry.id===item.expediente);
     const itemLines=asArray(item.lines);
@@ -4311,11 +4339,19 @@ function Facturacion({openCase,notify,invoices,cases,warehouseEntries=[],transpo
     const purchaseOrder=purchaseOrderOf(billingContext);
     if(isLimaniCase(billingContext)&&!purchaseOrder){notify('Falta el PO / Purchase Order de LIMANI. Abre el expediente, pulsa editar y añade un número como POA604877.');return}
     const preparedLines=ensurePurchaseOrderReferenceLines(itemLines.length?itemLines:templateLines,billingContext);
-    const prepared={...item,purchaseOrder,concepto:withPurchaseOrderSuffix(item.concepto,billingContext),clientProfile:holdedClientProfile(item.cliente),importe:item.importe||invoiceTotal(item),coste:related?caseExpenseTotal(related):Number(item.coste)||0,margen:related?invoiceRevenue(item)-caseExpenseTotal(related):Number(item.margen)||0,lines:preparedLines};
+    const portQuote=limaniPortQuote({...billingContext,cliente:item.cliente},warehouseEntries,transports,calendarEvents);
+    const portLines=preparedLines.filter(isPortTransportLine);
+    if(portQuote?.status==='missing'&&portLines.length){
+      if(portLines.some(line=>!(Number(line.price)>0))){notify(portQuote.message+' Revisa el precio de transporte antes de enviar.');setEditing(item);return}
+      if(!window.confirm(portQuote.message+'\n\nNo hay tarifa automática válida. ¿Confirmas enviar los precios manuales de transporte de este borrador?'))return;
+    }
+    const described=invoiceWithTransportDescription({...item,purchaseOrder,concepto:withPurchaseOrderSuffix(item.concepto,billingContext),clientProfile:holdedClientProfile(item.cliente),importe:item.importe||invoiceTotal(item),coste:related?caseExpenseTotal(related):Number(item.coste)||0,margen:related?invoiceRevenue(item)-caseExpenseTotal(related):Number(item.margen)||0,lines:preparedLines},billingContext,transports,calendarEvents);
+    const prepared=invoiceWithOvertime(described,billingContext,transports,calendarEvents);
+    if(prepared.overtimeReview?.some(row=>row.unknown)){notify('Revisa los horarios en el apartado Overtime del borrador antes de enviar a Holded.');setEditing(prepared);return}
     setSendingHolded(item.id);
     api('/api/holded/create.php',{method:'POST',headers:{'X-CSRF-Token':csrfToken},body:jsonBody({invoice:prepared})})
       .then(result=>{
-      updateInvoice({...prepared,estado:'Enviado a Holded',holdedStatus:result.holdedStatus||'Proforma creada',holdedDocType:result.docType||'proform',holdedId:result.holdedId||'',holdedNumber:result.holdedNumber||'',holdedAt:new Date().toISOString(),holdedSentAmount:Number(result.holdedAmount??invoiceRevenue(prepared))});
+      updateInvoice({...prepared,estado:'Enviado a Holded',holdedStatus:result.holdedStatus||'Proforma creada',holdedDocType:result.docType||'proform',holdedId:result.holdedId||'',holdedNumber:result.holdedNumber||'',holdedAt:new Date().toISOString(),holdedSentAmount:Number(result.holdedAmount??invoiceRevenue(prepared))});setEditing(null);
       notify(result.holdedNumber?`Proforma creada en Holded: ${result.holdedNumber}`:'Proforma creada en Holded');
     })
     .catch(reason=>notify([reason.message,reason.body?.holdedStatus,reason.body?.holdedReason].filter(Boolean).join(' · ')))
@@ -4424,7 +4460,7 @@ function Facturacion({openCase,notify,invoices,cases,warehouseEntries=[],transpo
   ];
   const billingControlVisible=billingControlView==='attention'?controlAttention:billingControlView==='sent'?controlSent:billingControlView==='confirmed'?controlConfirmed:billingControlView==='excluded'?controlExcluded:billingControlRows;
   return <>
-    <section className="panel"><SectionHeader title="Documentos de facturación" subtitle="Separa lo pendiente de lo enviado, facturado y archivado para cerrar el mes sin saltarte nada." action={<label className="billing-sort-control"><span>Ordenar por</span><select value={billingSort} onChange={event=>setBillingSort(event.target.value)}><option value="exp_desc">Expediente mayor → menor</option><option value="exp_asc">Expediente menor → mayor</option><option value="doc_desc">Documento mayor → menor</option><option value="doc_asc">Documento menor → mayor</option></select></label>}/><div className="billing-status-tabs">{billingBuckets.map(([value,label,count])=><button key={value} className={billingView===value?'active':''} onClick={()=>setBillingView(value)}>{label}<span>{count}</span></button>)}</div><div className="responsive-table billing-table"><div className="table-head"><span>Documento / expediente</span><span>Cliente</span><span>Concepto</span><span>Importe</span><span>Coste</span><span>Margen</span><span>Revisión Holded</span><span/></div>{sortedVisibleInvoices.length?sortedVisibleInvoices.map(item=>{const finalRevenue=invoiceFinalRevenue(item);const finalCost=invoiceCostOf(item);const finalMargin=finalRevenue-finalCost;return <div className="table-row" key={item.id}><span className="primary-cell"><span className="invoice-icon"><ReceiptText/></span><span><b>{item.id}</b><button onClick={()=>openCase(item.expediente)}>{item.expediente}</button>{item.holdedStatus&&<small>Holded: {item.holdedStatus}{item.holdedNumber?`  -  ${item.holdedNumber}`:''}</small>}</span></span><span data-label="Cliente">{item.cliente}</span><span data-label="Concepto" className="billing-concept-cell"><span>{item.concepto}</span>{!invoiceSentOrClosed(item)&&<div className={'billing-po-inline '+(isLimaniCase(relatedCaseForInvoice(item))&&!purchaseOrderOf(relatedCaseForInvoice(item))?'missing':'')}><label>PO / Purchase Order</label><div><input value={poDrafts[item.expediente]??purchaseOrderOf(relatedCaseForInvoice(item))} onChange={event=>setPoDrafts(current=>({...current,[item.expediente]:event.target.value.toUpperCase()}))} placeholder="Ej. POA604877"/><button className="button secondary compact" disabled={savingPurchaseOrder===item.expediente} onClick={()=>savePurchaseOrder(item)}>{savingPurchaseOrder===item.expediente?'Guardando…':'Guardar PO'}</button></div>{isLimaniCase(relatedCaseForInvoice(item))&&!purchaseOrderOf(relatedCaseForInvoice(item))&&<small>Obligatorio para enviar esta factura LIMANI a Holded.</small>}</div>}</span><strong data-label="Importe" className="billing-final-revenue">{moneyExact(finalRevenue)}{item.holdedBilledVerified===true&&<small>Importe final Holded</small>}</strong><span data-label="Coste" className="billing-cost">{moneyExact(finalCost)}</span><strong data-label="Margen" className={finalMargin<0?'billing-margin negative':'billing-margin'}>{moneyExact(finalMargin)}</strong><span data-label="Revisión Holded" className="billing-review-column">{['Facturado','Cobrado'].includes(item.estado)?<><HoldedBillingReview item={item} cost={finalCost} revenue={finalRevenue} margin={finalMargin}/><Badge>{item.estado}</Badge></>:<Badge>{item.estado}</Badge>}</span><span className="billing-row-actions"><button className="icon-button" aria-label={'Editar '+item.id} onClick={()=>setEditing(item)}><PencilLine/></button>{canAdmin&&!invoiceSentOrClosed(item)&&item.estado!=='Archivado'&&<button className="icon-button danger" aria-label={'Registrar no facturar '+item.id} onClick={()=>archiveInvoice(item)} title="Registrar motivo para no facturar"><Archive/></button>}{item.holdedId&&['Enviado a Holded','Facturado','Cobrado'].includes(item.estado)?<button className="button secondary compact" disabled={Boolean(checkingHolded)} onClick={()=>verifyHoldedDocuments([item])}><RefreshCw className={checkingHolded===item.id?'spinning':''}/> {checkingHolded===item.id?'Comprobando…':'Comprobar'}</button>:!['Facturado','Cobrado','Archivado'].includes(item.estado)&&<button className="button secondary compact" disabled={sendingHolded===item.id} onClick={()=>sendHolded(item)}>{sendingHolded===item.id?'Enviando…':'Enviar a Holded'}</button>}</span></div>}):<Empty text={billingView==='pending'?'No hay facturas pendientes en este filtro.':'No hay documentos en este estado.'}/>}</div></section>
+    <section className="panel"><SectionHeader title="Documentos de facturación" subtitle="Separa lo pendiente de lo enviado, facturado y archivado para cerrar el mes sin saltarte nada." action={<label className="billing-sort-control"><span>Ordenar por</span><select value={billingSort} onChange={event=>setBillingSort(event.target.value)}><option value="exp_desc">Expediente mayor → menor</option><option value="exp_asc">Expediente menor → mayor</option><option value="doc_desc">Documento mayor → menor</option><option value="doc_asc">Documento menor → mayor</option></select></label>}/><div className="billing-status-tabs">{billingBuckets.map(([value,label,count])=><button key={value} className={billingView===value?'active':''} onClick={()=>setBillingView(value)}>{label}<span>{count}</span></button>)}</div><div className="responsive-table billing-table"><div className="table-head"><span>Documento / expediente</span><span>Cliente</span><span>Concepto</span><span>Importe</span><span>Coste</span><span>Margen</span><span>Revisión Holded</span><span/></div>{sortedVisibleInvoices.length?sortedVisibleInvoices.map(item=>{const portQuote=limaniPortQuote({...relatedCaseForInvoice(item),cliente:item.cliente},warehouseEntries,transports,calendarEvents);const finalRevenue=invoiceFinalRevenue(item);const finalCost=invoiceCostOf(item);const finalMargin=finalRevenue-finalCost;return <div className="table-row" key={item.id}><span className="primary-cell"><span className="invoice-icon"><ReceiptText/></span><span><b>{item.id}</b><button onClick={()=>openCase(item.expediente)}>{item.expediente}</button>{item.holdedStatus&&<small>Holded: {item.holdedStatus}{item.holdedNumber?`  -  ${item.holdedNumber}`:''}</small>}</span></span><span data-label="Cliente">{item.cliente}</span><span data-label="Concepto" className="billing-concept-cell"><span>{item.concepto}</span>{!invoiceSentOrClosed(item)&&portQuote?.status==='missing'&&invoiceLinesOf(item.lines).some(isPortTransportLine)&&<small className="port-transport-rate missing" role="status">{portQuote.message}</small>}{!invoiceSentOrClosed(item)&&<div className={'billing-po-inline '+(isLimaniCase(relatedCaseForInvoice(item))&&!purchaseOrderOf(relatedCaseForInvoice(item))?'missing':'')}><label>PO / Purchase Order</label><div><input value={poDrafts[item.expediente]??purchaseOrderOf(relatedCaseForInvoice(item))} onChange={event=>setPoDrafts(current=>({...current,[item.expediente]:event.target.value.toUpperCase()}))} placeholder="Ej. POA604877"/><button className="button secondary compact" disabled={savingPurchaseOrder===item.expediente} onClick={()=>savePurchaseOrder(item)}>{savingPurchaseOrder===item.expediente?'Guardando…':'Guardar PO'}</button></div>{isLimaniCase(relatedCaseForInvoice(item))&&!purchaseOrderOf(relatedCaseForInvoice(item))&&<small>Obligatorio para enviar esta factura LIMANI a Holded.</small>}</div>}</span><strong data-label="Importe" className="billing-final-revenue">{moneyExact(finalRevenue)}{item.holdedBilledVerified===true&&<small>Importe final Holded</small>}</strong><span data-label="Coste" className="billing-cost">{moneyExact(finalCost)}</span><strong data-label="Margen" className={finalMargin<0?'billing-margin negative':'billing-margin'}>{moneyExact(finalMargin)}</strong><span data-label="Revisión Holded" className="billing-review-column">{['Facturado','Cobrado'].includes(item.estado)?<><HoldedBillingReview item={item} cost={finalCost} revenue={finalRevenue} margin={finalMargin}/><Badge>{item.estado}</Badge></>:<Badge>{item.estado}</Badge>}</span><span className="billing-row-actions"><button className="icon-button" aria-label={'Editar '+item.id} onClick={()=>setEditing(item)}><PencilLine/></button>{canAdmin&&!invoiceSentOrClosed(item)&&item.estado!=='Archivado'&&<button className="icon-button danger" aria-label={'Registrar no facturar '+item.id} onClick={()=>archiveInvoice(item)} title="Registrar motivo para no facturar"><Archive/></button>}{item.holdedId&&['Enviado a Holded','Facturado','Cobrado'].includes(item.estado)?<button className="button secondary compact" disabled={Boolean(checkingHolded)} onClick={()=>verifyHoldedDocuments([item])}><RefreshCw className={checkingHolded===item.id?'spinning':''}/> {checkingHolded===item.id?'Comprobando…':'Comprobar'}</button>:!['Facturado','Cobrado','Archivado'].includes(item.estado)&&<button className="button secondary compact" disabled={sendingHolded===item.id} onClick={()=>sendHolded(item)}>{sendingHolded===item.id?'Enviando…':'Enviar a Holded'}</button>}</span></div>}):<Empty text={billingView==='pending'?'No hay facturas pendientes en este filtro.':'No hay documentos en este estado.'}/>}</div></section>
     <section className="billing-flow-panel panel"><SectionHeader title="Flujo de facturación" subtitle="Control interno antes de crear la proforma real en Holded"/><div className="billing-flow-steps">{groupedStatus.map((status,index)=><span key={status}><b>{index+1}</b><small>{status}</small></span>)}</div><div className="billing-rules"><div><b>Se puede modificar aquí</b><small>Cliente, PO / Purchase Order, concepto, importe, estado y vencimiento.</small></div><div><b>No se modifica aquí</b><small>Buque, mercancía, POD y evidencias: se corrigen desde Expediente.</small></div></div></section>
     <section className="billing-flow-panel panel"><SectionHeader title="Doble verificación con Holded" subtitle="La app consulta el estado real de proformas, facturas y cobros al abrir Facturación." action={<button className="button secondary" disabled={Boolean(checkingHolded)||!holdedCheckInvoices.length} onClick={()=>verifyHoldedDocuments(holdedCheckInvoices)}><RefreshCw className={checkingHolded?'spinning':''}/> {checkingHolded?'Comprobando…':'Comprobar ahora'}</button>}/><div className="billing-rules"><div><b>Primera confirmación</b><small>Al crear la proforma se guarda su ID real de Holded.</small></div><div><b>Segunda confirmación</b><small>Holded confirma la factura y su importe final; la revisión queda visible junto a gastos y margen.</small></div></div></section>
     <section className="panel billing-control-panel"><SectionHeader title="Control de cierre y conciliación" subtitle="Cruza cada expediente con su borrador, la proforma real de Holded, la factura y el importe final." action={<button className="button secondary" disabled={Boolean(checkingHolded)||!holdedCheckInvoices.length} onClick={()=>verifyHoldedDocuments(holdedCheckInvoices)}><RefreshCw className={checkingHolded?'spinning':''}/> Conciliar con Holded</button>}/><div className={'billing-control-summary '+(controlAttention.length?'attention':'clear')}><span>{controlAttention.length?<CircleAlert/>:<ShieldCheck/>}</span><div><b>{controlAttention.length?controlAttention.length+' expediente'+(controlAttention.length===1?' requiere':'s requieren')+' revisión':'Cierre de facturación al día'}</b><small>{controlAttention.length?'Nada se oculta: abre cada incidencia, factura o registra el motivo por el que no corresponde facturar.':'Todos los expedientes revisados tienen una salida documentada.'}</small></div></div><div className="billing-control-kpis">{billingControlBuckets.map(([value,label,count])=><button key={value} className={billingControlView===value?'active':''} onClick={()=>setBillingControlView(value)}><strong>{count}</strong><span>{label}</span></button>)}</div><div className="billing-control-list">{billingControlVisible.length?billingControlVisible.map(row=>{const meta=billingControlMeta[row.stage]||billingControlMeta.incident;const canExclude=canAdmin&&((row.invoice&&!invoiceSentOrClosed(row.invoice)&&row.invoice.estado!=='Archivado')||(!row.invoice&&['missing','decision'].includes(row.stage)));return <article className={'billing-control-row '+meta.tone} key={row.key}><span className="billing-control-status">{row.stage==='confirmed'?<CheckCircle2/>:row.stage==='excluded'?<Archive/>:row.stage==='sent'?<RefreshCw/>:<CircleAlert/>}<b>{meta.label}</b></span><div className="billing-control-identity"><b>{row.expediente} · {row.buque}</b><small>{row.cliente||'Cliente no indicado'}</small></div><div className="billing-control-reason"><span>{row.reason}</span>{row.age!=null&&['sent','overdue','verify'].includes(row.stage)&&<small>Antigüedad en Holded: {row.age} día{row.age===1?'':'s'}</small>}{row.invoice?.billingExceptionBy&&<small>Decidido por {row.invoice.billingExceptionBy}</small>}</div><div className="billing-control-money"><span><small>IMPORTE</small><b>{moneyExact(row.amount)}</b></span><span><small>GASTOS</small><b>{moneyExact(row.cost)}</b></span></div><div className="billing-control-actions">{row.caseItem&&<button className="button tertiary compact" onClick={()=>openCase(row.expediente)}>Expediente</button>}{!row.invoice&&<button className="button primary compact" onClick={()=>createDraft(row.caseItem)}>Preparar borrador</button>}{row.invoice&&row.invoice.estado!=='Archivado'&&!invoiceSentOrClosed(row.invoice)&&<button className="button secondary compact" onClick={()=>setEditing(row.invoice)}>Revisar borrador</button>}{row.invoice?.holdedId&&['sent','overdue','verify','incident'].includes(row.stage)&&<button className="button secondary compact" disabled={Boolean(checkingHolded)} onClick={()=>verifyHoldedDocuments([row.invoice])}><RefreshCw className={checkingHolded===row.invoice.id?'spinning':''}/> Comprobar</button>}{canExclude&&<button className="button tertiary danger compact" onClick={()=>row.invoice?archiveInvoice(row.invoice):archiveReadyCase(row.caseItem)}><Archive/> No facturar</button>}{canAdmin&&row.invoice?.estado==='Archivado'&&<button className="button tertiary compact" onClick={()=>archiveInvoice(row.invoice)}><PencilLine/> {row.invoice.billingExceptionReason?'Editar motivo':'Añadir motivo'}</button>}</div></article>}):<Empty text={billingControlView==='attention'?'No hay expedientes olvidados ni incidencias pendientes.':'No hay expedientes en esta categoría.'}/>}</div></section>
@@ -4432,7 +4468,7 @@ function Facturacion({openCase,notify,invoices,cases,warehouseEntries=[],transpo
     {readyCases.length>0&&<section className="billing-ready-panel panel"><SectionHeader title="Listos para facturar" subtitle="Se crearán automáticamente con líneas habituales de operativa"/><div className="billing-ready-list">{readyCases.map(item=><article key={item.id} className="billing-ready-card"><span className="invoice-icon"><CheckCircle2/></span><div><b>{caseLabel(item)}</b><small>{item.cliente}  -  {item.puerto}  -  {item.estado==='Cancelado'?'cancelación con gastos facturables':isStorageOnly(item)?'salida/recogida verificada':'POD verificado'}</small><em>{invoiceCargoSummary(item,warehouseEntries)}  -  gastos {moneyExact(caseExpenseTotal(item))}  -  margen sugerido {moneyExact(suggestedTransportPrice(item,warehouseEntries)-caseExpenseTotal(item))}</em></div><div className="billing-ready-actions"><button className="button tertiary" onClick={()=>openCase(item.id)}>Ver expediente</button>{canAdmin&&<button className="button secondary danger compact" onClick={()=>archiveReadyCase(item)}><Archive/> No facturar</button>}<button className="button primary" onClick={()=>createDraft(item)}>Revisar borrador</button></div></article>)}</div></section>}
     {notReadyInvoices.length>0&&<section className="billing-hold-panel panel"><SectionHeader title="No listos / revisar" subtitle="Borradores guardados de expedientes que aún no están cerrados al 100%. No entran en el importe pendiente."/><div className="billing-ready-list">{notReadyInvoices.map(item=>{const related=relatedCaseForInvoice(item);return <article key={item.id} className="billing-ready-card warning"><span className="invoice-icon"><CircleAlert/></span><div><b>{item.expediente}  -  {related?.buque||item.buque||'BUQUE PENDIENTE'}</b><small>{item.cliente}  -  progreso {related?operationProgress(related):0}%  -  {related?.siguiente||'Expediente pendiente de completar'}</small><em>Este borrador queda reservado, pero no se considera listo para enviar.</em></div><div className="billing-ready-actions"><button className="button tertiary" onClick={()=>openCase(item.expediente)}>Ver expediente</button><button className="button secondary" onClick={()=>setEditing(item)}>Editar borrador</button>{canAdmin&&<button className="button secondary danger compact" onClick={()=>archiveInvoice(item)}><Archive/> No facturar</button>}</div></article>})}</div></section>}
     <section className="billing-hero"><div><span>Importe pendiente de gestión</span><strong>{money(total)}</strong><small>{activeInvoices.length} pendientes/enviados sin cerrar · facturados {invoicedInvoices.length} · costes {moneyExact(totalCosts)} · margen {moneyExact(total-totalCosts)}</small></div><div><span className="holded-mark">H</span><div><b>Holded conectado</b><small>El botón crea una proforma real. La factura final se hará cuando confirmemos el flujo.</small></div></div><button className="button primary" onClick={()=>notify('Holded listo: revisa un borrador y pulsa Enviar a Holded.')}><Download/> Proformas reales</button></section>
-    {editing&&<InvoiceModalBoundary key={invoiceText(editing.id)} close={()=>setEditing(null)}><InvoiceEditModal item={editing} cases={cases} warehouseEntries={warehouseEntries} transports={transports} calendarEvents={calendarEvents} clients={clients} close={()=>setEditing(null)} submit={item=>{const related=cases.find(entry=>entry.id===item.expediente);const context=related||item;updateInvoice({...item,purchaseOrder:purchaseOrderOf(context),concepto:withPurchaseOrderSuffix(item.concepto,context),lines:ensurePurchaseOrderReferenceLines(item.lines,context)});setEditing(null)}} simulateHolded={item=>{sendHolded(item);setEditing(null)}}/></InvoiceModalBoundary>}
+    {editing&&<InvoiceModalBoundary key={invoiceText(editing.id)} close={()=>setEditing(null)}><InvoiceEditModal item={editing} cases={cases} warehouseEntries={warehouseEntries} transports={transports} calendarEvents={calendarEvents} clients={clients} close={()=>setEditing(null)} submit={item=>{const related=cases.find(entry=>entry.id===item.expediente);const context=related||item;updateInvoice({...item,purchaseOrder:purchaseOrderOf(context),concepto:withPurchaseOrderSuffix(item.concepto,context),lines:ensurePurchaseOrderReferenceLines(item.lines,context)});setEditing(null)}} simulateHolded={item=>{sendHolded(item)}}/></InvoiceModalBoundary>}
     {archiveCandidate&&<BillingExceptionModal item={archiveCandidate} close={()=>setArchiveCandidate(null)} submit={saveBillingException}/>}
   </>;
 }
@@ -4696,15 +4732,9 @@ function InvoiceEditModal({item,cases=[],warehouseEntries=[],transports=[],calen
   const templateLines=invoiceLinesOf(template?.lines).map(invoiceLineForEditor);
   const storedItemLines=invoiceLinesOf(safeItem.lines).map(invoiceLineForEditor);
   const storedLines=storedItemLines.length?storedItemLines:[{id:'line-1',item:safeItem.concepto||'TRANSPORT FROM WAREHOUSE TO VESSEL',detail:'',price:Number(safeItem.importe)||0,units:1,tax:'0%'}];
-  const standardIds=new Set(['ref','reception','handling','storage','transport','waiting']);
-  const comparableLines=lines=>['ref','reception','handling','storage','transport','waiting'].map(id=>{const line=invoiceLinesOf(lines).find(entry=>entry.id===id);return line?[id,line.item,line.detail,Number(line.price)||0,Number(line.units)||0,line.tax||'0%']:null}).filter(Boolean);
-  const storedLineIds=storedLines.map(line=>line.id||String(line.item||'').toLowerCase());
-  const missingTemplateLine=templateLines.length>0&&templateLines.some(line=>!storedLineIds.includes(line.id));
-  const changedTemplateLine=templateLines.length>0&&JSON.stringify(comparableLines(storedLines))!==JSON.stringify(comparableLines(templateLines));
-  const shouldUseTemplate=templateLines.length>0&&(storedLines.length<4||missingTemplateLine||changedTemplateLine||/^SPL/i.test(String(storedLines[0]?.item||'')));
-  const customLines=storedLines.filter(line=>!standardIds.has(line.id)&&!String(line.id||'').startsWith('cancel-'));
-  const initialLines=enforceLimaniFreeStorageLines((shouldUseTemplate?[...templateLines,...customLines]:storedLines).map((line,index)=>invoiceLineForEditor(currentCargo?{...line,item:index===0?currentHeader:line.item,detail:line.detail||currentCargo}:line,index)),{cliente:template?.cliente||safeItem.cliente});
-  const [form,setForm]=useState({...safeItem,...template,id:invoiceText(safeItem.id),expediente:invoiceText(safeItem.expediente||template?.expediente),cliente:invoiceText(template?.cliente||safeItem.cliente),buque:invoiceText(template?.buque||safeItem.buque),puerto:invoiceText(template?.puerto||safeItem.puerto),concepto:invoiceText(currentHeader||template?.concepto||safeItem.concepto),estado:invoiceText(safeItem.estado||template?.estado)||'Borrador',vencimiento:invoiceText(safeItem.vencimiento||template?.vencimiento),observaciones:invoiceText(safeItem.observaciones||template?.observaciones),proforma:invoiceText(safeItem.proforma||template?.proforma),payment:invoiceText(safeItem.payment||template?.payment),supplierInvoices:invoiceLinesOf(safeItem.supplierInvoices),supplierText:invoiceText(safeItem.supplierText),lines:initialLines});
+  const initialLines=savedInvoiceLines(storedItemLines,templateLines.length?templateLines:storedLines).map(invoiceLineForEditor);
+  const describedInvoice=invoiceWithTransportDescription({...safeItem,observaciones:safeItem.observaciones||template?.observaciones,lines:initialLines},relatedCase,transports,calendarEvents);
+  const [form,setForm]=useState({...template,...safeItem,id:invoiceText(safeItem.id),expediente:invoiceText(safeItem.expediente||template?.expediente),cliente:invoiceText(template?.cliente||safeItem.cliente),buque:invoiceText(template?.buque||safeItem.buque),puerto:invoiceText(template?.puerto||safeItem.puerto),concepto:invoiceText(currentHeader||template?.concepto||safeItem.concepto),estado:invoiceText(safeItem.estado||template?.estado)||'Borrador',vencimiento:invoiceText(safeItem.vencimiento||template?.vencimiento),observaciones:invoiceText(describedInvoice.observaciones),proforma:invoiceText(safeItem.proforma||template?.proforma),payment:invoiceText(safeItem.payment||template?.payment),supplierInvoices:invoiceLinesOf(safeItem.supplierInvoices),supplierText:invoiceText(safeItem.supplierText),lines:describedInvoice.lines.filter(line=>overtimeLocked(safeItem)||!isAutoOvertime(line)),transportDescriptionNeedsReview:describedInvoice.transportDescriptionNeedsReview});
   const [supplierText,setSupplierText]=useState(invoiceText(safeItem.supplierText));
   const [supplierNote,setSupplierNote]=useState('');
   const [supplierScanning,setSupplierScanning]=useState(false);
@@ -4712,24 +4742,15 @@ function InvoiceEditModal({item,cases=[],warehouseEntries=[],transports=[],calen
   let manualInvoiceWeight=0;
   let manualInvoiceCargo='';
   try{manualInvoiceWeight=invoiceLinesWeight(form.lines);manualInvoiceCargo=invoiceLinesCargoSummary(form.lines)}catch{}
-  const billingCase={...(relatedCase||{}),cliente:form.cliente};
+  const billingCase={...form,...(relatedCase||{}),cliente:form.cliente};
+  const portQuote=limaniPortQuote(billingCase,warehouseEntries,transports,calendarEvents);
+  const applySelectedPortRate=index=>setForm(current=>({...current,lines:current.lines.map((line,lineIndex)=>lineIndex===index?applyPortRate(line,portQuote):line)}));
   let tariffConceptOptions=[];
   try{tariffConceptOptions=relatedCase?invoiceTariffConceptOptions(billingCase,warehouseEntries,transports,calendarEvents,{manualWeight:manualInvoiceWeight,manualCargo:manualInvoiceCargo}):[]}catch{tariffConceptOptions=[]}
   const selectedClient=findClientProfile(form.cliente);
   const applyClient=value=>{
     const profile=findClientProfile(value);
-    const clientName=profile?.nombre||value;
-    if(relatedCase){
-      let repriced=null;
-      try{repriced=draftInvoiceFromCase({...relatedCase,cliente:clientName},warehouseEntries,transports,calendarEvents)}catch{}
-      if(!repriced){setForm({...form,cliente:clientName});return}
-      const repricedLines=invoiceLinesOf(repriced.lines).map(invoiceLineForEditor);
-      const templateIds=new Set(repricedLines.map(line=>line.id));
-      const customLines=form.lines.filter(line=>!standardIds.has(line.id)&&!templateIds.has(line.id));
-      setForm({...form,cliente:clientName,concepto:invoiceText(repriced.concepto),buque:invoiceText(repriced.buque),puerto:invoiceText(repriced.puerto),lines:[...repricedLines,...customLines]});
-      return;
-    }
-    setForm({...form,cliente:clientName});
+    setForm(current=>({...current,cliente:profile?.nombre||value}));
   };
   const update=event=>{
     const {name,value}=event.target;
@@ -4739,20 +4760,7 @@ function InvoiceEditModal({item,cases=[],warehouseEntries=[],transports=[],calen
     }
     setForm({...form,[name]:value});
   };
-  const updateLine=(index,field,value)=>{
-    const billingContext={...(relatedCase||{}),cliente:form.cliente};
-    const updatedLines=form.lines.map((line,lineIndex)=>{
-      if(lineIndex!==index)return line;
-      const next={...line,[field]:value};
-      if(isLimaniCase(billingContext)&&isStorageInvoiceLine(next))return {...next,price:0};
-      if(['detail','item','units'].includes(field)){
-        const autoPrice=invoiceAutoPriceLine(next,billingContext,warehouseEntries,transports,calendarEvents);
-        if(autoPrice!==null)return {...next,price:autoPrice};
-      }
-      return next;
-    });
-    setForm({...form,lines:updatedLines});
-  };
+  const updateLine=(index,field,value)=>setForm(current=>({...current,lines:editInvoiceLine(current.lines,index,field,value)}));
   const addLine=()=>setForm({...form,lines:[...form.lines,{id:`line-${Date.now()}`,item:'WAITING TIME',detail:'',price:0,units:1,tax:'0%'}]});
   const removeLine=index=>setForm({...form,lines:form.lines.filter((_,lineIndex)=>lineIndex!==index)});
   const applySupplierLinesFromText=(text,source='texto')=>{
@@ -4784,10 +4792,12 @@ function InvoiceEditModal({item,cases=[],warehouseEntries=[],transports=[],calen
     setSelectedTariffConcept('');
     setSupplierNote(`${option.label} anadido con tarifa Swiftport. Revisa unidades, IVA y precio antes de enviar.`);
   };
-  const total=invoiceTotal(form);
+  const overtimePreview=invoiceWithOvertime(form,billingCase,transports,calendarEvents);
+  const updateOvertimeSchedule=(id,schedule)=>setForm(current=>({...current,lines:current.lines.map(line=>line.id===id?{...line,overtimeSchedule:schedule}:line)}));
+  const total=invoiceTotal(overtimePreview);
   const expenseTotal=relatedCase?caseExpenseTotal(relatedCase):Number(form.coste)||0;
   const estimatedMargin=total-expenseTotal;
-  return <div className="modal-backdrop" onMouseDown={event=>{if(event.target===event.currentTarget)close()}}><section className="modal invoice-modal invoice-detail-modal" role="dialog" aria-modal="true"><div className="modal-head"><div><span className="overline">{item.id}</span><h2>{String(item.id||'').startsWith('BOR-')?'Borrador automático de factura':'Editar facturación'}</h2><p>Plantilla basada en tus facturas habituales de Holded. Puedes cambiar líneas, precios y estado.</p></div><button className="icon-button" onClick={close}><X/></button></div><form onSubmit={event=>{event.preventDefault();submit({...form,importe:total,lines:form.lines.map(line=>({...line,price:Number(line.price)||0,units:Number(line.units)||0}))})}}><div className="invoice-locked wide"><ReceiptText/><span><small>DATOS DEL EXPEDIENTE</small><b>{form.expediente}{form.buque?`  -  ${form.buque}`:''}{form.puerto?`  -  ${form.puerto}`:''}</b><em>La mercancía y POD se corrigen desde Expediente; la factura se ajusta aquí.</em></span></div><label className="field"><span>Expediente</span><input name="expediente" value={form.expediente} readOnly/></label><label className="field invoice-client-field"><span>Cliente</span><input name="cliente" list="invoice-client-options" value={form.cliente} onChange={update} onBlur={event=>applyClient(event.target.value)} onKeyDown={event=>{if(event.key==='Enter'){event.preventDefault();applyClient(event.currentTarget.value)}}} placeholder="Escribe o selecciona cliente" required/><datalist id="invoice-client-options">{clientProfiles.map(profile=><option key={profile.codigo} value={profile.nombre}>{[profile.fiscalName,profile.taxId,profile.tarifaActiva].filter(Boolean).join('  -  ')}</option>)}</datalist>{selectedClient&&<small className="invoice-client-hint"><b>{selectedClient.fiscalName}</b>{selectedClient.taxId&&`  -  ${selectedClient.taxId}`}{selectedClient.tarifaActiva&&`  -  ${selectedClient.tarifaActiva}`}</small>}</label><label className="field"><span>Estado interno</span><select name="estado" value={form.estado} onChange={update}>{['Borrador','Revisar','Listo para enviar','Enviado a Holded','Facturado','Cobrado'].map(value=><option key={value}>{value}</option>)}</select></label><label className="field"><span>Vencimiento</span><input name="vencimiento" type="date" value={form.vencimiento} onChange={update}/></label><label className="field wide"><span>Concepto general</span><input name="concepto" value={form.concepto} onChange={update} required/></label><div className="supplier-invoice-import wide"><div className="supplier-import-head"><span><b>Facturas proveedor del expediente</b><small>Sube PDFs de proveedor: Swiftport intentara leer conceptos, bultos, kilos y precios automaticamente.</small></span><label className="button secondary"><input type="file" accept="application/pdf,.pdf" multiple onChange={addSupplierFiles}/> {supplierScanning?'Escaneando PDFs...':'Subir PDFs proveedor'}</label></div>{(form.supplierInvoices||[]).length>0&&<div className="supplier-file-list">{form.supplierInvoices.map(file=><span key={file.id}><ReceiptText/><b>{file.name}</b><button type="button" className="icon-button compact danger" onClick={()=>removeSupplierFile(file.id)}><Trash2/></button></span>)}</div>}<label className="field wide"><span>Texto / conceptos copiados de la factura proveedor</span><textarea value={supplierText} onChange={event=>setSupplierText(event.target.value)} rows="4" placeholder="Pega aquí líneas como: Load / Unload 18.00, Warehouse 9.00, Customs clearance 33.00, Delivery vessel Algeciras Port 65.00"/></label><div className="supplier-import-actions"><button type="button" className="button secondary" onClick={importSupplierLines}>Copiar conceptos y aplicar mi tarifa</button><button type="button" className="button tertiary" onClick={rescanSupplierFiles}>PDFs como evidencia</button>{supplierNote&&<small>{supplierNote}</small>}</div></div><div className="invoice-lines-editor wide"><div className="invoice-lines-title"><span><b>Lineas de factura</b><small>Selecciona un concepto tarifado o anade una linea manual.</small></span><button type="button" className="button secondary" onClick={addLine}><Plus/> Linea manual</button></div>{tariffConceptOptions.length>0&&<div className="invoice-concept-toolbar"><label className="field"><span>Concepto Swiftport</span><select value={selectedTariffConcept} onChange={event=>setSelectedTariffConcept(event.target.value)}><option value="">Seleccionar concepto...</option>{tariffConceptOptions.map(option=><option key={option.id} value={option.id}>{option.label} - {moneyExact((Number(option.price)||0)*(Number(option.units)||1))}</option>)}</select></label><button type="button" className="button primary" onClick={addTariffConcept} disabled={!selectedTariffConcept}><Plus/> Anadir con tarifa</button></div>}{form.lines.map((line,index)=><article className="invoice-line-row" key={line.id||index}><label className="field"><span>Item</span><input value={line.item} onChange={event=>updateLine(index,'item',event.target.value)} required/></label><label className="field line-detail"><span>Detalle mercancía</span><input value={line.detail||''} onChange={event=>updateLine(index,'detail',event.target.value)} placeholder="Ej. 3 BOXES 5 KGS"/></label><label className="field"><span>Precio</span><input type="number" min="0" step="0.01" value={line.price} onChange={event=>updateLine(index,'price',event.target.value)} readOnly={isLimaniCase(billingCase)&&isStorageInvoiceLine(line)}/></label><label className="field"><span>Uds.</span><input type="number" min="0" step="0.01" value={line.units} onChange={event=>updateLine(index,'units',event.target.value)}/></label><label className="field"><span>IVA</span><select value={line.tax||'0%'} onChange={event=>updateLine(index,'tax',event.target.value)}><option>0%</option><option>21%</option><option>Exenta</option></select></label><strong>{moneyExact(invoiceLineTotal(line))}</strong>{form.lines.length>1&&<button type="button" className="icon-button danger" onClick={()=>removeLine(index)}><Trash2/></button>}</article>)}</div><div className="invoice-total-box wide"><span>Base imponible <b>{moneyExact(total)}</b></span><span>IVA 21% <b>{moneyExact(0)}</b></span><span>Exenta <b>{moneyExact(total)}</b></span><strong>Total <b>{moneyExact(total)}</b></strong></div><label className="field wide"><span>Observaciones</span><input name="observaciones" value={form.observaciones||''} onChange={update}/></label><label className="field"><span>Proforma</span><input name="proforma" value={form.proforma||''} onChange={update}/></label><label className="field"><span>Condiciones de pago</span><input name="payment" value={form.payment||''} onChange={update}/></label><div className="billing-edit-note wide"><b>Automático:</b> referencia, recepción, handling, storage, transporte y totales. <b>Editable:</b> cualquier precio, línea, cliente, estado y vencimiento.</div><div className="modal-actions wide"><button type="button" className="button tertiary" onClick={close}>Cancelar</button>{simulateHolded&&<button type="button" className="button secondary" onClick={()=>simulateHolded({...form,importe:total,lines:form.lines.map(line=>({...line,price:Number(line.price)||0,units:Number(line.units)||0}))})}>Enviar proforma a Holded</button>}<button className="button primary"><Save/> Guardar borrador</button></div></form></section></div>;
+  return <div className="modal-backdrop" onMouseDown={event=>{if(event.target===event.currentTarget)close()}}><section className="modal invoice-modal invoice-detail-modal" role="dialog" aria-modal="true"><div className="modal-head"><div><span className="overline">{item.id}</span><h2>{String(item.id||'').startsWith('BOR-')?'Borrador automático de factura':'Editar facturación'}</h2><p>Plantilla basada en tus facturas habituales de Holded. Puedes cambiar líneas, precios y estado.</p></div><button className="icon-button" onClick={close}><X/></button></div><form onSubmit={event=>{event.preventDefault();submit({...overtimePreview,importe:total,lines:overtimePreview.lines.map(line=>({...line,price:Number(line.price)||0,units:Number(line.units)||0}))})}}><div className="invoice-locked wide"><ReceiptText/><span><small>DATOS DEL EXPEDIENTE</small><b>{form.expediente}{form.buque?`  -  ${form.buque}`:''}{form.puerto?`  -  ${form.puerto}`:''}</b><em>La mercancía y POD se corrigen desde Expediente; la factura se ajusta aquí.</em></span></div><label className="field"><span>Expediente</span><input name="expediente" value={form.expediente} readOnly/></label><label className="field invoice-client-field"><span>Cliente</span><input name="cliente" list="invoice-client-options" value={form.cliente} onChange={update} onBlur={event=>applyClient(event.target.value)} onKeyDown={event=>{if(event.key==='Enter'){event.preventDefault();applyClient(event.currentTarget.value)}}} placeholder="Escribe o selecciona cliente" required/><datalist id="invoice-client-options">{clientProfiles.map(profile=><option key={profile.codigo} value={profile.nombre}>{[profile.fiscalName,profile.taxId,profile.tarifaActiva].filter(Boolean).join('  -  ')}</option>)}</datalist>{selectedClient&&<small className="invoice-client-hint"><b>{selectedClient.fiscalName}</b>{selectedClient.taxId&&`  -  ${selectedClient.taxId}`}{selectedClient.tarifaActiva&&`  -  ${selectedClient.tarifaActiva}`}</small>}</label><label className="field"><span>Estado interno</span><select name="estado" value={form.estado} onChange={update}>{['Borrador','Revisar','Listo para enviar','Enviado a Holded','Facturado','Cobrado'].map(value=><option key={value}>{value}</option>)}</select></label><label className="field"><span>Vencimiento</span><input name="vencimiento" type="date" value={form.vencimiento} onChange={update}/></label><label className="field wide"><span>Concepto general</span><input name="concepto" value={form.concepto} onChange={update} required/></label><div className="supplier-invoice-import wide"><div className="supplier-import-head"><span><b>Facturas proveedor del expediente</b><small>Sube PDFs de proveedor: Swiftport intentara leer conceptos, bultos, kilos y precios automaticamente.</small></span><label className="button secondary"><input type="file" accept="application/pdf,.pdf" multiple onChange={addSupplierFiles}/> {supplierScanning?'Escaneando PDFs...':'Subir PDFs proveedor'}</label></div>{(form.supplierInvoices||[]).length>0&&<div className="supplier-file-list">{form.supplierInvoices.map(file=><span key={file.id}><ReceiptText/><b>{file.name}</b><button type="button" className="icon-button compact danger" onClick={()=>removeSupplierFile(file.id)}><Trash2/></button></span>)}</div>}<label className="field wide"><span>Texto / conceptos copiados de la factura proveedor</span><textarea value={supplierText} onChange={event=>setSupplierText(event.target.value)} rows="4" placeholder="Pega aquí líneas como: Load / Unload 18.00, Warehouse 9.00, Customs clearance 33.00, Delivery vessel Algeciras Port 65.00"/></label><div className="supplier-import-actions"><button type="button" className="button secondary" onClick={importSupplierLines}>Copiar conceptos y aplicar mi tarifa</button><button type="button" className="button tertiary" onClick={rescanSupplierFiles}>PDFs como evidencia</button>{supplierNote&&<small>{supplierNote}</small>}</div></div>{form.transportDescriptionNeedsReview&&<div className="billing-edit-note wide">Hay varias líneas de transporte. Revisa y coloca en la descripción de cada una su fecha, horario y ruta; no se asignan automáticamente para evitar mezclar servicios.</div>}<PortTransportRateNotice quote={portQuote} lines={form.lines} onApply={applySelectedPortRate}/><div className="invoice-lines-editor wide"><div className="invoice-lines-title"><span><b>Lineas de factura</b><small>Selecciona un concepto tarifado o anade una linea manual.</small></span><button type="button" className="button secondary" onClick={addLine}><Plus/> Linea manual</button></div>{tariffConceptOptions.length>0&&<div className="invoice-concept-toolbar"><label className="field"><span>Concepto Swiftport</span><select value={selectedTariffConcept} onChange={event=>setSelectedTariffConcept(event.target.value)}><option value="">Seleccionar concepto...</option>{tariffConceptOptions.map(option=><option key={option.id} value={option.id}>{option.label} - {moneyExact((Number(option.price)||0)*(Number(option.units)||1))}</option>)}</select></label><button type="button" className="button primary" onClick={addTariffConcept} disabled={!selectedTariffConcept}><Plus/> Anadir con tarifa</button></div>}{form.lines.map((line,index)=><article className="invoice-line-row" key={line.id||index}><label className="field"><span>Item</span><input value={line.item} onChange={event=>updateLine(index,'item',event.target.value)} required/></label><label className="field line-detail"><span>Detalle mercancía</span><textarea rows="3" value={line.detail||''} onChange={event=>updateLine(index,'detail',event.target.value)} placeholder="Mercancía, fecha, horario y ruta del servicio"/></label><label className="field"><span>Precio</span><input type="number" min="0" step="0.01" value={line.price} onChange={event=>updateLine(index,'price',event.target.value)}/></label><label className="field"><span>Uds.</span><input type="number" min="0" step="0.01" value={line.units} onChange={event=>updateLine(index,'units',event.target.value)}/></label><label className="field"><span>IVA</span><select value={line.tax||'0%'} onChange={event=>updateLine(index,'tax',event.target.value)}><option>0%</option><option>21%</option><option>Exenta</option></select></label><strong>{moneyExact(invoiceLineTotal(line))}</strong>{form.lines.length>1&&<button type="button" className="icon-button danger" onClick={()=>removeLine(index)}><Trash2/></button>}</article>)}</div>{!overtimeLocked(form)&&<OvertimeReview invoice={overtimePreview} onSchedule={updateOvertimeSchedule}/>}<div className="invoice-total-box wide"><span>Base imponible <b>{moneyExact(total)}</b></span><span>IVA 21% <b>{moneyExact(0)}</b></span><span>Exenta <b>{moneyExact(total)}</b></span><strong>Total <b>{moneyExact(total)}</b></strong></div><label className="field wide"><span>Observaciones</span><textarea rows="3" name="observaciones" value={form.observaciones||''} onChange={update}/></label><label className="field"><span>Proforma</span><input name="proforma" value={form.proforma||''} onChange={update}/></label><label className="field"><span>Condiciones de pago</span><input name="payment" value={form.payment||''} onChange={update}/></label><div className="billing-edit-note wide"><b>Precios manuales respetados:</b> la tarifa solo propone los importes iniciales. Guardar, reabrir o actualizar el expediente no sustituye tus líneas ni tus precios. Los totales se calculan sobre los importes que hayas elegido.</div><div className="modal-actions wide"><button type="button" className="button tertiary" onClick={close}>Cancelar</button>{simulateHolded&&<button type="button" className="button secondary" onClick={()=>simulateHolded({...overtimePreview,importe:total,lines:overtimePreview.lines.map(line=>({...line,price:Number(line.price)||0,units:Number(line.units)||0}))})}>Enviar proforma a Holded</button>}<button className="button primary"><Save/> Guardar borrador</button></div></form></section></div>;
 }
 function CustomEditModal({item,close,submit}){
   const [form,setForm]=useState({...item});const update=event=>setForm({...form,[event.target.name]:event.target.value});

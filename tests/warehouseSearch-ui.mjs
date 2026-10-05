@@ -1,0 +1,46 @@
+// Local demo only: no remote calls or stock mutations.
+import {createRequire} from 'node:module';
+import assert from 'node:assert/strict';
+const require=createRequire(process.env.PLAYWRIGHT_PACKAGE||import.meta.url);
+const {chromium}=require('playwright');
+const browser=await chromium.launch({channel:'msedge',headless:true});
+try{
+ const page=await browser.newPage({viewport:{width:1440,height:1000}});
+ const errors=[];page.on('pageerror',error=>errors.push(error.message));
+ await page.route('**/*',route=>route.request().url().startsWith('http://127.0.0.1:5184/')?route.continue():route.abort());
+ await page.goto('http://127.0.0.1:5184/');
+ await page.getByRole('button',{name:'Almacén',exact:true}).click();
+ const notice=page.getByRole('button',{name:'Entendido',exact:true});if(await notice.count())await notice.click();
+ const search=page.getByRole('searchbox',{name:'Buscar en almacén'});
+ await search.waitFor();
+ const rows=page.locator('.warehouse-table .table-row');
+ const total=await rows.count();assert.ok(total>1);
+ const summary=await page.locator('.summary-strip').innerText();
+ await search.fill('  monté  a-12 ');
+ await page.waitForFunction(()=>document.querySelectorAll('.warehouse-table .table-row').length===1);
+ assert.match(await rows.innerText(),/MONTE EXPRESS/);
+ await page.getByRole('checkbox',{name:'Seleccionar visibles'}).check();
+ assert.equal(await page.locator('.warehouse-table input:checked').count(),1);
+ await search.fill('polaris');
+ await rows.filter({hasText:'POLARIS MILA'}).waitFor();
+ assert.match(await page.locator('.warehouse-selection-bar').innerText(),/1 fuera del filtro/);
+ assert.equal(await page.locator('.warehouse-table input:checked').count(),0);
+ assert.equal(await page.locator('.summary-strip').innerText(),summary);
+ await search.fill('NO-EXISTE-98765');
+ await page.getByText('No hay entradas que coincidan con la búsqueda.',{exact:true}).waitFor();
+ assert.equal(await rows.count(),0);
+ await page.getByRole('button',{name:'Limpiar búsqueda de almacén'}).click();
+ assert.equal(await search.inputValue(),'');
+ await page.waitForFunction(expected=>document.querySelectorAll('.warehouse-table .table-row').length===expected,total);
+ await search.fill('ocean');
+ await page.locator('.warehouse-view-tabs').getByRole('button',{name:/Archivados/}).click();
+ await rows.filter({hasText:'OCEAN BREEZE'}).waitFor();
+ assert.equal(await rows.count(),1);
+ await search.fill('alm-309');assert.equal(await rows.count(),1);
+ await search.press('Escape');assert.equal(await search.inputValue(),'');
+ await page.setViewportSize({width:390,height:844});
+ const width=await page.locator('.warehouse-search-toolbar').evaluate(element=>({scroll:element.scrollWidth,client:element.clientWidth}));
+ assert.ok(width.scroll<=width.client+1,JSON.stringify(width));
+ assert.deepEqual(errors,[]);
+ console.log('OK: warehouse search, accents, multiple fields, clear/Escape, active/archive views, filtered selection, unchanged totals and mobile toolbar.');
+}finally{await browser.close();}

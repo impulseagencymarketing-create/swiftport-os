@@ -216,10 +216,10 @@ export const holdedClientProfiles = [
     direccion:'Calle Juan de la Cierva 11, 28810 Villalbilla, Madrid, España',
     condicionesPago:'Transferencia bancaria',
     moneda:'EUR',
-    tarifaActiva:'LIMANI Barcelona 2026',
-    recepcion:'0-35 kg 15€ · 35-250 kg 60€ · 251-500 kg 130€ · 501-2500 kg 245€',
+    tarifaActiva:'LIMANI Barcelona / Valencia / A Coruña 2026',
+    recepcion:'0-35 kg 15€ · 35-250 kg 60€ · 251-500 kg 130€ · 501-2500 kg 235€',
     storage:'GRATIS · Sin coste por días ni peso',
-    transporte:'Warehouse→Vessel: 45€ / 95€ / 250€ / 350€ por peso',
+    transporte:'Local Barcelona / Valencia / A Coruña: 40€ / 70€ / 210€ / 350€ por peso',
     recargo:'+30% overtime / holidays',
     notas:'Importado de Holded · cuenta 40000092 · régimen general · modelo 347: sí'
   },

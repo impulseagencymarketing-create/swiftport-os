@@ -3,6 +3,7 @@ declare(strict_types=1);
 require __DIR__ . '/_bootstrap.php';
 require_once __DIR__ . '/mail/_service.php';
 require_once __DIR__ . '/_expense_service.php';
+require_once __DIR__ . '/_warehouse_archive.php';
 
 ensure_schema();
 $user = require_auth();
@@ -14,7 +15,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'GET') {
     $row = $statement->fetch();
     $data = $row ? json_decode($row['data'], true, 512, JSON_THROW_ON_ERROR) : null;
     if (is_array($data) && is_array($data['cases'] ?? null)) {
-        $data = expense_project($data, expense_load_imports(db()));
+        $data = warehouse_archive_project(expense_project($data, expense_load_imports(db())));
         $positions = [];
         foreach (db()->query('SELECT case_ref, data FROM app_ais_positions')->fetchAll() as $position) {
             $positions[(string) $position['case_ref']] = json_decode((string) $position['data'], true);
@@ -48,7 +49,7 @@ $pdo = db();
 try {
     $pdo->beginTransaction();
     $pdo->query('SELECT id FROM app_operational_state WHERE id = 1 FOR UPDATE')->fetch();
-    $data = expense_project($data, expense_load_imports($pdo));
+    $data = warehouse_archive_project(expense_project($data, expense_load_imports($pdo)));
     $encoded = json_encode($data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
     if (strlen($encoded) > 6 * 1024 * 1024) {
         $pdo->rollBack();

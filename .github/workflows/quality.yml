@@ -34,5 +34,7 @@ jobs:
         run: php server/tests/mail_correlation_test.php
       - name: Probar reparto de gastos
         run: |
-          node --test tests/expenseMath.test.mjs
+          node --test tests/expenseMath.test.mjs tests/invoiceDraftLines.test.mjs tests/invoiceTransportDescription.test.mjs tests/limaniPortRates.test.mjs tests/warehouseSearch.test.mjs tests/warehouseArchive.test.mjs tests/overtime.test.mjs
           php tests/expense-service.test.php
+          php tests/warehouse-archive.test.php
+          php tests/overtime-server.test.php

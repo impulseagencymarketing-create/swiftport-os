@@ -1,0 +1,826 @@
+[
+  {
+    "name": "legacy completed case archives existing stock",
+    "cases": [
+      {
+        "id": "SW-2026-0100",
+        "buque": "MISMO BUQUE",
+        "estado": "Completado"
+      }
+    ],
+    "entries": [
+      {
+        "ref": "ALM-TEST",
+        "expediente": "SW-2026-0100",
+        "buque": "MISMO BUQUE",
+        "estado": "En stock",
+        "archivado": false,
+        "fechaRecepcion": "2026-09-01T10:00:00Z",
+        "bultos": 2,
+        "peso": "100 KG",
+        "fotos": [
+          {
+            "id": "foto-original"
+          }
+        ],
+        "documentosRecepcion": [
+          {
+            "id": "pdf-original"
+          }
+        ]
+      }
+    ],
+    "archived": true
+  },
+  {
+    "name": "closed case archives stock",
+    "cases": [
+      {
+        "id": "SW-2026-0100",
+        "buque": "MISMO BUQUE",
+        "estado": "Cerrado"
+      }
+    ],
+    "entries": [
+      {
+        "ref": "ALM-TEST",
+        "expediente": "SW-2026-0100",
+        "buque": "MISMO BUQUE",
+        "estado": "En stock",
+        "archivado": false,
+        "fechaRecepcion": "2026-09-01T10:00:00Z",
+        "bultos": 2,
+        "peso": "100 KG",
+        "fotos": [
+          {
+            "id": "foto-original"
+          }
+        ],
+        "documentosRecepcion": [
+          {
+            "id": "pdf-original"
+          }
+        ]
+      }
+    ],
+    "archived": true
+  },
+  {
+    "name": "confirmed delivery archives even before invoicing",
+    "cases": [
+      {
+        "id": "SW-2026-0100",
+        "buque": "MISMO BUQUE",
+        "estado": "En curso",
+        "operationalFlow": {
+          "delivery": true,
+          "billingReady": false
+        }
+      }
+    ],
+    "entries": [
+      {
+        "ref": "ALM-TEST",
+        "expediente": "SW-2026-0100",
+        "buque": "MISMO BUQUE",
+        "estado": "En stock",
+        "archivado": false,
+        "fechaRecepcion": "2026-09-01T10:00:00Z",
+        "bultos": 2,
+        "peso": "100 KG",
+        "fotos": [
+          {
+            "id": "foto-original"
+          }
+        ],
+        "documentosRecepcion": [
+          {
+            "id": "pdf-original"
+          }
+        ]
+      }
+    ],
+    "archived": true
+  },
+  {
+    "name": "legacy POD flag means delivery completed",
+    "cases": [
+      {
+        "id": "SW-2026-0100",
+        "buque": "MISMO BUQUE",
+        "operationalFlow": {
+          "pod": true
+        }
+      }
+    ],
+    "entries": [
+      {
+        "ref": "ALM-TEST",
+        "expediente": "SW-2026-0100",
+        "buque": "MISMO BUQUE",
+        "estado": "En stock",
+        "archivado": false,
+        "fechaRecepcion": "2026-09-01T10:00:00Z",
+        "bultos": 2,
+        "peso": "100 KG",
+        "fotos": [
+          {
+            "id": "foto-original"
+          }
+        ],
+        "documentosRecepcion": [
+          {
+            "id": "pdf-original"
+          }
+        ]
+      }
+    ],
+    "archived": true
+  },
+  {
+    "name": "billing readiness alone is not physical delivery",
+    "cases": [
+      {
+        "id": "SW-2026-0100",
+        "buque": "MISMO BUQUE",
+        "operationalFlow": {
+          "billingReady": true
+        }
+      }
+    ],
+    "entries": [
+      {
+        "ref": "ALM-TEST",
+        "expediente": "SW-2026-0100",
+        "buque": "MISMO BUQUE",
+        "estado": "En stock",
+        "archivado": false,
+        "fechaRecepcion": "2026-09-01T10:00:00Z",
+        "bultos": 2,
+        "peso": "100 KG",
+        "fotos": [
+          {
+            "id": "foto-original"
+          }
+        ],
+        "documentosRecepcion": [
+          {
+            "id": "pdf-original"
+          }
+        ]
+      }
+    ],
+    "archived": false
+  },
+  {
+    "name": "100 percent alone is not delivery",
+    "cases": [
+      {
+        "id": "SW-2026-0100",
+        "buque": "MISMO BUQUE",
+        "progreso": 100
+      }
+    ],
+    "entries": [
+      {
+        "ref": "ALM-TEST",
+        "expediente": "SW-2026-0100",
+        "buque": "MISMO BUQUE",
+        "estado": "En stock",
+        "archivado": false,
+        "fechaRecepcion": "2026-09-01T10:00:00Z",
+        "bultos": 2,
+        "peso": "100 KG",
+        "fotos": [
+          {
+            "id": "foto-original"
+          }
+        ],
+        "documentosRecepcion": [
+          {
+            "id": "pdf-original"
+          }
+        ]
+      }
+    ],
+    "archived": false
+  },
+  {
+    "name": "cancellation never ships goods",
+    "cases": [
+      {
+        "id": "SW-2026-0100",
+        "buque": "MISMO BUQUE",
+        "estado": "Cancelado",
+        "progreso": 100,
+        "operationalFlow": {
+          "delivery": true,
+          "billingReady": true
+        }
+      }
+    ],
+    "entries": [
+      {
+        "ref": "ALM-TEST",
+        "expediente": "SW-2026-0100",
+        "buque": "MISMO BUQUE",
+        "estado": "En stock",
+        "archivado": false,
+        "fechaRecepcion": "2026-09-01T10:00:00Z",
+        "bultos": 2,
+        "peso": "100 KG",
+        "fotos": [
+          {
+            "id": "foto-original"
+          }
+        ],
+        "documentosRecepcion": [
+          {
+            "id": "pdf-original"
+          }
+        ]
+      }
+    ],
+    "archived": false
+  },
+  {
+    "name": "cancellation metadata overrides completed status",
+    "cases": [
+      {
+        "id": "SW-2026-0100",
+        "buque": "MISMO BUQUE",
+        "estado": "Completado",
+        "caseCancellation": {
+          "cancelledAt": "2026-09-02T00:00:00Z"
+        }
+      }
+    ],
+    "entries": [
+      {
+        "ref": "ALM-TEST",
+        "expediente": "SW-2026-0100",
+        "buque": "MISMO BUQUE",
+        "estado": "En stock",
+        "archivado": false,
+        "fechaRecepcion": "2026-09-01T10:00:00Z",
+        "bultos": 2,
+        "peso": "100 KG",
+        "fotos": [
+          {
+            "id": "foto-original"
+          }
+        ],
+        "documentosRecepcion": [
+          {
+            "id": "pdf-original"
+          }
+        ]
+      }
+    ],
+    "archived": false
+  },
+  {
+    "name": "reopened delivery remains active",
+    "cases": [
+      {
+        "id": "SW-2026-0100",
+        "buque": "MISMO BUQUE",
+        "estado": "En curso",
+        "operationalFlow": {
+          "delivery": false,
+          "pod": false,
+          "billingReady": false
+        },
+        "deliveryConfirmedAt": "2026-09-02T00:00:00Z"
+      }
+    ],
+    "entries": [
+      {
+        "ref": "ALM-TEST",
+        "expediente": "SW-2026-0100",
+        "buque": "MISMO BUQUE",
+        "estado": "En stock",
+        "archivado": false,
+        "fechaRecepcion": "2026-09-01T10:00:00Z",
+        "bultos": 2,
+        "peso": "100 KG",
+        "fotos": [
+          {
+            "id": "foto-original"
+          }
+        ],
+        "documentosRecepcion": [
+          {
+            "id": "pdf-original"
+          }
+        ]
+      }
+    ],
+    "archived": false
+  },
+  {
+    "name": "explicit other case on same ship is untouched",
+    "cases": [
+      {
+        "id": "SW-2026-0100",
+        "buque": "MISMO BUQUE",
+        "estado": "Completado"
+      },
+      {
+        "id": "SW-2026-0101",
+        "buque": "MISMO BUQUE",
+        "estado": "En curso"
+      }
+    ],
+    "entries": [
+      {
+        "ref": "ALM-TEST",
+        "expediente": "SW-2026-0101",
+        "buque": "MISMO BUQUE",
+        "estado": "En stock",
+        "archivado": false,
+        "fechaRecepcion": "2026-09-01T10:00:00Z",
+        "bultos": 2,
+        "peso": "100 KG",
+        "fotos": [
+          {
+            "id": "foto-original"
+          }
+        ],
+        "documentosRecepcion": [
+          {
+            "id": "pdf-original"
+          }
+        ]
+      }
+    ],
+    "archived": false
+  },
+  {
+    "name": "unlinked same vessel must not be guessed",
+    "cases": [
+      {
+        "id": "SW-2026-0100",
+        "buque": "MISMO BUQUE",
+        "estado": "Completado"
+      }
+    ],
+    "entries": [
+      {
+        "ref": "ALM-TEST",
+        "expediente": "",
+        "buque": "MISMO BUQUE",
+        "estado": "En stock",
+        "archivado": false,
+        "fechaRecepcion": "2026-09-01T10:00:00Z",
+        "bultos": 2,
+        "peso": "100 KG",
+        "fotos": [
+          {
+            "id": "foto-original"
+          }
+        ],
+        "documentosRecepcion": [
+          {
+            "id": "pdf-original"
+          }
+        ]
+      }
+    ],
+    "archived": false
+  },
+  {
+    "name": "unique receipt reference can recover missing case link",
+    "cases": [
+      {
+        "id": "SW-2026-0100",
+        "buque": "MISMO BUQUE",
+        "estado": "Completado",
+        "recepciones": [
+          {
+            "ref": "ALM-TEST"
+          }
+        ]
+      }
+    ],
+    "entries": [
+      {
+        "ref": "ALM-TEST",
+        "expediente": "",
+        "buque": "MISMO BUQUE",
+        "estado": "En stock",
+        "archivado": false,
+        "fechaRecepcion": "2026-09-01T10:00:00Z",
+        "bultos": 2,
+        "peso": "100 KG",
+        "fotos": [
+          {
+            "id": "foto-original"
+          }
+        ],
+        "documentosRecepcion": [
+          {
+            "id": "pdf-original"
+          }
+        ]
+      }
+    ],
+    "archived": true
+  },
+  {
+    "name": "receipt reference cannot override explicit other case",
+    "cases": [
+      {
+        "id": "SW-2026-0100",
+        "buque": "MISMO BUQUE",
+        "estado": "Completado",
+        "recepciones": [
+          {
+            "ref": "ALM-TEST"
+          }
+        ]
+      }
+    ],
+    "entries": [
+      {
+        "ref": "ALM-TEST",
+        "expediente": "SW-2026-0101",
+        "buque": "MISMO BUQUE",
+        "estado": "En stock",
+        "archivado": false,
+        "fechaRecepcion": "2026-09-01T10:00:00Z",
+        "bultos": 2,
+        "peso": "100 KG",
+        "fotos": [
+          {
+            "id": "foto-original"
+          }
+        ],
+        "documentosRecepcion": [
+          {
+            "id": "pdf-original"
+          }
+        ]
+      }
+    ],
+    "archived": false
+  },
+  {
+    "name": "ambiguous receipt link is left for review",
+    "cases": [
+      {
+        "id": "SW-2026-0100",
+        "buque": "MISMO BUQUE",
+        "estado": "Completado",
+        "recepciones": [
+          {
+            "ref": "ALM-TEST"
+          }
+        ]
+      },
+      {
+        "id": "SW-2026-0101",
+        "estado": "Completado",
+        "recepciones": [
+          {
+            "ref": "ALM-TEST"
+          }
+        ]
+      }
+    ],
+    "entries": [
+      {
+        "ref": "ALM-TEST",
+        "expediente": "",
+        "buque": "MISMO BUQUE",
+        "estado": "En stock",
+        "archivado": false,
+        "fechaRecepcion": "2026-09-01T10:00:00Z",
+        "bultos": 2,
+        "peso": "100 KG",
+        "fotos": [
+          {
+            "id": "foto-original"
+          }
+        ],
+        "documentosRecepcion": [
+          {
+            "id": "pdf-original"
+          }
+        ]
+      }
+    ],
+    "archived": false
+  },
+  {
+    "name": "reference comparison ignores case and outer whitespace",
+    "cases": [
+      {
+        "id": "SW-2026-0100",
+        "buque": "MISMO BUQUE",
+        "estado": "Completado"
+      }
+    ],
+    "entries": [
+      {
+        "ref": "ALM-TEST",
+        "expediente": " sw-2026-0100 ",
+        "buque": "MISMO BUQUE",
+        "estado": "En stock",
+        "archivado": false,
+        "fechaRecepcion": "2026-09-01T10:00:00Z",
+        "bultos": 2,
+        "peso": "100 KG",
+        "fotos": [
+          {
+            "id": "foto-original"
+          }
+        ],
+        "documentosRecepcion": [
+          {
+            "id": "pdf-original"
+          }
+        ]
+      }
+    ],
+    "archived": true
+  },
+  {
+    "name": "saved delivery timestamp determines departure",
+    "cases": [
+      {
+        "id": "SW-2026-0100",
+        "buque": "MISMO BUQUE",
+        "estado": "Completado",
+        "deliveryConfirmedAt": "2026-09-02T11:00:00Z"
+      }
+    ],
+    "entries": [
+      {
+        "ref": "ALM-TEST",
+        "expediente": "SW-2026-0100",
+        "buque": "MISMO BUQUE",
+        "estado": "En stock",
+        "archivado": false,
+        "fechaRecepcion": "2026-09-01T10:00:00Z",
+        "bultos": 2,
+        "peso": "100 KG",
+        "fotos": [
+          {
+            "id": "foto-original"
+          }
+        ],
+        "documentosRecepcion": [
+          {
+            "id": "pdf-original"
+          }
+        ]
+      }
+    ],
+    "archived": true
+  },
+  {
+    "name": "existing departure is preserved",
+    "cases": [
+      {
+        "id": "SW-2026-0100",
+        "buque": "MISMO BUQUE",
+        "estado": "Completado",
+        "deliveryConfirmedAt": "2026-09-02T11:00:00Z"
+      }
+    ],
+    "entries": [
+      {
+        "ref": "ALM-TEST",
+        "expediente": "SW-2026-0100",
+        "buque": "MISMO BUQUE",
+        "estado": "En stock",
+        "archivado": false,
+        "fechaRecepcion": "2026-09-01T10:00:00Z",
+        "bultos": 2,
+        "peso": "100 KG",
+        "fotos": [
+          {
+            "id": "foto-original"
+          }
+        ],
+        "documentosRecepcion": [
+          {
+            "id": "pdf-original"
+          }
+        ],
+        "salida": "2026-09-02T09:00:00Z"
+      }
+    ],
+    "archived": true
+  },
+  {
+    "name": "new reception after previous delivery remains active",
+    "cases": [
+      {
+        "id": "SW-2026-0100",
+        "buque": "MISMO BUQUE",
+        "estado": "Completado",
+        "deliveryConfirmedAt": "2026-09-02T11:00:00Z"
+      }
+    ],
+    "entries": [
+      {
+        "ref": "ALM-TEST",
+        "expediente": "SW-2026-0100",
+        "buque": "MISMO BUQUE",
+        "estado": "En stock",
+        "archivado": false,
+        "fechaRecepcion": "2026-09-03T11:00:00Z",
+        "bultos": 2,
+        "peso": "100 KG",
+        "fotos": [
+          {
+            "id": "foto-original"
+          }
+        ],
+        "documentosRecepcion": [
+          {
+            "id": "pdf-original"
+          }
+        ]
+      }
+    ],
+    "archived": false
+  },
+  {
+    "name": "string false flag is not a delivery",
+    "cases": [
+      {
+        "id": "SW-2026-0100",
+        "buque": "MISMO BUQUE",
+        "operationalFlow": {
+          "delivery": "false"
+        }
+      }
+    ],
+    "entries": [
+      {
+        "ref": "ALM-TEST",
+        "expediente": "SW-2026-0100",
+        "buque": "MISMO BUQUE",
+        "estado": "En stock",
+        "archivado": false,
+        "fechaRecepcion": "2026-09-01T10:00:00Z",
+        "bultos": 2,
+        "peso": "100 KG",
+        "fotos": [
+          {
+            "id": "foto-original"
+          }
+        ],
+        "documentosRecepcion": [
+          {
+            "id": "pdf-original"
+          }
+        ]
+      }
+    ],
+    "archived": false
+  },
+  {
+    "name": "Supply uses the same closed case rule",
+    "cases": [
+      {
+        "id": "SW-2026-0100",
+        "buque": "MISMO BUQUE",
+        "estado": "Completado",
+        "serviceType": "vessel_supply"
+      }
+    ],
+    "entries": [
+      {
+        "ref": "ALM-TEST",
+        "expediente": "SW-2026-0100",
+        "buque": "MISMO BUQUE",
+        "estado": "En stock",
+        "archivado": false,
+        "fechaRecepcion": "2026-09-01T10:00:00Z",
+        "bultos": 2,
+        "peso": "100 KG",
+        "fotos": [
+          {
+            "id": "foto-original"
+          }
+        ],
+        "documentosRecepcion": [
+          {
+            "id": "pdf-original"
+          }
+        ]
+      }
+    ],
+    "archived": true
+  },
+  {
+    "name": "storage pickup uses the same closed case rule",
+    "cases": [
+      {
+        "id": "SW-2026-0100",
+        "buque": "MISMO BUQUE",
+        "estado": "Completado",
+        "serviceType": "storage_only"
+      }
+    ],
+    "entries": [
+      {
+        "ref": "ALM-TEST",
+        "expediente": "SW-2026-0100",
+        "buque": "MISMO BUQUE",
+        "estado": "En stock",
+        "archivado": false,
+        "fechaRecepcion": "2026-09-01T10:00:00Z",
+        "bultos": 2,
+        "peso": "100 KG",
+        "fotos": [
+          {
+            "id": "foto-original"
+          }
+        ],
+        "documentosRecepcion": [
+          {
+            "id": "pdf-original"
+          }
+        ]
+      }
+    ],
+    "archived": true
+  },
+  {
+    "name": "manual archive not reopened",
+    "cases": [
+      {
+        "id": "SW-2026-0100",
+        "buque": "MISMO BUQUE",
+        "estado": "En curso"
+      }
+    ],
+    "entries": [
+      {
+        "ref": "ALM-TEST",
+        "expediente": "SW-2026-0100",
+        "buque": "MISMO BUQUE",
+        "estado": "Expedido",
+        "archivado": true,
+        "fechaRecepcion": "2026-09-01T10:00:00Z",
+        "bultos": 2,
+        "peso": "100 KG",
+        "fotos": [
+          {
+            "id": "foto-original"
+          }
+        ],
+        "documentosRecepcion": [
+          {
+            "id": "pdf-original"
+          }
+        ],
+        "archiveReason": "manual",
+        "salida": "2026-09-02T09:00:00Z"
+      }
+    ],
+    "archived": true
+  },
+  {
+    "name": "duplicate case identifiers are not guessed",
+    "cases": [
+      {
+        "id": "SW-2026-0100",
+        "buque": "MISMO BUQUE",
+        "estado": "Completado"
+      },
+      {
+        "id": "SW-2026-0100",
+        "estado": "En curso"
+      }
+    ],
+    "entries": [
+      {
+        "ref": "ALM-TEST",
+        "expediente": "SW-2026-0100",
+        "buque": "MISMO BUQUE",
+        "estado": "En stock",
+        "archivado": false,
+        "fechaRecepcion": "2026-09-01T10:00:00Z",
+        "bultos": 2,
+        "peso": "100 KG",
+        "fotos": [
+          {
+            "id": "foto-original"
+          }
+        ],
+        "documentosRecepcion": [
+          {
+            "id": "pdf-original"
+          }
+        ]
+      }
+    ],
+    "archived": false
+  }
+]

@@ -1,6 +1,7 @@
 <?php
 declare(strict_types=1);
 require dirname(__DIR__) . '/_bootstrap.php';
+require_once __DIR__ . '/_overtime.php';
 
 ensure_schema();
 $user = require_roles(['finance', 'admin']);
@@ -17,6 +18,9 @@ $invoice = $payload['invoice'] ?? null;
 if (!is_array($invoice)) {
     respond(['error' => 'El borrador de factura no es válido.'], 422);
 }
+
+$overtimeError = overtime_submission_error($invoice);
+if ($overtimeError !== null) respond(['error' => $overtimeError], 422);
 
 $clientName = trim((string) ($invoice['cliente'] ?? ''));
 $clientProfile = $invoice['clientProfile'] ?? [];

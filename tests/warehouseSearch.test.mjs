@@ -1,0 +1,11 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {warehouseMatchesSearch as matches} from '../src/warehouseSearch.mjs';
+const entry={ref:'ALM-317',expediente:'SW-2026-0048',buque:'MONTE EXPRESS',zona:'A-12',tracking:'AWB123',mercancias:[{tipo:'PALLET',descripcion:'Material eléctrico',seguimiento:'TRACK-99'}]};
+const related={cliente:'LIMANI',puerto:'Palamós',purchaseOrder:'POA604877'};
+test('blank query shows every row without mutation',()=>{const original=JSON.stringify(entry);assert.ok(matches(entry,'  '));assert.equal(JSON.stringify(entry),original)});
+test('case and accents are ignored',()=>{assert.ok(matches(entry,'monte EXPRESS'));assert.ok(matches(entry,'electrico'));assert.ok(matches(entry,'palamos',related))});
+test('reference, case, location and tracking are searchable',()=>{for(const query of ['ALM-317','0048','a-12','AWB123','track-99'])assert.ok(matches(entry,query),query)});
+test('multiple terms may match different fields, but all must match',()=>{assert.ok(matches(entry,'monte pallet a-12'));assert.equal(matches(entry,'monte caja'),false)});
+test('related client and PO are searchable without exposing unrelated case fields',()=>{assert.ok(matches(entry,'limani poa604877',related));assert.equal(matches(entry,'limani'),false)});
+test('incomplete or unlinked entries and malformed goods are safe',()=>{assert.ok(matches({},''));assert.equal(matches({},'monte'),false);assert.ok(matches({buque:'WASA',mercancias:null},'wasa'));assert.ok(matches({...entry,estado:'Expedido'},'expedido'))});
