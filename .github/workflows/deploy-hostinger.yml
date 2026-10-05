@@ -52,6 +52,7 @@ jobs:
           php tests/expense-service.test.php
           php tests/warehouse-archive.test.php
           php tests/captain-contact-import.test.php
+          node --test tests/captain-whatsapp.test.mjs
           php tests/overtime-server.test.php
 
       - name: Preparar configuración privada
