@@ -33,7 +33,7 @@ export function applyOvertime(invoice, services = [], {cancelled = false} = {}) 
   if (!cancelled) for (const [index,line] of base.entries()) {
     if (!isServiceLine(line)) continue;
     const manual = line.overtimeSchedule?.mode === 'manual';
-    const schedules = manual ? [line.overtimeSchedule] : automaticTransportLine(line) ? records : [];
+    const schedules = manual ? [line.overtimeSchedule] : line.transportServiceKey ? records.filter(record=>String(record.transporte||record.id||[record.fecha,record.inicio,record.origen,record.destino].join('|'))===line.transportServiceKey) : line.transportSplitUnmatched ? [] : automaticTransportLine(line) ? records : [];
     const statuses = schedules.map(nightService);
     const units = Number(line.units) || 0;
     const ambiguous = !manual && schedules.length > 1 && units !== schedules.length;

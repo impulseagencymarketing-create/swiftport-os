@@ -61,6 +61,16 @@ export function isPortTransportLine(line){
     !/AIRPORT|AEROPUERTO|FROM AGP|FROM SVQ/.test(name) &&
     /^(?:TRANSPORT(?:E)?\b|DELIVERY\s+VESSEL\b|ENTREGA\s+(?:A\s+)?BUQUE\b)/.test(name);
 }
+export function quoteLimaniService({port,weight,service}){
+  const unavailable=message=>({port:portKey(port),weight:Number(weight),price:null,status:'missing',message});
+  if(!service)return unavailable('Transporte sin ruta vinculada. Revisa este servicio e introduce su precio manual.');
+  const origin=normalize(service.origen),destination=normalize(service.destino);
+  if(!/\bALMACEN\b|\bWAREHOUSE\b|BLUESPACE/.test(origin)||/\bALMACEN\b|\bWAREHOUSE\b|BLUESPACE/.test(destination))return unavailable('Recogida o ruta especial sin tarifa automática. Introduce el precio de este transporte.');
+  const key=portKey(port);
+  const mentionedPorts=Object.keys(LIMANI_PORT_RATES).filter(name=>new RegExp(`\\b${name}\\b`).test(destination));
+  if(!destination||mentionedPorts.some(name=>name!==key)||(!/\bBUQUE\b|\bVESSEL\b|\bPUERTO\b|\bPORT\b/.test(destination)&&!mentionedPorts.includes(key)))return unavailable('Destino sin tarifa verificable. Revisa la ruta y el precio de este transporte.');
+  return quoteLimaniTransport({port,weight,origins:[service.origen]});
+}
 export function applyPortRate(line,quote){
   if(quote.status!=='available'||!isPortTransportLine(line))return line;
   return {...line,price:quote.price,portTariff:{port:quote.port,origin:quote.origin,weight:quote.weight,price:quote.price,source:quote.source}};
