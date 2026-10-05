@@ -1,6 +1,7 @@
 <?php
 declare(strict_types=1);
 require __DIR__ . '/_bootstrap.php';
+require __DIR__ . '/_finance_revision.php';
 
 ensure_schema();
 $user = require_roles(['finance', 'admin']);
@@ -59,8 +60,19 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'PUT') {
              concept=VALUES(concept), amount=VALUES(amount), status=VALUES(status), due_date=VALUES(due_date),
              invoice_data=VALUES(invoice_data)'
         );
+        $invoiceVersions = [];
+        $lockInvoice = $pdo->prepare('SELECT invoice_data FROM app_invoices WHERE id = ? FOR UPDATE');
+        usort($invoices, static fn(array $a, array $b): int => strcmp((string) ($a['id'] ?? ''), (string) ($b['id'] ?? '')));
         foreach ($invoices as $invoice) {
+            $invoiceId = (string) ($invoice['id'] ?? '');
+            if ($invoiceId === '' || strlen($invoiceId) > 40 || mb_strlen((string) ($invoice['concepto'] ?? '')) > 220) {
+                throw new InvalidArgumentException('Revisa el identificador y el concepto general (máximo 220 caracteres). No se ha guardado ningún cambio.');
+            }
+            $lockInvoice->execute([$invoiceId]);
+            $stored = json_decode((string) ($lockInvoice->fetchColumn() ?: '{}'), true) ?: [];
             $invoiceData = $invoice;
+            $invoiceData['financeRevision'] = next_finance_revision($invoice, $stored);
+            $invoiceVersions[$invoiceId] = $invoiceData['financeRevision'];
             unset(
                 $invoiceData['id'],
                 $invoiceData['expediente'],
@@ -74,20 +86,22 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'PUT') {
                 substr((string) ($invoice['id'] ?? ''), 0, 40),
                 substr((string) ($invoice['expediente'] ?? ''), 0, 40),
                 substr((string) ($invoice['cliente'] ?? ''), 0, 160),
-                substr((string) ($invoice['concepto'] ?? ''), 0, 220),
+                (string) ($invoice['concepto'] ?? ''),
                 (float) ($invoice['importe'] ?? 0),
                 substr((string) ($invoice['estado'] ?? ''), 0, 40),
                 substr((string) ($invoice['vencimiento'] ?? ''), 0, 40),
-                json_encode($invoiceData, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+                json_encode($invoiceData, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR),
             ]);
         }
+        audit((int) $user['id'], 'finance.update', ['invoiceVersions' => $invoiceVersions]);
         $pdo->commit();
     } catch (Throwable $error) {
         $pdo->rollBack();
+        if ($error instanceof FinanceConflict) respond(['error' => $error->getMessage()], 409);
+        if ($error instanceof InvalidArgumentException) respond(['error' => $error->getMessage()], 422);
         throw $error;
     }
-    audit((int) $user['id'], 'finance.update');
-    respond(['ok' => true]);
+    respond(['ok' => true, 'invoiceVersions' => $invoiceVersions]);
 }
 
 require_method('GET');
