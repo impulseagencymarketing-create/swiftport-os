@@ -10,6 +10,27 @@ test('boundary convention, decimals, accents and port prefixes',()=>{
   for(const [weight,price] of [[0.1,350],[35,350],[35.01,370],[250.01,400],[500.01,450]])assert.equal(quoteLimaniTransport({port:'Puerto de Tarragona',weight}).price,price);
   assert.equal(quoteLimaniTransport({port:' PALAMÓS ',weight:100}).price,380);
 });
+
+test('Vinaròs uses Alcanar prices at every tier without changing the destination',()=>{
+  for(const port of ['Vinaròs','VINAROS','Vinaroz',' Puerto de Vinaròs ','Port de Vinaròs']){
+    for(const weight of [1,35,35.01,250,250.01,500,500.01,2500]){
+      const quote=quoteLimaniTransport({port,weight,origins:['Almacén Swiftport - Bluespace El Prat']});
+      assert.equal(quote.price,quoteLimaniTransport({port:'Alcanar',weight}).price);
+      assert.equal(quote.status,'available');
+      assert.equal(quote.port,'VINAROS');
+      assert.equal(quote.message,'');
+      assert.match(quote.source,/Equivalencia confirmada/);
+    }
+  }
+  assert.equal(quoteLimaniTransport({port:'Vinaròs',weight:100,origins:['Almacén Valencia']}).price,null);
+  assert.equal(quoteLimaniTransport({port:'Vinaròs',weight:2501}).price,null);
+  assert.equal(quoteLimaniTransport({port:'Vinaròs',weight:0}).price,null);
+  const manual={id:'transport',item:'TRANSPORT',price:123.45,units:1,detail:'Vinaròs'};
+  const quote=quoteLimaniTransport({port:'Vinaròs',weight:100});
+  assert.equal(manual.price,123.45);
+  assert.equal(applyPortRate(manual,quote).price,540);
+  assert.equal(manual.price,123.45);
+});
 test('Unknown ports and out-of-range weights have no price',()=>{
   for(const port of ['Sagunto','Castellón',''])assert.equal(quoteLimaniTransport({port,weight:100}).price,null);
   for(const weight of [0,-1,undefined,NaN,Infinity,2500.01])assert.equal(quoteLimaniTransport({port:'Tarragona',weight}).price,null);

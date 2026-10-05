@@ -1,6 +1,8 @@
 // Local sources: RATES 2026 - SWIFTPORT LOGISTIC - LIMANI BARCELONA / VALENCIA / A CORUÑA.
 // Interport sources: 2026 - TARIFAS PUERTOS CERCA DE BARCELONA.
 const tiers=[35,250,500,2500];
+// Operator-confirmed equivalence: Vinaròs uses Alcanar's transport tariff.
+const alcanarTransportRates=[520,540,580,650];
 export const LIMANI_LOCAL_RATES={
   reception:[[35,15],[250,60],[500,130],[2500,235]],
   airportToWarehouse:[[35,60],[250,140],[500,250],[2500,350]],
@@ -16,11 +18,13 @@ export const LIMANI_PORT_RATES={
   'A CORUNA':[40,70,210,350],
   TARRAGONA:[350,370,400,450],
   PALAMOS:[360,380,410,460],
-  ALCANAR:[520,540,580,650]
+  ALCANAR:alcanarTransportRates,
+  VINAROS:alcanarTransportRates
 };
 const normalize=value=>String(value||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toUpperCase().trim().replace(/\s+/g,' ');
 export const portKey=value=>{
   const key=normalize(value).replace(/^(?:PUERTO DE|PORT DE|PORT OF|PUERTO|PORT)\s+/,'');
+  if(key==='VINAROZ')return 'VINAROS';
   return /^(?:LA )?CORUNA$/.test(key)?'A CORUNA':key;
 };
 const localPorts=['BARCELONA','VALENCIA','A CORUNA'];
@@ -49,7 +53,7 @@ export function quoteLimaniTransport({port,weight,origins=[]}){
   if(!Number.isFinite(base.weight)||base.weight<=0)return missing('Falta un peso válido para seleccionar la tarifa de transporte.');
   if(base.weight>2500)return missing('Peso superior a 2.500 kg: fuera de tabla. Solicita una tarifa específica.');
   const index=tiers.findIndex(limit=>base.weight<=limit);
-  return {...base,status:'available',price:LIMANI_PORT_RATES[key][index],maxKg:tiers[index],source:local?`LIMANI · ${key==='A CORUNA'?'A Coruña':key} local 2026`:'LIMANI · Puertos cerca de Barcelona 2026',message:''};
+  return {...base,status:'available',price:LIMANI_PORT_RATES[key][index],maxKg:tiers[index],source:local?`LIMANI · ${key==='A CORUNA'?'A Coruña':key} local 2026`:key==='VINAROS'?'LIMANI · Vinaròs = Alcanar · Equivalencia confirmada':'LIMANI · Puertos cerca de Barcelona 2026',message:''};
 }
 export function isPortTransportLine(line){
   const name=normalize(line?.item);

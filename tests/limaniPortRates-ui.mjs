@@ -5,11 +5,12 @@ const require=createRequire(process.env.PLAYWRIGHT_PACKAGE||import.meta.url);
 const {chromium}=require('playwright');
 const browser=await chromium.launch({channel:'msedge',headless:true});
 try{
- for(const [port,expected,origin='Barcelona'] of [['Tarragona',400],['Palamós',410],['Alcanar',580],['Barcelona',210],['Valencia',210,'Valencia'],['A Coruña',210,'A Coruña'],['Valencia',null,'Barcelona'],['Sagunto',null]]){
+ for(const [port,expected,origin='Barcelona'] of [['Tarragona',400],['Palamós',410],['Alcanar',580],['Vinaròs',580],['VINAROS',580],['Barcelona',210],['Valencia',210,'Valencia'],['A Coruña',210,'A Coruña'],['Valencia',null,'Barcelona'],['Sagunto',null]]){
   const context=await browser.newContext();
   const page=await context.newPage();const errors=[];let holded=0;
   page.on('pageerror',error=>errors.push(error.message));
-  await page.route('**/*',route=>route.request().url().startsWith('http://127.0.0.1:5184/')?route.continue():route.abort());
+  const baseUrl=process.env.TEST_BASE_URL||'http://127.0.0.1:5184/';
+  await page.route('**/*',route=>route.request().url().startsWith(baseUrl)?route.continue():route.abort());
   await page.route('**/src/data.js*',async route=>{
    const response=await route.fetch();let body=await response.text();
    body=body.replace(/(\{id: ["']SW-2026-0044["'][^\n]*)/,line=>line.replace('UME Shipping','Limani').replace('Bilbao',port));
@@ -19,7 +20,7 @@ try{
    await route.fulfill({response,body});
   });
   await page.route('**/api/holded/**',route=>{holded++;return route.abort()});
-  await page.goto('http://127.0.0.1:5184/');
+  await page.goto(baseUrl);
   await page.getByRole('button',{name:'Facturación',exact:true}).click();
   const notice=page.getByRole('button',{name:'Entendido',exact:true});if(await notice.count())await notice.click();
   const open=()=>page.getByRole('button',{name:'Editar BOR-2026-0044',exact:true}).click();
