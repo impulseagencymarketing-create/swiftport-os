@@ -29,6 +29,11 @@ $pdo->exec(
 $seed = $pdo->prepare("INSERT IGNORE INTO app_captain_contacts (vessel_name, captain_name, phone_e164, imo, mmsi, language, notes, created_by) VALUES (?, '', ?, ?, ?, ?, ?, ?)");
 $seed->execute(['ESKE', '+905345007830', '9479632', '249930000', 'Turco / Inglés', 'Contacto facilitado durante la operativa. Confirmar el nombre del capitán y actualizarlo cuando cambie el mando.', (int) $user['id']]);
 
+// Contacts explicitly supplied by the operator. Insert missing records only;
+// never overwrite edits or reactivate a contact deliberately archived later.
+require_once __DIR__ . '/_captain_contact_import.php';
+import_requested_captain_contacts($pdo, (int) $user['id']);
+
 
 
 $normalizePhone = static function (string $value): string {
