@@ -1,4 +1,5 @@
 export const OVERTIME_RATE = 0.30;
+import {isManualInvoice,markManualInvoice} from './manualInvoice.mjs';
 export const OVERTIME_MARGIN_MINUTES = 60;
 const round = value => Math.round((value + Number.EPSILON) * 100) / 100;
 export const isAutoOvertime = line => String(line?.id || '').startsWith('auto-overtime:');
@@ -26,6 +27,11 @@ export const isServiceLine = line => {
 const automaticTransportLine = line => ['transport','delivery-vessel','survey'].includes(line.id) || /^(tariff-)?(warehouse-vessel|delivery-vessel)(-|$)/.test(String(line.id)) || /^(TRANSPORT FROM WAREHOUSE TO VESSEL|DELIVERY VESSEL|SURVEY)/i.test(line.item || '');
 export function applyOvertime(invoice, services = [], {cancelled = false} = {}) {
   if (overtimeLocked(invoice)) return invoice;
+  if (isManualInvoice(invoice)) {
+    // In manual billing every visible row is final, including any overtime row.
+    const result=markManualInvoice(invoice);
+    return {...result,manualEditedAt:invoice.manualEditedAt,margen:round(result.importe-(Number(invoice.coste)||0))};
+  }
   const base = (invoice.lines || []).filter(line => !isAutoOvertime(line));
   const records = [...new Map(services.filter(s => !/cancel|anulad/i.test(s.estado || '')).map(s => [s.transporte || s.id || [s.fecha,s.inicio,s.fin,s.origen,s.destino].join('|'),s])).values()];
   const manualSurcharge = base.some(line => /\bOVERTIME\b|RECARGO NOCTURNO/i.test(line.item || ''));

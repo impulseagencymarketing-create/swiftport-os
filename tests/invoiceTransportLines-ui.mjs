@@ -55,6 +55,7 @@ try{
   assert.equal(await rows.count(),2);
   assert.equal(await rows.nth(0).getByLabel('Precio',{exact:true}).inputValue(),'111');
   assert.equal(await rows.nth(1).getByLabel('Precio',{exact:true}).inputValue(),'222');
+  await modal.getByRole('checkbox').check();
   await modal.getByRole('button',{name:'Enviar proforma a Holded',exact:true}).click();
   await page.getByText('Prueba local: envío simulado.',{exact:true}).waitFor();
   const sent=payload.invoice.lines.filter(line=>line.item==='TRANSPORT');

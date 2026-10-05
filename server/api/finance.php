@@ -15,6 +15,16 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'PUT') {
         respond(['error' => 'Los datos financieros no son válidos.'], 422);
     }
     $pdo = db();
+    // Full snapshots are written in the same transaction as the invoice.
+    $pdo->exec('CREATE TABLE IF NOT EXISTS app_invoice_revisions (
+        id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+        invoice_id VARCHAR(40) NOT NULL,
+        revision BIGINT UNSIGNED NOT NULL,
+        snapshot JSON NOT NULL,
+        created_by BIGINT UNSIGNED NULL,
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE KEY invoice_revision (invoice_id, revision)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci');
     $pdo->beginTransaction();
     try {
         $clientStatement = $pdo->prepare(
@@ -61,7 +71,8 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'PUT') {
              invoice_data=VALUES(invoice_data)'
         );
         $invoiceVersions = [];
-        $lockInvoice = $pdo->prepare('SELECT invoice_data FROM app_invoices WHERE id = ? FOR UPDATE');
+        $lockInvoice = $pdo->prepare('SELECT * FROM app_invoices WHERE id = ? FOR UPDATE');
+        $saveRevision = $pdo->prepare('INSERT IGNORE INTO app_invoice_revisions (invoice_id, revision, snapshot, created_by) VALUES (?, ?, ?, ?)');
         usort($invoices, static fn(array $a, array $b): int => strcmp((string) ($a['id'] ?? ''), (string) ($b['id'] ?? '')));
         foreach ($invoices as $invoice) {
             $invoiceId = (string) ($invoice['id'] ?? '');
@@ -69,10 +80,17 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'PUT') {
                 throw new InvalidArgumentException('Revisa el identificador y el concepto general (máximo 220 caracteres). No se ha guardado ningún cambio.');
             }
             $lockInvoice->execute([$invoiceId]);
-            $stored = json_decode((string) ($lockInvoice->fetchColumn() ?: '{}'), true) ?: [];
+            $storedRow = $lockInvoice->fetch();
+            $stored = json_decode((string) ($storedRow['invoice_data'] ?? '{}'), true) ?: [];
+            if ($storedRow) {
+                $stored = array_merge($stored, ['id'=>$storedRow['id'], 'expediente'=>$storedRow['case_ref'], 'cliente'=>$storedRow['client_name'], 'concepto'=>$storedRow['concept'], 'importe'=>(float)$storedRow['amount'], 'estado'=>$storedRow['status'], 'vencimiento'=>$storedRow['due_date']]);
+            }
+            protect_manual_finance($invoice, $stored);
             $invoiceData = $invoice;
             $invoiceData['financeRevision'] = next_finance_revision($invoice, $stored);
             $invoiceVersions[$invoiceId] = $invoiceData['financeRevision'];
+            if ($storedRow) $saveRevision->execute([$invoiceId, (int)($stored['financeRevision'] ?? 0), json_encode($stored, JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR), (int)$user['id']]);
+            $saveRevision->execute([$invoiceId, $invoiceData['financeRevision'], json_encode($invoiceData, JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR), (int)$user['id']]);
             unset(
                 $invoiceData['id'],
                 $invoiceData['expediente'],

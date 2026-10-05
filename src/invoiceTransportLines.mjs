@@ -1,4 +1,5 @@
 import {overtimeLocked,isAutoOvertime} from './overtime.mjs';
+import {isManualInvoice} from './manualInvoice.mjs';
 import {splitTransportNotes} from './invoiceTransportDescription.mjs';
 
 export const transportServiceKey=record=>String(record?.transporte||record?.id||[record?.fecha,record?.inicio,record?.origen,record?.destino].join('|'));
@@ -21,7 +22,7 @@ function described(line,service){
 
 // A legacy price is retained per unit. Never reprice saved or issued documents.
 export function separateTransportLines(invoice,services=[],{fresh=false,quoteFor=()=>null}={}){
-  if(overtimeLocked(invoice))return invoice;
+  if(overtimeLocked(invoice)||isManualInvoice(invoice))return invoice;
   const records=[...new Map(services.map(s=>[transportServiceKey(s),s])).values()];
   const lines=invoice.lines||[];
   const targets=lines.filter(transportLine);

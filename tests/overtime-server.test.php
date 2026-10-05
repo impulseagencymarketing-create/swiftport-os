@@ -8,3 +8,6 @@ foreach([[],['overtimePolicyVersion'=>'old'],['overtimePolicyVersion'=>'night-30
     if(overtime_submission_error($invalid)===null)throw new RuntimeException('Old/unreviewed invoice accepted');
 }
 echo "OK: overtime server submission guard\n";
+if(overtime_submission_error(['manualEdited'=>true,'manualPricingConfirmed'=>true])!==null)throw new RuntimeException('Approved manual invoice rejected');
+if(overtime_submission_error(['manualEdited'=>true,'manualPricingConfirmed'=>false])===null)throw new RuntimeException('Unreviewed manual invoice accepted');
+echo "OK: explicit manual pricing review accepted, no silent overtime bypass\n";
