@@ -1,12 +1,13 @@
 import {createRequire} from 'node:module';
 import assert from 'node:assert/strict';
+import {billingToday} from '../src/invoiceDates.mjs';
 const {chromium}=createRequire(process.env.PLAYWRIGHT_PACKAGE||import.meta.url)('playwright');
 const browser=await chromium.launch({channel:'msedge',headless:true});
 const base=process.env.TEST_BASE_URL||'http://127.0.0.1:5186/';
 const caseRef='SW-2026-0211',invoiceId='BOR-2026-0211';
 const vessel={id:caseRef,buque:'RDO CONCORD',cliente:'Limani',puerto:'Valencia',purchaseOrder:'POA634715',estado:'Completado',progreso:100,bultos:1,peso:'3 kg',servicios:['Transporte'],eta:'2026-10-03'};
 let operational={cases:[vessel],transports:[],warehouseEntries:[],calendarEvents:[],customs:[],providers:[],vessels:[]};
-let saved={id:invoiceId,expediente:caseRef,cliente:'Limani',buque:'RDO CONCORD',puerto:'Valencia',concepto:'RDO CONCORD POA634715',estado:'Borrador',importe:98.5,financeRevision:1,lines:[{id:'transport',item:'TRANSPORT FROM WAREHOUSE TO VESSEL',detail:'1 BOX 3 KGS',price:98.5,units:1,tax:'0%'}]};
+let saved={id:invoiceId,expediente:caseRef,cliente:'Limani',buque:'RDO CONCORD',puerto:'Valencia',concepto:'RDO CONCORD POA634715',estado:'Borrador',vencimiento:'2020-01-01',importe:98.5,financeRevision:1,lines:[{id:'transport',item:'TRANSPORT FROM WAREHOUSE TO VESSEL',detail:'1 BOX 3 KGS',price:98.5,units:1,tax:'0%'}]};
 let holdedPayload;const errors=[];
 try{
  const context=await browser.newContext({viewport:{width:1440,height:1000}}),page=await context.newPage();
@@ -30,6 +31,7 @@ try{
  const open=()=>page.getByRole('button',{name:'Editar '+invoiceId,exact:true}).click();
  const modal=page.locator('.invoice-detail-modal'),rows=modal.locator('.invoice-line-row');
  await page.goto(base);await billing();await open();
+ assert.equal(await modal.getByLabel('Vencimiento',{exact:true}).inputValue(),billingToday());
  await rows.first().locator('textarea').fill('7 BOXES 875 KGS - PESO CORREGIDO');
  await rows.first().getByLabel('Precio',{exact:true}).fill('187.35');
  await rows.first().getByLabel('Uds.',{exact:true}).fill('2');
@@ -42,6 +44,7 @@ try{
  }
  await modal.getByRole('button',{name:'Guardar borrador',exact:true}).click();await modal.waitFor({state:'hidden'});
  assert.equal(saved.manualEdited,true);assert.equal(saved.lines.length,3);assert.equal(saved.importe,485.2);
+ assert.equal(saved.vencimiento,billingToday());
  const expected=structuredClone(saved.lines);
  // Operational data change between sessions must not regenerate the billing draft.
  operational.cases[0]={...operational.cases[0],peso:'2 kg',bultos:1};
@@ -60,6 +63,7 @@ try{
  assert.deepEqual(saved.lines,expected);
  assert.equal(holdedPayload.invoice.importe,485.2);
  assert.equal(holdedPayload.invoice.manualPricingConfirmed,true);
+ assert.equal(holdedPayload.invoice.vencimiento,billingToday());
  assert.deepEqual(errors,[]);
  console.log('OK: RDO CONCORD fixture, corrected kg, added rows, special prices, units, reload after operational change, exact mocked Holded payload');
 }finally{await browser.close()}

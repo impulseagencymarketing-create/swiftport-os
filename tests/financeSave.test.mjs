@@ -63,3 +63,10 @@ test('duplicate filtering does not drop a draft that was edited after the filter
   const newer=edit('B',{importe:345})(baseline);
   assert.deepEqual(mergeFinanceSnapshot(newer,baseline,proposed).invoices.map(row=>row.id),['A','B']);
 });
+
+test('acknowledged server due date is retained if the day changed during the request',async()=>{
+ let state=initial();
+ const writer=createFinanceWriter({read:()=>state,commit:next=>state=next,send:async()=>({ok:true,invoiceVersions:{A:3},invoiceDueDates:{A:'2026-10-09'}})});
+ await writer(edit('A',{vencimiento:'2026-10-08'}));
+ assert.equal(state.invoices[0].vencimiento,'2026-10-09');
+});

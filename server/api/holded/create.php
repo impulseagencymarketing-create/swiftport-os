@@ -2,6 +2,7 @@
 declare(strict_types=1);
 require dirname(__DIR__) . '/_bootstrap.php';
 require_once __DIR__ . '/_overtime.php';
+require_once dirname(__DIR__) . '/_invoice_dates.php';
 
 ensure_schema();
 $user = require_roles(['finance', 'admin']);
@@ -73,13 +74,6 @@ if ($purchaseOrder !== '') {
     }
     unset($line);
 }
-function holded_timestamp(?string $date): int
-{
-    $date = trim((string) $date);
-    $timestamp = $date === '' ? false : strtotime($date . ' 00:00:00');
-    return $timestamp ?: (strtotime('today') ?: time());
-}
-
 function holded_safe_error(mixed $decoded, string $raw): string
 {
     $candidates = [];
@@ -221,10 +215,11 @@ if (!$holdedItems) {
 
 $docType = 'proform';
 $notes = trim((string) ($invoice['observaciones'] ?? ''));
+$documentDates = invoice_document_dates((string) ($invoice['vencimiento'] ?? ''));
 $request = [
     'contactName' => $clientFiscalName ?: $clientName,
-    'date' => holded_timestamp(date('Y-m-d')),
-    'dueDate' => holded_timestamp((string) ($invoice['vencimiento'] ?? '')),
+    'date' => $documentDates['issueTimestamp'],
+    'dueDate' => $documentDates['dueTimestamp'],
     'desc' => $concept,
     'notes' => $notes,
     'currency' => 'EUR',
@@ -294,5 +289,7 @@ respond([
     'holdedId' => $holdedId,
     'holdedNumber' => $holdedNumber,
     'holdedAmount' => $holdedAmount,
+    'issueDate' => $documentDates['issueDate'],
+    'dueDate' => $documentDates['dueDate'],
     'holdedStatus' => 'Proforma simple creada',
 ]);

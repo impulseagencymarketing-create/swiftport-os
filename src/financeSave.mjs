@@ -39,7 +39,7 @@ export function createFinanceWriter({read, commit, send, protect = (_, next) => 
       const result = await send({clients, invoices});
       if (result?.ok !== true) throw new Error('El servidor no confirmó el guardado. Vuelve a intentarlo.');
       const versions = result?.invoiceVersions || {};
-      const saved = {...next, invoices: next.invoices.map(row => ({...row, financeRevision: versions[row.id] ?? current.invoices.find(old => old.id === row.id)?.financeRevision ?? 0}))};
+      const saved = {...next, invoices: next.invoices.map(row => ({...row, ...(result.invoiceDueDates?.[row.id] ? {vencimiento:result.invoiceDueDates[row.id]} : {}), financeRevision: versions[row.id] ?? current.invoices.find(old => old.id === row.id)?.financeRevision ?? 0}))};
       commit(saved);
       return saved;
     };

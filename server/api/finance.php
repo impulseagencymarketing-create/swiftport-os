@@ -2,6 +2,7 @@
 declare(strict_types=1);
 require __DIR__ . '/_bootstrap.php';
 require __DIR__ . '/_finance_revision.php';
+require __DIR__ . '/_invoice_dates.php';
 
 ensure_schema();
 $user = require_roles(['finance', 'admin']);
@@ -71,11 +72,14 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'PUT') {
              invoice_data=VALUES(invoice_data)'
         );
         $invoiceVersions = [];
+        $invoiceDueDates = [];
         $lockInvoice = $pdo->prepare('SELECT * FROM app_invoices WHERE id = ? FOR UPDATE');
         $saveRevision = $pdo->prepare('INSERT IGNORE INTO app_invoice_revisions (invoice_id, revision, snapshot, created_by) VALUES (?, ?, ?, ?)');
         usort($invoices, static fn(array $a, array $b): int => strcmp((string) ($a['id'] ?? ''), (string) ($b['id'] ?? '')));
         foreach ($invoices as $invoice) {
+            $invoice = refresh_draft_due_date($invoice);
             $invoiceId = (string) ($invoice['id'] ?? '');
+            $invoiceDueDates[$invoiceId] = $invoice['vencimiento'] ?? '';
             if ($invoiceId === '' || strlen($invoiceId) > 40 || mb_strlen((string) ($invoice['concepto'] ?? '')) > 220) {
                 throw new InvalidArgumentException('Revisa el identificador y el concepto general (máximo 220 caracteres). No se ha guardado ningún cambio.');
             }
@@ -119,7 +123,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'PUT') {
         if ($error instanceof InvalidArgumentException) respond(['error' => $error->getMessage()], 422);
         throw $error;
     }
-    respond(['ok' => true, 'invoiceVersions' => $invoiceVersions]);
+    respond(['ok' => true, 'invoiceVersions' => $invoiceVersions, 'invoiceDueDates' => $invoiceDueDates]);
 }
 
 require_method('GET');

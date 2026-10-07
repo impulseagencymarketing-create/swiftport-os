@@ -56,6 +56,8 @@ jobs:
           node --test tests/invoiceTransportLines.test.mjs
           node --test tests/financeSave.test.mjs
           node --test tests/manualInvoice.test.mjs
+          node --test tests/invoiceDates.test.mjs
+          php tests/invoice-dates.test.php
           php tests/finance-revision.test.php
           php tests/overtime-server.test.php
 
