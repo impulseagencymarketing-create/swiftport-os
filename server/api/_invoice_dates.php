@@ -13,7 +13,7 @@ function invoice_document_dates(string $due, ?DateTimeImmutable $now = null): ar
 
 function refresh_draft_due_date(array $invoice, ?DateTimeImmutable $now = null): array
 {
-    if (in_array($invoice['estado'] ?? '', ['Enviado a Holded','Facturado','Cobrado','Archivado'], true)
+    if (!empty($invoice['groupedInto']) || in_array($invoice['estado'] ?? '', ['Enviado a Holded','Facturado','Cobrado','Archivado','Agrupado'], true)
         || !empty($invoice['holdedId']) || !empty($invoice['holdedNumber']) || !empty($invoice['holdedAt']) || !empty($invoice['holdedStatus'])) return $invoice;
     $invoice['vencimiento'] = invoice_document_dates((string)($invoice['vencimiento'] ?? ''), $now)['dueDate'];
     return $invoice;

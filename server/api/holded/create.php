@@ -3,6 +3,7 @@ declare(strict_types=1);
 require dirname(__DIR__) . '/_bootstrap.php';
 require_once __DIR__ . '/_overtime.php';
 require_once dirname(__DIR__) . '/_invoice_dates.php';
+require_once dirname(__DIR__) . '/_invoice_grouping.php';
 
 ensure_schema();
 $user = require_roles(['finance', 'admin']);
@@ -18,6 +19,31 @@ $payload = input();
 $invoice = $payload['invoice'] ?? null;
 if (!is_array($invoice)) {
     respond(['error' => 'El borrador de factura no es válido.'], 422);
+}
+
+// Share the lock with grouping: a source cannot be exported while it is being grouped.
+$pdo=db();
+billing_export_schema($pdo);
+try { billing_lock($pdo); } catch (InvalidArgumentException $error) { respond(['error'=>$error->getMessage()],409); }
+$invoiceId=(string)($invoice['id']??'');
+$find=$pdo->prepare('SELECT * FROM app_invoices WHERE id=?');$find->execute([$invoiceId]);$savedRow=$find->fetch();
+if(!$savedRow)respond(['error'=>'Guarda el borrador antes de enviarlo a Holded.'],409);
+$savedInvoice=billing_row($savedRow);
+if(!empty($savedInvoice['groupedInto']))respond(['error'=>'Este expediente está incluido en '.$savedInvoice['groupedInto'].'. Envía la factura conjunta, no el borrador individual.'],409);
+$export=$pdo->prepare('SELECT state,result FROM app_billing_exports WHERE invoice_id=?');$export->execute([$invoiceId]);$previousExport=$export->fetch();
+if($previousExport){
+    if($previousExport['state']==='sent')respond(json_decode($previousExport['result'],true));
+    respond(['error'=>'Ya hay un envío iniciado para este documento. Comprueba Holded antes de repetirlo para evitar duplicados.'],409);
+}
+if(billing_exported($savedInvoice)||($savedInvoice['estado']??'')==='Archivado')respond(['error'=>'Este documento ya fue enviado o está cerrado.'],409);
+if(billing_grouped($savedInvoice)){
+    foreach(['lines','concepto','cliente','sourceInvoiceIds','expedientes'] as $field)if(($invoice[$field]??null)!=($savedInvoice[$field]??null))respond(['error'=>'La factura conjunta cambió. Guarda y revisa la última versión antes de enviar.'],409);
+    $invoice=array_merge($savedInvoice,['clientProfile'=>$invoice['clientProfile']??[]]);
+}else{
+    foreach($pdo->query('SELECT invoice_data FROM app_invoices')->fetchAll() as $row){
+        $other=json_decode($row['invoice_data'],true)?:[];
+        if(billing_grouped($other)&&in_array($savedInvoice['expediente'],$other['expedientes']??[],true))respond(['error'=>'El expediente ya está incluido en una factura conjunta. Actualiza Facturación.'],409);
+    }
 }
 
 $overtimeError = overtime_submission_error($invoice);
@@ -229,9 +255,10 @@ if ($clientTaxId !== '') {
     $request['contactCode'] = $clientTaxId;
 }
 
+$reserve=$pdo->prepare("INSERT INTO app_billing_exports(invoice_id,state) VALUES (?,'sending')");$reserve->execute([$invoiceId]);
 [$status, $response, $usedAuth, $usedVersion] = holded_try_create_document($apiKey, $docType, $request);
 
-if ($status >= 400 && $status < 500) {
+if ($status >= 400 && $status < 500 && !billing_grouped($invoice)) {
     $fallbackRequest = $request;
     foreach ($fallbackRequest['items'] as $index => $line) {
         unset($fallbackRequest['items'][$index]['tax']);
@@ -251,6 +278,8 @@ if ($response === false) {
 
 $decoded = json_decode((string) $response, true);
 if ($status < 200 || $status >= 300) {
+    // Explicit rejection can be retried; network/5xx ambiguity stays reserved for reconciliation.
+    if($status>=400&&$status<500){$delete=$pdo->prepare('DELETE FROM app_billing_exports WHERE invoice_id=?');$delete->execute([$invoiceId]);}
     $safeMessage = 'Holded rechazó la proforma.';
     if ($status === 401 || $status === 403) {
         $safeMessage = 'Holded rechazó la clave API o permisos.';
@@ -275,6 +304,14 @@ if (!is_array($decoded)) {
 $holdedId = (string) ($decoded['id'] ?? $decoded['_id'] ?? $decoded['docId'] ?? '');
 $holdedNumber = (string) ($decoded['docNumber'] ?? $decoded['number'] ?? $decoded['num'] ?? '');
 $holdedAmount = is_numeric($decoded['total'] ?? null) ? round((float) $decoded['total'], 2) : round($total, 2);
+if($holdedId==='')respond(['error'=>'Holded no devolvió un identificador verificable. Revisa el documento en Holded antes de repetir el envío.'],502);
+
+$exportResult=[
+    'ok'=>true,'docType'=>$docType,'holdedId'=>$holdedId,'holdedNumber'=>$holdedNumber,'holdedAmount'=>$holdedAmount,
+    'issueDate'=>$documentDates['issueDate'],'dueDate'=>$documentDates['dueDate'],'holdedStatus'=>'Proforma simple creada',
+];
+$complete=$pdo->prepare("UPDATE app_billing_exports SET state='sent',result=? WHERE invoice_id=?");
+$complete->execute([json_encode($exportResult,JSON_UNESCAPED_UNICODE|JSON_THROW_ON_ERROR),$invoiceId]);
 
 audit((int) $user['id'], 'holded.proform.create', [
     'invoice' => substr((string) ($invoice['id'] ?? ''), 0, 40),

@@ -4,7 +4,7 @@ export function billingToday(now=new Date()) {
   return `${value('year')}-${value('month')}-${value('day')}`;
 }
 export function refreshDraftDueDate(invoice,now=new Date()) {
-  if(['Enviado a Holded','Facturado','Cobrado','Archivado'].includes(invoice?.estado)||invoice?.holdedId||invoice?.holdedNumber||invoice?.holdedAt||invoice?.holdedStatus)return invoice;
+  if(invoice?.groupedInto||['Enviado a Holded','Facturado','Cobrado','Archivado','Agrupado'].includes(invoice?.estado)||invoice?.holdedId||invoice?.holdedNumber||invoice?.holdedAt||invoice?.holdedStatus)return invoice;
   const today=billingToday(now),due=String(invoice?.vencimiento||'').trim();
   const valid=/^\d{4}-\d{2}-\d{2}$/.test(due)&&!Number.isNaN(Date.parse(due))&&new Date(due).toISOString().slice(0,10)===due;
   return valid&&due>=today?invoice:{...invoice,vencimiento:today};

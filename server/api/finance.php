@@ -3,6 +3,7 @@ declare(strict_types=1);
 require __DIR__ . '/_bootstrap.php';
 require __DIR__ . '/_finance_revision.php';
 require __DIR__ . '/_invoice_dates.php';
+require __DIR__ . '/_invoice_grouping.php';
 
 ensure_schema();
 $user = require_roles(['finance', 'admin']);
@@ -26,8 +27,13 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'PUT') {
         created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
         UNIQUE KEY invoice_revision (invoice_id, revision)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci');
+    billing_export_schema($pdo);
+    try { billing_lock($pdo); } catch (InvalidArgumentException $error) { respond(['error'=>$error->getMessage()],409); }
     $pdo->beginTransaction();
     try {
+        $storedInvoices=array_map('billing_row',$pdo->query('SELECT * FROM app_invoices ORDER BY id FOR UPDATE')->fetchAll());
+        $exportIds=array_fill_keys($pdo->query('SELECT invoice_id FROM app_billing_exports')->fetchAll(PDO::FETCH_COLUMN),true);
+        validate_invoice_group_batch($invoices,$storedInvoices,$exportIds);
         $clientStatement = $pdo->prepare(
             'INSERT INTO app_clients
              (code, name, contact, active_cases, reception_rate, storage_rate, transport_rate, surcharge_rate, client_profile, active)
@@ -128,6 +134,13 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'PUT') {
 
 require_method('GET');
 
+// Recover a confirmed export even if the browser closed before saving its response.
+billing_export_schema(db());
+$confirmedExports=[];
+foreach(db()->query("SELECT invoice_id,result FROM app_billing_exports WHERE state='sent'")->fetchAll() as $exportRow){
+    $confirmedExports[$exportRow['invoice_id']]=json_decode($exportRow['result'],true)?:[];
+}
+
 $caseRows = db()->query(
     'SELECT case_ref, amount FROM app_case_finance ORDER BY case_ref'
 )->fetchAll();
@@ -175,12 +188,12 @@ respond([
             'activo' => (bool) $row['active'],
         ];
     }, $clientRows),
-    'invoices' => array_map(static function (array $row): array {
+    'invoices' => array_map(static function (array $row) use ($confirmedExports): array {
         $extra = json_decode((string) ($row['invoice_data'] ?? ''), true);
         if (!is_array($extra)) {
             $extra = [];
         }
-        return array_merge($extra, [
+        $result = array_merge($extra, [
             'id' => $row['id'],
             'expediente' => $row['case_ref'],
             'cliente' => $row['client_name'],
@@ -189,5 +202,12 @@ respond([
             'estado' => $row['status'],
             'vencimiento' => $row['due_date'],
         ]);
+        $export=$confirmedExports[$row['id']]??null;
+        if($export&&!billing_exported($result))$result=array_merge($result,[
+            'estado'=>'Enviado a Holded','holdedId'=>$export['holdedId'],'holdedNumber'=>$export['holdedNumber'],
+            'holdedStatus'=>$export['holdedStatus'],'holdedDocType'=>$export['docType'],'holdedSentAmount'=>$export['holdedAmount'],
+            'vencimiento'=>$export['dueDate'],'holdedIssueDate'=>$export['issueDate'],
+        ]);
+        return $result;
     }, $invoiceRows),
 ]);
