@@ -1,4 +1,5 @@
 import {billingToday} from './invoiceDates.mjs';
+import {applyWristVat} from './wristVat.mjs';
 
 export const isGroupedInvoice = invoice => Array.isArray(invoice?.sourceInvoiceIds) && invoice.sourceInvoiceIds.length > 1;
 export const invoiceCaseRefs = invoice => isGroupedInvoice(invoice) ? invoice.expedientes || [] : [invoice?.expediente].filter(Boolean);
@@ -25,7 +26,7 @@ export function buildInvoiceGroup(sources, id, now = new Date()) {
     lines,observaciones:sources.map(row=>[row.expediente,row.observaciones].filter(Boolean).join('\n')).join('\n\n'),
     payment:sources[0].payment||'',coste:sources.reduce((sum,row)=>sum+Number(row.coste||0),0),
     manualEdited:true,manualEditedAt:now.toISOString(),manualPricingConfirmed:false,groupedAt:now.toISOString(),financeRevision:0};
-  return {...group,importe:groupSubtotal(group)};
+  return applyWristVat({...group,importe:groupSubtotal(group)});
 }
 
 export function groupFinanceInvoices(current, selections, id, now = new Date()) {

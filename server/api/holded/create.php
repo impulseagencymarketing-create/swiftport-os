@@ -46,6 +46,7 @@ if(billing_grouped($savedInvoice)){
     }
 }
 
+$invoice=apply_wrist_vat($invoice);
 $overtimeError = overtime_submission_error($invoice);
 if ($overtimeError !== null) respond(['error' => $overtimeError], 422);
 
@@ -258,7 +259,7 @@ if ($clientTaxId !== '') {
 $reserve=$pdo->prepare("INSERT INTO app_billing_exports(invoice_id,state) VALUES (?,'sending')");$reserve->execute([$invoiceId]);
 [$status, $response, $usedAuth, $usedVersion] = holded_try_create_document($apiKey, $docType, $request);
 
-if ($status >= 400 && $status < 500 && !billing_grouped($invoice)) {
+if ($status >= 400 && $status < 500 && !billing_grouped($invoice) && !is_wrist_invoice($invoice)) {
     $fallbackRequest = $request;
     foreach ($fallbackRequest['items'] as $index => $line) {
         unset($fallbackRequest['items'][$index]['tax']);
@@ -303,7 +304,12 @@ if (!is_array($decoded)) {
 
 $holdedId = (string) ($decoded['id'] ?? $decoded['_id'] ?? $decoded['docId'] ?? '');
 $holdedNumber = (string) ($decoded['docNumber'] ?? $decoded['number'] ?? $decoded['num'] ?? '');
-$holdedAmount = is_numeric($decoded['total'] ?? null) ? round((float) $decoded['total'], 2) : round($total, 2);
+$fallbackTotal=$total;
+if(is_wrist_invoice($invoice)){
+    $base=0;foreach($holdedItems as $line)$base+=(float)$line['subtotal']*(float)$line['units'];
+    $fallbackTotal=round($base,2)+round($base*.21,2);
+}
+$holdedAmount = is_numeric($decoded['total'] ?? null) ? round((float) $decoded['total'], 2) : round($fallbackTotal, 2);
 if($holdedId==='')respond(['error'=>'Holded no devolvió un identificador verificable. Revisa el documento en Holded antes de repetir el envío.'],502);
 
 $exportResult=[

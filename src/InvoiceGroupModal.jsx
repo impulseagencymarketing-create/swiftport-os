@@ -1,5 +1,6 @@
 import React,{useState} from 'react';
 import {groupEligible,groupSubtotal,groupTaxTotal} from './invoiceGrouping.mjs';
+import {applyWristVat} from './wristVat.mjs';
 import './invoice-grouping.css';
 const money=value=>new Intl.NumberFormat('es-ES',{style:'currency',currency:'EUR'}).format(value);
 export default function InvoiceGroupModal({invoices,onCreate,onClose}) {
@@ -7,7 +8,7 @@ export default function InvoiceGroupModal({invoices,onCreate,onClose}) {
   const candidates=invoices.filter(groupEligible);
   const chosen=candidates.filter(row=>selected.includes(row.id));
   const client=chosen[0]?.cliente.trim().toLowerCase();
-  const totals={lines:chosen.flatMap(row=>row.lines)};
+  const totals={lines:chosen.flatMap(row=>applyWristVat(row).lines)};
   const visible=candidates.filter(row=>[row.expediente,row.buque,row.concepto,row.cliente].join(' ').toLowerCase().includes(search.toLowerCase()));
   const submit=async()=>{setBusy(true);setError('');try{await onCreate(chosen)}catch(reason){setError(reason.message)}finally{setBusy(false)}};
   return <div className="modal-backdrop"><section className="modal invoice-group-modal" role="dialog" aria-modal="true" aria-label="Unificar expedientes WRIST">

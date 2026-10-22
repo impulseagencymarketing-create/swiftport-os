@@ -62,6 +62,7 @@ try {
  assert.equal(await editor.locator('.invoice-line-row').count(),4);
  await editor.getByRole('button',{name:'Enviar proforma a Holded',exact:true}).click();await editor.waitFor({state:'hidden'});
  assert.equal(exportCount,1);assert.deepEqual(exported.lines,savedLines);assert.deepEqual(exported.expedientes,cases.slice(0,2).map(row=>row.id));
+ assert.ok(exported.lines.every(line=>line.tax==='21%'));
  await page.reload();await billing();await page.getByRole('button',{name:/Unificar expedientes WRIST/,exact:true}).click();
  assert.equal(await dialog.getByRole('checkbox').count(),0);
  assert.deepEqual(errors,[]);

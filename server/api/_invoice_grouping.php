@@ -1,5 +1,6 @@
 <?php
 declare(strict_types=1);
+require_once __DIR__.'/_wrist_vat.php';
 
 function billing_grouped(array $row): bool { return count($row['sourceInvoiceIds'] ?? []) > 1; }
 function billing_exported(array $row): bool {
@@ -26,7 +27,7 @@ function billing_group_lines(array $sources): array {
         $lines[]=['id'=>'group:'.$source['id'],'item'=>$source['expediente'],'detail'=>implode(' · ',$parts),'price'=>0,'units'=>1,'tax'=>'0%','sourceInvoiceId'=>$source['id'],'sourceCaseRef'=>$source['expediente']];
         foreach($source['lines'] as $index=>$line) $lines[]=array_merge($line,['id'=>$source['id'].':'.$index,'sourceInvoiceId'=>$source['id'],'sourceCaseRef'=>$source['expediente']]);
     }
-    return $lines;
+    return apply_wrist_vat(['cliente'=>'WRIST','lines'=>$lines])['lines'];
 }
 
 // Validate the whole batch before any write. Originals and group are committed together.

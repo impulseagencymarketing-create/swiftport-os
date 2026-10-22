@@ -7,7 +7,7 @@ test('group preserves every line, tax, cargo, route, PO, price and distinct iden
  assert.equal(group.lines.length,4);assert.equal(group.importe,375.75);
  assert.equal(new Set(group.lines.map(line=>line.id)).size,4);
  assert.equal(group.lines[1].detail,fixtures[0].lines[0].detail);
- assert.equal(group.lines[1].tax,'21%');assert.match(group.lines[0].detail,/PO1/);
+ assert.ok(group.lines.every(line=>line.tax==='21%'));assert.match(group.lines[0].detail,/PO1/);
  assert.deepEqual(group.sourceInvoiceIds,['BOR-1','BOR-2']);assert.equal(group.manualPricingConfirmed,false);
 });
 test('reject mixed clients, repeated cases, already sent and stale selection',()=>{

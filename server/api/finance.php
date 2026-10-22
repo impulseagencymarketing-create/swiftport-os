@@ -83,7 +83,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'PUT') {
         $saveRevision = $pdo->prepare('INSERT IGNORE INTO app_invoice_revisions (invoice_id, revision, snapshot, created_by) VALUES (?, ?, ?, ?)');
         usort($invoices, static fn(array $a, array $b): int => strcmp((string) ($a['id'] ?? ''), (string) ($b['id'] ?? '')));
         foreach ($invoices as $invoice) {
-            $invoice = refresh_draft_due_date($invoice);
+            $invoice = apply_wrist_vat(refresh_draft_due_date($invoice));
             $invoiceId = (string) ($invoice['id'] ?? '');
             $invoiceDueDates[$invoiceId] = $invoice['vencimiento'] ?? '';
             if ($invoiceId === '' || strlen($invoiceId) > 40 || mb_strlen((string) ($invoice['concepto'] ?? '')) > 220) {
@@ -95,7 +95,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'PUT') {
             if ($storedRow) {
                 $stored = array_merge($stored, ['id'=>$storedRow['id'], 'expediente'=>$storedRow['case_ref'], 'cliente'=>$storedRow['client_name'], 'concepto'=>$storedRow['concept'], 'importe'=>(float)$storedRow['amount'], 'estado'=>$storedRow['status'], 'vencimiento'=>$storedRow['due_date']]);
             }
-            protect_manual_finance($invoice, $stored);
+            protect_manual_finance($invoice, apply_wrist_vat($stored));
             $invoiceData = $invoice;
             $invoiceData['financeRevision'] = next_finance_revision($invoice, $stored);
             $invoiceVersions[$invoiceId] = $invoiceData['financeRevision'];
