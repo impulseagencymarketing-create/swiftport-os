@@ -1,0 +1,15 @@
+name: Verificar contacto WRIST en Holded (solo lectura)
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v5
+      - name: Consultar contactos y últimas facturas emitidas
+        env:
+          HOLDED_API_KEY: ${{ secrets.HOLDED_API_KEY }}
+        run: php scripts/holded-contact-audit.php
