@@ -4,6 +4,7 @@ require dirname(__DIR__) . '/_bootstrap.php';
 require_once __DIR__ . '/_overtime.php';
 require_once dirname(__DIR__) . '/_invoice_dates.php';
 require_once dirname(__DIR__) . '/_invoice_grouping.php';
+require_once __DIR__ . '/_contacts.php';
 
 ensure_schema();
 $user = require_roles(['finance', 'admin']);
@@ -29,6 +30,7 @@ $invoiceId=(string)($invoice['id']??'');
 $find=$pdo->prepare('SELECT * FROM app_invoices WHERE id=?');$find->execute([$invoiceId]);$savedRow=$find->fetch();
 if(!$savedRow)respond(['error'=>'Guarda el borrador antes de enviarlo a Holded.'],409);
 $savedInvoice=billing_row($savedRow);
+if (trim((string)($invoice['cliente']??''))!==trim((string)($savedInvoice['cliente']??''))) respond(['error'=>'El cliente del borrador cambió. Guarda y revisa el borrador antes de enviarlo a Holded.'],409);
 if(!empty($savedInvoice['groupedInto']))respond(['error'=>'Este expediente está incluido en '.$savedInvoice['groupedInto'].'. Envía la factura conjunta, no el borrador individual.'],409);
 $export=$pdo->prepare('SELECT state,result FROM app_billing_exports WHERE invoice_id=?');$export->execute([$invoiceId]);$previousExport=$export->fetch();
 if($previousExport){
@@ -244,7 +246,6 @@ $docType = 'proform';
 $notes = trim((string) ($invoice['observaciones'] ?? ''));
 $documentDates = invoice_document_dates((string) ($invoice['vencimiento'] ?? ''));
 $request = [
-    'contactName' => $clientFiscalName ?: $clientName,
     'date' => $documentDates['issueTimestamp'],
     'dueDate' => $documentDates['dueTimestamp'],
     'desc' => $concept,
@@ -252,8 +253,13 @@ $request = [
     'currency' => 'EUR',
     'items' => $holdedItems,
 ];
-if ($clientTaxId !== '') {
-    $request['contactCode'] = $clientTaxId;
+try {
+    $contactResolution = holded_resolve_contact($apiKey, $clientName, $clientFiscalName, $clientTaxId);
+    $request = holded_existing_contact_request($request, $contactResolution);
+} catch (InvalidArgumentException $error) {
+    respond(['error'=>$error->getMessage()],422);
+} catch (RuntimeException $error) {
+    respond(['error'=>$error->getMessage()],502);
 }
 
 $reserve=$pdo->prepare("INSERT INTO app_billing_exports(invoice_id,state) VALUES (?,'sending')");$reserve->execute([$invoiceId]);
@@ -314,6 +320,7 @@ if($holdedId==='')respond(['error'=>'Holded no devolvió un identificador verifi
 
 $exportResult=[
     'ok'=>true,'docType'=>$docType,'holdedId'=>$holdedId,'holdedNumber'=>$holdedNumber,'holdedAmount'=>$holdedAmount,
+    'holdedContactId'=>$request['contactId'],'holdedContactName'=>$contactResolution['contact']['name']??'',
     'issueDate'=>$documentDates['issueDate'],'dueDate'=>$documentDates['dueDate'],'holdedStatus'=>'Proforma simple creada',
 ];
 $complete=$pdo->prepare("UPDATE app_billing_exports SET state='sent',result=? WHERE invoice_id=?");
@@ -323,6 +330,8 @@ audit((int) $user['id'], 'holded.proform.create', [
     'invoice' => substr((string) ($invoice['id'] ?? ''), 0, 40),
     'case' => substr((string) ($invoice['expediente'] ?? ''), 0, 40),
     'holded_id' => substr($holdedId, 0, 80),
+    'holded_contact_id' => $request['contactId'],
+    'contact_match' => $contactResolution['matchedBy'],
     'auth' => $usedAuth . ' ' . $usedVersion,
 ]);
 
@@ -332,6 +341,8 @@ respond([
     'holdedId' => $holdedId,
     'holdedNumber' => $holdedNumber,
     'holdedAmount' => $holdedAmount,
+    'holdedContactId' => $request['contactId'],
+    'holdedContactName' => $contactResolution['contact']['name']??'',
     'issueDate' => $documentDates['issueDate'],
     'dueDate' => $documentDates['dueDate'],
     'holdedStatus' => 'Proforma simple creada',

@@ -1,5 +1,6 @@
 <?php
 declare(strict_types=1);
+require __DIR__.'/../server/api/holded/_contacts.php';
 // Read-only support check: never creates or changes Holded documents or contacts.
 $key = trim((string) getenv('HOLDED_API_KEY'));
 if ($key === '') throw new RuntimeException('Falta la conexión de Holded.');
@@ -26,4 +27,6 @@ foreach ($invoices as $row) {
     $found[] = ['id'=>$row['id']??'', 'number'=>$row['docNumber']??'', 'date'=>$row['date']??'', 'contactId'=>$id, 'contactName'=>$row['contactName']??'', 'status'=>$row['status']??null];
 }
 usort($found, static fn($a,$b)=>($b['date']??0)<=>($a['date']??0));
-echo json_encode(['readOnly'=>true,'contactCount'=>count($contacts),'invoiceCount'=>count($invoices),'contactFields'=>array_keys($contacts[0]??[]),'invoiceFields'=>array_keys($invoices[0]??[]),'contacts'=>array_map(static fn($c)=>array_intersect_key($c,array_flip(['id','name','code','type'])),$matches),'recentInvoices'=>array_slice($found,0,12)],JSON_PRETTY_PRINT|JSON_UNESCAPED_UNICODE|JSON_THROW_ON_ERROR).PHP_EOL;
+$resolved=holded_choose_contact(holded_contact_candidates($contacts,'WRIST','WRIST',''),$invoices);
+$request=holded_existing_contact_request(['contactName'=>'WRIST'],$resolved);
+echo json_encode(['readOnly'=>true,'resolvedContact'=>['id'=>$resolved['contact']['id'],'name'=>$resolved['contact']['name'],'matchedBy'=>$resolved['matchedBy'],'invoiceNumber'=>$resolved['invoiceNumber']??''],'requestContactId'=>$request['contactId'],'inlineContactCreation'=>isset($request['contactName']),'contacts'=>array_map(static fn($c)=>array_intersect_key($c,array_flip(['id','name'])),$matches),'recentInvoices'=>array_slice($found,0,12)],JSON_PRETTY_PRINT|JSON_UNESCAPED_UNICODE|JSON_THROW_ON_ERROR).PHP_EOL;

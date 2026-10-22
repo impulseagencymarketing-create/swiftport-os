@@ -60,6 +60,7 @@ jobs:
           node --test tests/invoiceGrouping.test.mjs
           node --test tests/wristVat.test.mjs
           php tests/wrist-vat.test.php
+          php tests/holded-contacts.test.php
           php tests/invoice-grouping.test.php
           php tests/invoice-dates.test.php
           php tests/finance-revision.test.php
