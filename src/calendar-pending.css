@@ -1,0 +1,25 @@
+.calendar-pending-strip{margin:0 0 16px;padding:16px;min-width:0;border-top:3px solid #e59a31}
+.calendar-pending-strip>header{display:flex;align-items:flex-start;gap:10px;margin-bottom:12px}
+.calendar-pending-strip>header>svg{flex:none;color:#b67411}
+.calendar-pending-strip h3{font-size:15px;margin:0;line-height:1.5}
+.calendar-pending-strip h3>span{display:inline-block;min-width:25px;text-align:center;margin-left:6px;border-radius:8px;background:#fff1ce;color:#825000;font-size:13px;padding:1px 6px}
+.calendar-pending-strip p{font-size:12px;line-height:1.5;margin:4px 0 0;color:var(--muted,#52647a)}
+.calendar-pending-cards{display:flex;gap:12px;overflow-x:auto;padding:2px 2px 12px;overscroll-behavior-x:contain;scroll-snap-type:x proximity}
+.calendar-pending-cards>.calendar-unscheduled-card{flex:0 0 280px;min-width:0;max-width:100%;scroll-snap-align:start;display:flex;flex-direction:column;overflow:hidden;margin:0;cursor:default}
+.calendar-pending-cards .calendar-event-open{flex:1;display:flex;flex-direction:column;align-items:flex-start;justify-content:flex-start;text-align:left;width:100%;padding:12px!important;position:relative}
+.calendar-pending-cards .calendar-status-pill{position:static!important;display:inline-flex;margin-bottom:8px}
+.calendar-pending-cards .calendar-event-open time{display:block;font-size:10px!important;margin-bottom:6px}
+.calendar-pending-cards .calendar-vessel-name{font-size:15px!important;line-height:1.3!important;overflow-wrap:anywhere}
+.calendar-pending-cards .calendar-port-name{font-size:12px!important}
+.calendar-pending-cards .calendar-route{font-size:11px!important;line-height:1.45!important;margin:9px 0!important;overflow-wrap:anywhere}
+.calendar-pending-cards .calendar-event-open small{font-size:11px!important}
+:root[data-theme="dark"] .calendar-pending-cards .calendar-route{color:#c3d9ef!important}
+.calendar-pending-date{padding:0 12px 8px;font-size:11px;font-weight:600}
+.calendar-pending-actions{display:flex;align-items:center;gap:8px;padding:9px;border-top:1px solid var(--line,#dbe4ef);margin-top:auto}
+.calendar-pending-actions>.button{flex:1;font-size:12px;white-space:normal}
+.calendar-pending-actions .icon-button{flex:none}
+.calendar-schedule-hint{padding:12px;border:1px solid var(--line,#dbe4ef);border-radius:10px;display:flex;gap:12px;align-items:center;justify-content:space-between;font-size:12px;line-height:1.5}
+.calendar-schedule-hint .button{flex:none}
+:root[data-theme="dark"] .calendar-pending-strip h3>span{background:#493511;color:#ffd47a}
+:root[data-theme="dark"] .calendar-pending-strip>header>svg{color:#ffd47a}
+@media(max-width:600px){.calendar-pending-strip{padding:12px}.calendar-pending-cards>.calendar-unscheduled-card{flex-basis:260px}.calendar-schedule-hint{align-items:stretch;flex-direction:column}}

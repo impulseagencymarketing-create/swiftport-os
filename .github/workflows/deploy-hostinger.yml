@@ -59,6 +59,7 @@ jobs:
           node --test tests/invoiceDates.test.mjs
           node --test tests/invoiceGrouping.test.mjs
           node --test tests/wristVat.test.mjs
+          node --test tests/calendarPending.test.mjs
           php tests/wrist-vat.test.php
           php tests/holded-contacts.test.php
           php tests/invoice-grouping.test.php
