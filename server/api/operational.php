@@ -4,6 +4,7 @@ require __DIR__ . '/_bootstrap.php';
 require_once __DIR__ . '/mail/_service.php';
 require_once __DIR__ . '/_expense_service.php';
 require_once __DIR__ . '/_warehouse_archive.php';
+require_once __DIR__ . '/_transport_carriers.php';
 
 ensure_schema();
 $user = require_auth();
@@ -48,7 +49,9 @@ if (!is_array($data)
 $pdo = db();
 try {
     $pdo->beginTransaction();
-    $pdo->query('SELECT id FROM app_operational_state WHERE id = 1 FOR UPDATE')->fetch();
+    $storedRow = $pdo->query('SELECT data FROM app_operational_state WHERE id = 1 FOR UPDATE')->fetch();
+    $storedData = $storedRow ? json_decode($storedRow['data'], true, 512, JSON_THROW_ON_ERROR) : [];
+    $data = preserve_transport_carriers($data, is_array($storedData) ? $storedData : []);
     $data = warehouse_archive_project(expense_project($data, expense_load_imports($pdo)));
     $encoded = json_encode($data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
     if (strlen($encoded) > 6 * 1024 * 1024) {

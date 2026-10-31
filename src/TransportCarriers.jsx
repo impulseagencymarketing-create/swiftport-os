@@ -1,0 +1,24 @@
+import React,{useState} from 'react';
+import {Plus,Truck,UserRound,PencilLine,X,Save,Search} from 'lucide-react';
+import {carrierType,filterCarriers} from './transportCarriers.mjs';
+import './transport-carriers.css';
+
+export default function TransportCarriers({providers=[],saveProvider}){
+  const [query,setQuery]=useState(''),[filter,setFilter]=useState('active'),[editing,setEditing]=useState(null);
+  const visible=filterCarriers(providers,query,filter);
+  return <section className="carrier-directory panel">
+    <header><div><h2>Transportistas</h2><p>Empresas proveedoras y personas externas para asignar servicios. No crea usuarios ni concede acceso a la aplicación.</p></div><button className="button primary" onClick={()=>setEditing({tipo:'empresa',activo:true})}><Plus/> Nuevo transportista</button></header>
+    <div className="carrier-filters"><label className="field"><span><Search size={15}/> Buscar transportista</span><input value={query} onChange={e=>setQuery(e.target.value)} placeholder="Nombre, teléfono, contacto o zona"/></label><label className="field"><span>Estado</span><select value={filter} onChange={e=>setFilter(e.target.value)}><option value="active">Activos</option><option value="inactive">Inactivos</option><option value="all">Todos</option></select></label></div>
+    <p>{visible.length} transportista(s)</p>
+    <div className="carrier-grid">{visible.map(p=><article className="carrier-card" key={p.id} data-carrier-id={p.id}><header>{carrierType(p)==='persona'?<UserRound/>:<Truck/>}<div><small>{carrierType(p)==='persona'?'Persona externa':'Empresa proveedora'}{p.activo===false?' · Inactivo':''}</small><h3>{p.nombre}</h3></div><button className="icon-button" aria-label={`Editar ${p.nombre}`} onClick={()=>setEditing(p)}><PencilLine/></button></header><dl>{[['Contacto',p.contacto],['Teléfono',p.telefono],['Email',p.email],['Zona / puertos',p.zona],['Vehículo',p.vehiculo]].filter(([,v])=>v).map(([k,v])=><div key={k}><dt>{k}</dt><dd>{v}</dd></div>)}</dl>{p.notas&&<p>{p.notas}</p>}</article>)}</div>
+    {!visible.length&&<p>No hay transportistas en esta selección. Puedes añadir una empresa o una persona.</p>}
+    {editing&&<CarrierEditor item={editing} close={()=>setEditing(null)} saveProvider={saveProvider}/>}
+  </section>;
+}
+function CarrierEditor({item,close,saveProvider}){
+  const [form,setForm]=useState({nombre:'',contacto:'',telefono:'',email:'',zona:'',vehiculo:'',notas:'',...item,tipo:carrierType(item)});
+  const [saving,setSaving]=useState(false),[error,setError]=useState('');
+  const update=e=>setForm(f=>({...f,[e.target.name]:e.target.type==='checkbox'?e.target.checked:e.target.value}));
+  const submit=async e=>{e.preventDefault();if(saving)return;setError('');setSaving(true);try{await saveProvider(form);close()}catch(reason){setError(reason.message||'No se pudo guardar. Tus datos siguen en el formulario.')}finally{setSaving(false)}};
+  return <div className="modal-backdrop"><section className="modal carrier-editor" role="dialog" aria-modal="true" aria-label={item.id?'Editar transportista':'Nuevo transportista'}><div className="modal-head"><div><span className="overline">Directorio de transporte</span><h2>{item.id?'Editar transportista':'Nuevo transportista'}</h2></div><button className="icon-button" disabled={saving} onClick={close} aria-label="Cerrar"><X/></button></div><form onSubmit={submit}><label className="field"><span>Tipo</span><select name="tipo" value={form.tipo} onChange={update}><option value="empresa">Empresa proveedora</option><option value="persona">Persona externa</option></select></label><label className="field"><span>Nombre *</span><input name="nombre" value={form.nombre} onChange={update} required maxLength={160} autoFocus/></label>{[['contacto','Persona de contacto'],['telefono','Teléfono'],['email','Email'],['zona','Zona / puertos'],['vehiculo','Vehículo / matrícula']].map(([name,label])=><label className="field" key={name}><span>{label}</span><input name={name} type={name==='email'?'email':name==='telefono'?'tel':'text'} value={form[name]||''} maxLength={200} onChange={update}/></label>)}<label className="field wide"><span>Notas</span><textarea name="notas" value={form.notas} maxLength={2000} onChange={update}/></label><label className="carrier-active wide"><input name="activo" type="checkbox" checked={form.activo!==false} onChange={update}/> Disponible para nuevas asignaciones</label><p className="wide">Desactivar no elimina servicios ni cambia asignaciones anteriores.</p>{error&&<p className="carrier-error wide" role="alert">{error}</p>}<div className="modal-actions wide"><button className="button tertiary" type="button" disabled={saving} onClick={close}>Cancelar</button><button className="button primary" disabled={saving}><Save/>{saving?'Guardando…':'Guardar transportista'}</button></div></form></section></div>;
+}

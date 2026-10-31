@@ -60,6 +60,8 @@ jobs:
           node --test tests/invoiceGrouping.test.mjs
           node --test tests/wristVat.test.mjs
           node --test tests/calendarPending.test.mjs
+          node --test tests/transportCarriers.test.mjs
+          php tests/transport-carriers.test.php
           php tests/wrist-vat.test.php
           php tests/holded-contacts.test.php
           php tests/invoice-grouping.test.php
