@@ -1,4 +1,13 @@
 export const carrierType=carrier=>carrier?.tipo==='persona'?'persona':'empresa';
+// Assignment records currently use names, not account IDs. Prefer the operational
+// account when a person also has an administrator login; never rewrite history.
+export function transportAssignmentTeam(team=[]){
+  const roles=member=>Array.isArray(member.roles)?member.roles:[member.role];
+  const name=member=>String(member.fullName||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').trim().replace(/\s+/g,' ').toLowerCase();
+  const eligible=team.filter(member=>name(member)&&roles(member).some(role=>['operations','driver'].includes(role)));
+  const operationalNames=new Set(eligible.filter(member=>!roles(member).includes('admin')).map(name));
+  return eligible.filter(member=>!roles(member).includes('admin')||!operationalNames.has(name(member)));
+}
 export const externalCarrierLabel=carrier=>`Externo · ${carrier.nombre}`;
 export function assignmentValue(driver,providerId,providers){
   if(providerId&&(driver===externalCarrierLabel(providers.find(p=>p.id===providerId)||{nombre:''})||String(driver||'').startsWith('Externo · ')||!driver||driver==='Sin asignar'))return `external:${providerId}`;

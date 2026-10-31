@@ -3,6 +3,7 @@ import TransportCarriers from './TransportCarriers.jsx';
 import CalendarSearch from './CalendarSearch.jsx';
 import {emptyCalendarSearch,calendarAssigneeOptions,filterCalendarEvents} from './calendarSearch.mjs';
 import TransportAssigneeSelect from './TransportAssigneeSelect.jsx';
+import {transportAssignmentTeam} from './transportCarriers.mjs';
 import CalendarPendingStrip from './CalendarPendingStrip.jsx';
 import {calendarScheduleIncomplete,calendarPendingLabel,partitionCalendarSchedule,manualCalendarSchedule,validCalendarDate} from './calendarPending.mjs';
 import InvoiceGroupModal from './InvoiceGroupModal.jsx';
@@ -2008,7 +2009,7 @@ function App({auth,finance,onFinanceChange,onLogout}){
     }
   };
   const saveOperational=(...args)=>persistOperational(...args).catch(reason=>notify(reason.message));
-  const operationalTeam=useMemo(()=>team.filter(member=>hasRole(member,'operations')||hasRole(member,'driver')),[team]);
+  const operationalTeam=useMemo(()=>transportAssignmentTeam(team),[team]);
   useEffect(()=>{if(driverOnly&&!['calendario','almacen'].includes(tab))setTab('calendario')},[driverOnly,tab]);
   useEffect(()=>{
     if(!operationalLoaded)return;

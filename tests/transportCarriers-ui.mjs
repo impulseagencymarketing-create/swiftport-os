@@ -24,7 +24,7 @@ try{
    const p=req.postDataJSON().provider;const saved={...p,id:p.id||'PRV-'+data.providers.length,revision:(p.revision||0)+1,...(req.postDataJSON().action==='delete'?{activo:false,deletedAt:'2026-10-31T12:00:00Z'}:{})};
    data.providers=data.providers.some(x=>x.id===saved.id)?data.providers.map(x=>x.id===saved.id?saved:x):[...data.providers,saved];body={ok:true,providers:data.providers,provider:saved};
   }
-  else if(path==='/api/users/directory.php')body={users:[{id:'test',fullName:'Test Driver',roles:['operations','driver']}]};
+  else if(path==='/api/users/directory.php')body={users:[{id:'test-admin',fullName:'Test Driver',roles:['admin','operations','driver']},{id:'test',fullName:'Test Driver',roles:['operations','driver']}]};
   else if(path==='/api/finance.php')body={caseAmounts:{},clients:[],invoices:[]};
   else if(path==='/api/clients/directory.php')body={clients:[]};
   await route.fulfill({contentType:'application/json',body:JSON.stringify(body)});
@@ -63,6 +63,7 @@ try{
  assert.equal(await directory.locator('[data-carrier-id]').count(),1);
  await page.getByRole('button',{name:'Calendario',exact:true}).click();await dismiss();
  const card=page.locator('[data-pending-event="EV-0"]');
+ assert.equal(await card.locator('optgroup[label="Equipo SWIFTPORT"] option[value="team:Test Driver"]').count(),1);
  await card.getByRole('combobox',{name:'Asignar transportista'}).selectOption('external:PRV-1');
  await page.waitForFunction(()=>document.querySelector('[data-pending-event="EV-0"] select')?.value==='external:PRV-1');
  assert.equal(data.transports.find(t=>t.id==='TR-0').proveedorId,'PRV-1');
@@ -71,6 +72,7 @@ try{
  assert.equal(await card.getByRole('combobox',{name:'Asignar transportista'}).inputValue(),'external:PRV-1');
  await card.getByRole('button',{name:'Asignar fecha y hora'}).click();
  const calendarModal=page.locator('.calendar-event-modal');
+ assert.equal(await calendarModal.locator('optgroup[label="Equipo SWIFTPORT"] option[value="team:Test Driver"]').count(),1);
  await calendarModal.getByRole('combobox',{name:'Asignar transportista'}).selectOption('external:PRV-0');
  await calendarModal.getByRole('button',{name:'Guardar transporte',exact:true}).click();
  assert.equal(data.transports.find(t=>t.id==='TR-0').proveedorId,'PRV-0');

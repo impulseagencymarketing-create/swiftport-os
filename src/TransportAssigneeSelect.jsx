@@ -1,7 +1,8 @@
 import React from 'react';
-import {assignmentValue,assignmentFields,carrierType} from './transportCarriers.mjs';
+import {assignmentValue,assignmentFields,carrierType,transportAssignmentTeam} from './transportCarriers.mjs';
 
 export default function TransportAssigneeSelect({driver,providerId,team=[],providers=[],onChange,disabled=false,label='Asignar transportista'}){
+  team=transportAssignmentTeam(team);
   const value=assignmentValue(driver,providerId,providers);
   const active=providers.filter(p=>p.activo!==false&&!p.deletedAt);
   const known=value===''||team.some(p=>value===`team:${p.fullName}`)||active.some(p=>value===`external:${p.id}`);
