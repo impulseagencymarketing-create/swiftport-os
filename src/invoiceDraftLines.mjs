@@ -6,5 +6,5 @@ export function savedInvoiceLines(stored, proposed = []) {
 }
 
 export function editInvoiceLine(lines, index, field, value) {
-  return lines.map((line, position) => position === index ? {...line, [field]: value, ...(field==='detail' && line.transportDetailBlock ? {transportDetailManual:true} : {})} : line);
+  return lines.map((line, position) => position === index ? {...line, [field]: value, ...(field==='price'&&line.waitingSourceKey?{waitingRatePending:String(value).trim()===''}:{}), ...(field==='detail' && line.transportDetailBlock ? {transportDetailManual:true} : {})} : line);
 }

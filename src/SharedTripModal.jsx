@@ -1,6 +1,7 @@
 import React,{useState} from 'react';
 import {X,Plus,Truck,Save} from 'lucide-react';
 import TransportAssigneeSelect from './TransportAssigneeSelect.jsx';
+import TransportWaitingFields from './TransportWaitingFields.jsx';
 import {initialSharedTrip,allocateTripCost,tripStops} from './sharedTrips.mjs';
 import './shared-trips.css';
 
@@ -10,8 +11,8 @@ export default function SharedTripModal({item={},cases,transports,team,providers
   const change=(key,value)=>setForm(f=>({...f,[key]:value}));
   const stopChange=(index,patch)=>setForm(f=>({...f,stops:f.stops.map((s,i)=>i===index?{...s,...patch}:s)}));
   let shares=null,costError='';try{shares=allocateTripCost(form.cost,form.stops,form.costMode)}catch(e){costError=e.message}
-  const chooseCase=(index,id)=>{const c=cases.find(c=>c.id===id);stopChange(index,{expediente:id,transportId:'',destino:c?`BUQUE ${c.buque} · ${c.puerto||''}`:'',cargo:c?.resumenMercancia||'',observacion:''})};
-  const chooseTransport=(index,id)=>{const t=transports.find(t=>t.id===id);if(!t){stopChange(index,{transportId:''});return}stopChange(index,{transportId:id,origen:t.origen||'',destino:t.destino||'',cargo:t.sharedCargo||cases.find(c=>c.id===t.expediente)?.resumenMercancia||'',observacion:t.observacion||''});if(index===0&&!form.id)setForm(f=>({...f,fecha:t.fecha||'',inicio:t.inicio||'',fin:t.fin||'',asignado:t.conductor||'Sin asignar',proveedorId:t.proveedorId||'',vehiculo:t.vehiculo||''}))};
+  const chooseCase=(index,id)=>{const c=cases.find(c=>c.id===id);stopChange(index,{expediente:id,transportId:'',destino:c?`BUQUE ${c.buque} · ${c.puerto||''}`:'',cargo:c?.resumenMercancia||'',waiting:undefined,observacion:''})};
+  const chooseTransport=(index,id)=>{const t=transports.find(t=>t.id===id);if(!t){stopChange(index,{transportId:'',waiting:undefined});return}stopChange(index,{transportId:id,waiting:t.waiting,origen:t.origen||'',destino:t.destino||'',cargo:t.sharedCargo||cases.find(c=>c.id===t.expediente)?.resumenMercancia||'',observacion:t.observacion||''});if(index===0&&!form.id)setForm(f=>({...f,fecha:t.fecha||'',inicio:t.inicio||'',fin:t.fin||'',asignado:t.conductor||'Sin asignar',proveedorId:t.proveedorId||'',vehiculo:t.vehiculo||''}))};
   const save=async e=>{e.preventDefault();setError('');if(costError){setError(costError);return}setBusy(true);try{await submit({sharedTripDraft:form});close()}catch(e){setError(e.message||'No se pudo guardar el viaje. Tus cambios siguen aquí.')}finally{setBusy(false)}};
   return <div className="modal-backdrop"><section className="modal shared-trip-modal" role="dialog" aria-modal="true" aria-label="Transporte compartido">
     <header className="modal-head"><div><span className="overline">Un viaje · varias entregas</span><h2>{form.id?'Editar viaje compartido':'Crear / unir transporte compartido'}</h2><p>Un transporte en calendario. Mercancía, entrega y facturación independientes para cada buque.</p></div><button type="button" className="icon-button" aria-label="Cerrar" disabled={busy} onClick={close}><X/></button></header>
@@ -35,6 +36,7 @@ export default function SharedTripModal({item={},cases,transports,team,providers
           <label className="field"><span>Mercancía de este buque</span><textarea value={stop.cargo} onChange={e=>stopChange(index,{cargo:e.target.value})} placeholder="Ej. 2 cajas · 80 kg · referencias"/></label>
           <label className="field"><span>Instrucciones de esta entrega</span><textarea value={stop.observacion} onChange={e=>stopChange(index,{observacion:e.target.value})}/></label>
         </div>
+        <TransportWaitingFields value={stop.waiting} onChange={waiting=>stopChange(index,{waiting})}/>
         {current&&<small>Se conservan la mercancía seleccionada, el estado de entrega y los documentos ya registrados. {current.estado==='Cancelado'?'Esta entrega está cancelada.':''}</small>}
       </article>})}
       <button type="button" className="button secondary" disabled={form.stops.length>=20} onClick={()=>change('stops',[...form.stops,{expediente:'',transportId:'',origen:form.stops[0]?.origen||'ALMACÉN SWIFTPORT',destino:'',cargo:'',costShare:'',observacion:''}])}><Plus/> Añadir buque / expediente</button>

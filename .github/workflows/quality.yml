@@ -37,6 +37,8 @@ jobs:
           node --test tests/expenseMath.test.mjs tests/invoiceDraftLines.test.mjs tests/invoiceTransportDescription.test.mjs tests/limaniPortRates.test.mjs tests/warehouseSearch.test.mjs tests/warehouseArchive.test.mjs tests/overtime.test.mjs
           php tests/expense-service.test.php
           php tests/shared-trips.test.php
+          php tests/transport-waiting.test.php
+          node --test tests/transportWaiting.test.mjs
           node --test tests/sharedTrips.test.mjs tests/calendarSearch.test.mjs
           php tests/warehouse-archive.test.php
           php tests/captain-contact-import.test.php

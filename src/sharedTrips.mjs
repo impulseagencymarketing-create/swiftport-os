@@ -1,4 +1,5 @@
 import {manualCalendarSchedule,validCalendarDate,validCalendarTime} from './calendarPending.mjs';
+import {normalizeWaiting} from './transportWaiting.mjs';
 
 // A trip is the physical journey. Its existing per-case service IDs remain stable
 // so invoices, cargo and delivery evidence never move between cases.
@@ -26,7 +27,7 @@ export function initialSharedTrip(event,transports,cases){
   const members=id?transports.filter(t=>t.sharedTripId===id).sort((a,b)=>a.sharedTripOrder-b.sharedTripOrder):linked?[linked]:[];
   const first=members.find(t=>t.estado!=='Cancelado')||members[0]||event||{};
   return {id,fecha:first.fecha||'',inicio:first.inicio||'',fin:first.fin||'',asignado:first.conductor||event?.asignado||'Sin asignar',proveedorId:first.proveedorId||'',vehiculo:first.vehiculo||'',cost:first.sharedTripCost??'',costMode:first.sharedTripCostMode||'equal',costProvider:first.sharedTripCostProvider||'',
-    stops:members.length?members.map(t=>({expediente:t.expediente,transportId:t.id,origen:t.origen||'',destino:t.destino||'',cargo:t.sharedCargo||cases.find(c=>c.id===t.expediente)?.resumenMercancia||'',costShare:t.sharedTripCostShare??'',observacion:t.observacion||''})):[{expediente:event?.expediente||'',transportId:'',origen:event?.origen||'ALMACÉN SWIFTPORT',destino:event?.destino||'',cargo:'',costShare:'',observacion:''}]};
+    stops:members.length?members.map(t=>({expediente:t.expediente,transportId:t.id,origen:t.origen||'',destino:t.destino||'',cargo:t.sharedCargo||cases.find(c=>c.id===t.expediente)?.resumenMercancia||'',costShare:t.sharedTripCostShare??'',waiting:t.waiting,observacion:t.observacion||''})):[{expediente:event?.expediente||'',transportId:'',origen:event?.origen||'ALMACÉN SWIFTPORT',destino:event?.destino||'',cargo:'',costShare:'',observacion:''}]};
 }
 export function allocateTripCost(total,stops,mode='equal'){
   const amount=String(total??'').replace(',','.');
@@ -65,7 +66,7 @@ export function saveSharedTripState(state,draft,{id,now=new Date().toISOString()
     const oldEvents=(state.calendarEvents||[]).filter(e=>e.transporte===transportId);
     if(oldEvents.length>1)throw new Error('Este transporte tiene varias tarjetas de calendario. Revisa el duplicado antes de unirlo.');
     const cancelled=related.estado==='Cancelado'||previous?.estado==='Cancelado';
-    const common={sharedTripId:tripId,sharedTripOrder:index,sharedCargo:stop.cargo||'',fecha:draft.fecha||'',inicio:draft.inicio||'',fin:draft.fin||'',proveedorId:draft.proveedorId||'',vehiculo:draft.vehiculo||'',origen:stop.origen.trim(),destino:stop.destino.trim(),observacion:stop.observacion||'',expediente:related.id,sharedTripCost:shares?Number(String(draft.cost).replace(',','.')):null,sharedTripCostShare:shares?.[index]??null,sharedTripCostMode:draft.costMode||'equal',sharedTripCostProvider:draft.costProvider||''};
+    const common={...(stop.waiting!==undefined?{waiting:normalizeWaiting(stop.waiting)}:{}),sharedTripId:tripId,sharedTripOrder:index,sharedCargo:stop.cargo||'',fecha:draft.fecha||'',inicio:draft.inicio||'',fin:draft.fin||'',proveedorId:draft.proveedorId||'',vehiculo:draft.vehiculo||'',origen:stop.origen.trim(),destino:stop.destino.trim(),observacion:stop.observacion||'',expediente:related.id,sharedTripCost:shares?Number(String(draft.cost).replace(',','.')):null,sharedTripCostShare:shares?.[index]??null,sharedTripCostMode:draft.costMode||'equal',sharedTripCostProvider:draft.costProvider||''};
     const route=`${common.origen} → ${common.destino}`;
     const schedule=manualCalendarSchedule(common);
     const status=cancelled?'Cancelado':previous?.estado||'Asignado';

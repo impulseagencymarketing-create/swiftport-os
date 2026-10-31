@@ -29,7 +29,7 @@ export function separateTransportLines(invoice,services=[],{fresh=false,quoteFor
   const targets=lines.filter(transportLine);
   if(!targets.length)return invoice;
   if(targets.some(line=>line.transportServiceKey||line.transportSplitUnmatched)){
-    const updated=lines.map(line=>line.transportServiceKey?described(line,records.find(s=>transportServiceKey(s)===line.transportServiceKey)):line);
+    const updated=lines.map(line=>line.transportServiceKey&&!line.waitingSourceKey?described(line,records.find(s=>transportServiceKey(s)===line.transportServiceKey)):line);
     const complete=targets.every(line=>line.transportServiceKey&&records.some(s=>transportServiceKey(s)===line.transportServiceKey));
     return {...invoice,lines:updated,observaciones:complete?splitTransportNotes(invoice.observaciones).notes:invoice.observaciones,
       transportDescriptionNeedsReview:!complete};

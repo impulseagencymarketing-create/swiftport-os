@@ -65,6 +65,9 @@ if ($clientName === '' || $concept === '' || !is_array($lines) || count($lines) 
     respond(['error' => 'Faltan cliente, concepto o líneas de factura.'], 422);
 }
 $purchaseOrder = strtoupper(trim((string) ($invoice['purchaseOrder'] ?? '')));
+foreach ($lines as $line) {
+    if (!empty($line['waitingRatePending'])) respond(['error'=>'Hay horas de espera sin precio revisado. Indica su tarifa o 0 explícitamente antes de enviar.'],422);
+}
 $isLimaniInvoice = stripos($clientName . ' ' . $clientFiscalName, 'limani') !== false;
 
 function holded_with_purchase_order(string $value, string $purchaseOrder): string

@@ -1,0 +1,68 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {normalizeWaiting,waitingProposal,waitingReview,reviewWaiting,appendFreshWaiting} from '../src/transportWaiting.mjs';
+import {editInvoiceLine} from '../src/invoiceDraftLines.mjs';
+import {saveSharedTripState,initialSharedTrip,syncSharedTripSchedule} from '../src/sharedTrips.mjs';
+import {buildInvoiceGroup} from '../src/invoiceGrouping.mjs';
+const service={id:'T1',expediente:'SW-1',fecha:'2026-10-31',inicio:'10:00',fin:'11:00',origen:'Almacén',destino:'Buque',waiting:{hours:1.5,rate:40,reason:'Terminal ocupada'}};
+const proposal=waitingProposal(service);
+test('Decimal hours, missing versus explicit zero rates, validation',()=>{
+ assert.deepEqual(normalizeWaiting({hours:'1,5',rate:''}),{hours:1.5,rate:null,reason:''});
+ assert.equal(normalizeWaiting({hours:2,rate:0}).rate,0);
+ for(const hours of [-1,Infinity,NaN,'bad',1001,1.555])assert.throws(()=>normalizeWaiting({hours}));
+ assert.throws(()=>normalizeWaiting({hours:1,rate:-3}));
+ assert.equal(waitingProposal({...service,waiting:{hours:2}},{defaultRate:30}).line.price,30);
+ assert.equal(waitingProposal({...service,waiting:{hours:2}}).line.waitingRatePending,true);
+ assert.equal(waitingProposal({...service,waiting:{hours:2,rate:0}},{defaultRate:30}).line.price,0);
+});
+test('A separate dated/routed charge, no duplicate after reload, manual rows preserved',()=>{
+ const manual={id:'custom',item:'SPECIAL TRANSPORT',price:123,units:1,detail:'500 kg agreed'};
+ const invoice={estado:'Borrador',manualEdited:true,lines:[manual]};
+ assert.equal(waitingReview(invoice,[proposal]).length,1);
+ const next=reviewWaiting(invoice,proposal);
+ assert.deepEqual(next.lines[0],manual);
+ assert.equal(next.lines[1].price*next.lines[1].units,60);
+ assert.match(next.lines[1].detail,/2026-10-31.*10:00/);
+ assert.match(next.lines[1].detail,/Almacén → Buque/);
+ assert.match(next.lines[1].detail,/Terminal ocupada/);
+ assert.equal(waitingReview(JSON.parse(JSON.stringify(next)),[proposal]).length,0);
+ next.lines[1].price=75;assert.equal(waitingReview(next,[proposal]).length,0);
+ const changed=waitingProposal({...service,waiting:{...service.waiting,hours:3}});
+ assert.equal(waitingReview(next,[changed]).length,1);
+ assert.equal(next.lines[1].price,75);
+ assert.equal(reviewWaiting(next,changed).lines.length,2);
+ const omitted=reviewWaiting(invoice,proposal,false);
+ assert.equal(waitingReview(omitted,[proposal]).length,0);
+ assert.deepEqual(omitted.lines,[manual]);
+});
+test('Zero hours, sent invoices, existing legacy charges and price review',()=>{
+ const invoice=appendFreshWaiting({estado:'Borrador',lines:[]},[proposal]);
+ assert.equal(appendFreshWaiting(invoice,[proposal]).lines.length,1);
+ const zero=waitingProposal({...service,waiting:{hours:0}});
+ assert.equal(waitingReview(invoice,[zero]).length,1);
+ assert.equal(reviewWaiting(invoice,zero).lines.length,0);
+ const locked={...invoice,holdedId:'already-sent'};
+ assert.equal(reviewWaiting(locked,zero),locked);assert.deepEqual(waitingReview(locked,[zero]),[]);
+ const legacy={lines:[{item:'WAITING TIME',units:2,price:30}]};
+ assert.equal(appendFreshWaiting(legacy,[proposal]),legacy);
+ const missing=waitingProposal({...service,waiting:{hours:1}}).line;
+ assert.equal(editInvoiceLine([missing],0,'price','0')[0].waitingRatePending,false);
+ assert.equal(editInvoiceLine([missing],0,'price','')[0].waitingRatePending,true);
+});
+test('Shared trip waits stay at the selected stop after save/reload/reschedule',()=>{
+ const state={cases:[{id:'SW-1'},{id:'SW-2'}],transports:[service,{...service,id:'T2',expediente:'SW-2',waiting:undefined}],calendarEvents:[]};
+ const draft={id:'',fecha:'2026-10-31',inicio:'10:00',fin:'12:00',cost:'',stops:state.transports.map(t=>({expediente:t.expediente,transportId:t.id,origen:t.origen,destino:t.destino,waiting:t.waiting}))};
+ const saved=saveSharedTripState(state,draft,{id:'VJ-1'});
+ assert.equal(saved.transports[0].waiting.hours,1.5);assert.equal(saved.transports[1].waiting,undefined);
+ assert.equal(saved.calendarEvents[0].waiting.hours,1.5);
+ assert.equal(initialSharedTrip(saved.calendarEvents[0],saved.transports,saved.cases).stops[0].waiting.rate,40);
+ const moved=syncSharedTripSchedule(saved,{...saved.calendarEvents[0],inicio:'12:00',fin:'13:00'});
+ assert.equal(moved.transports[0].waiting.hours,1.5);assert.equal(moved.transports[1].waiting,undefined);
+});
+test('WRIST group retains waiting review decisions and independent service attribution',()=>{
+ const sources=[1,2].map(n=>({id:'BOR-'+n,expediente:'SW-'+n,cliente:'WRIST',estado:'Borrador',lines:[{...proposal.line,sourceCaseRef:'SW-'+n,waitingSourceKey:'SW-'+n+':T'+n}],waitingDecisions:{['SW-'+n+':T'+n]:'reviewed'}}));
+ const group=buildInvoiceGroup(sources,'G1');
+ assert.deepEqual(group.waitingDecisions,{'SW-1:T1':'reviewed','SW-2:T2':'reviewed'});
+ assert.equal(group.lines.filter(l=>l.waitingSourceKey).length,2);
+ assert.ok(group.lines.filter(l=>l.waitingSourceKey).every(l=>l.tax==='21%'));
+});

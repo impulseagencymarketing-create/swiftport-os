@@ -25,6 +25,7 @@ export function buildInvoiceGroup(sources, id, now = new Date()) {
     cliente:sources[0].cliente,concepto:`WRIST · Factura conjunta · ${sources.length} expedientes`,estado:'Borrador',vencimiento:billingToday(now),
     lines,observaciones:sources.map(row=>[row.expediente,row.observaciones].filter(Boolean).join('\n')).join('\n\n'),
     payment:sources[0].payment||'',coste:sources.reduce((sum,row)=>sum+Number(row.coste||0),0),
+    waitingDecisions:Object.assign({},...sources.map(row=>row.waitingDecisions||{})),
     manualEdited:true,manualEditedAt:now.toISOString(),manualPricingConfirmed:false,groupedAt:now.toISOString(),financeRevision:0};
   return applyWristVat({...group,importe:groupSubtotal(group)});
 }
