@@ -16,3 +16,10 @@ test('directory searches accents, phone, zones and inactive records without muta
   assert.equal(filterCarriers(people,'jose barcelona').length,1);assert.equal(filterCarriers(people,'600').length,1);
   assert.equal(filterCarriers(people,'').length,2);assert.equal(filterCarriers(people,'','inactive')[0].id,'OLD');assert.equal(filterCarriers(people,'','all').length,3);
 });
+test('deleted transportistas disappear from every directory filter and new assignments, but remain identifiable on history',()=>{
+  const deleted={id:'DEL',nombre:'Deleted Person',tipo:'persona',activo:false,deletedAt:'2026-10-31T12:00:00Z'};
+  const list=[...people,deleted];
+  for(const filter of ['active','inactive','all'])assert.equal(filterCarriers(list,'Deleted',filter).length,0);
+  assert.throws(()=>assignmentFields('external:DEL',list));
+  assert.equal(assignmentValue('Externo · Deleted Person','DEL',list),'external:DEL');
+});

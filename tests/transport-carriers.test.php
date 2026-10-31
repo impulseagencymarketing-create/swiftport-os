@@ -22,3 +22,17 @@ check($merged['providers']===$edited['providers'],'stale operational writes must
 check($merged['cases']===$incoming['cases'],'unrelated operational writes retained');
 check(preserve_transport_carriers($incoming,[])===$incoming,'initial bootstrap allowed');
 echo "OK: company/person validation, stable IDs, revisions, archive, duplicates, concurrent snapshot protection\n";
+$deleted=transport_carrier_delete($edited['providers'],$edited['provider'],42);
+check(count($deleted['providers'])===2,'history identity retained');
+check($deleted['provider']['id']===$p['id']&&$deleted['provider']['activo']===false&&!empty($deleted['provider']['deletedAt']),'deleted and unavailable');
+check($deleted['provider']['deletedBy']===42,'deletion audited');
+check($deleted['providers'][0]===$original[0],'other entries untouched');
+rejects(fn()=>transport_carrier_save($deleted['providers'],$edited['provider']));
+rejects(fn()=>transport_carrier_delete($edited['providers'],$p,42));
+rejects(fn()=>transport_carrier_delete($edited['providers'],['id'=>'missing'],42));
+check(transport_carrier_delete($deleted['providers'],$edited['provider'],42)===$deleted,'retry is idempotent');
+$recreated=transport_carrier_save($deleted['providers'],['nombre'=>'Jane Driver','tipo'=>'persona']);
+check($recreated['provider']['id']!==$p['id'],'new identity does not replace historical assignments');
+$stored=['providers'=>$deleted['providers'],'providerDirectoryManaged'=>true];
+check(preserve_transport_carriers(['providers'=>$original],$stored)['providers']===$deleted['providers'],'stale client cannot resurrect deleted entries');
+echo "OK: deletion, history preservation, stale revisions, idempotent retry, recreation and stale write protection\n";

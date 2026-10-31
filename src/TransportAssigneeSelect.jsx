@@ -3,7 +3,7 @@ import {assignmentValue,assignmentFields,carrierType} from './transportCarriers.
 
 export default function TransportAssigneeSelect({driver,providerId,team=[],providers=[],onChange,disabled=false,label='Asignar transportista'}){
   const value=assignmentValue(driver,providerId,providers);
-  const active=providers.filter(p=>p.activo!==false);
+  const active=providers.filter(p=>p.activo!==false&&!p.deletedAt);
   const known=value===''||team.some(p=>value===`team:${p.fullName}`)||active.some(p=>value===`external:${p.id}`);
   return <select aria-label={label} value={value} disabled={disabled} onChange={e=>onChange(assignmentFields(e.target.value,providers))}>
     <option value="">Sin asignar</option>

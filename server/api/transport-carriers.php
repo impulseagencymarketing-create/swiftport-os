@@ -7,6 +7,8 @@ $user=require_roles(['operations','admin']);
 require_method('POST');
 verify_csrf();
 $input=input();
+$action=$input['action']??'save';
+if (!in_array($action,['save','delete'],true)) respond(['error'=>'Acción no válida.'],422);
 if (!is_array($input['provider']??null)) respond(['error'=>'Transportista no válido.'],422);
 $pdo=db();
 try {
@@ -14,14 +16,16 @@ try {
     $row=$pdo->query('SELECT data FROM app_operational_state WHERE id = 1 FOR UPDATE')->fetch();
     $data=$row?json_decode($row['data'],true,512,JSON_THROW_ON_ERROR):null;
     if (!is_array($data)) { $pdo->rollBack(); respond(['error'=>'Carga primero los datos operativos y vuelve a intentarlo.'],409); }
-    $result=transport_carrier_save($data['providers']??[],$input['provider']);
+    $result=$action==='delete'
+        ? transport_carrier_delete($data['providers']??[],$input['provider'],(int)$user['id'])
+        : transport_carrier_save($data['providers']??[],$input['provider']);
     $data['providers']=$result['providers'];
     $data['providerDirectoryManaged']=true;
     $encoded=json_encode($data,JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES|JSON_THROW_ON_ERROR);
     if (strlen($encoded)>6*1024*1024) { $pdo->rollBack(); respond(['error'=>'El directorio no se pudo guardar: límite de datos operativos alcanzado.'],413); }
     $statement=$pdo->prepare('UPDATE app_operational_state SET data=?, updated_by=? WHERE id=1');
     $statement->execute([$encoded,$user['id']]);
-    audit((int)$user['id'],'transport_carrier.save',['providerId'=>$result['provider']['id'],'type'=>$result['provider']['tipo'],'active'=>$result['provider']['activo']]);
+    audit((int)$user['id'],'transport_carrier.'.$action,['providerId'=>$result['provider']['id'],'type'=>$result['provider']['tipo']??'empresa','active'=>$result['provider']['activo']]);
     $pdo->commit();
     respond(['ok'=>true]+$result);
 } catch (InvalidArgumentException $error) {

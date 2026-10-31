@@ -1,16 +1,20 @@
 import React,{useState} from 'react';
-import {Plus,Truck,UserRound,PencilLine,X,Save,Search} from 'lucide-react';
+import {Plus,Truck,UserRound,PencilLine,X,Save,Search,Trash2} from 'lucide-react';
 import {carrierType,filterCarriers} from './transportCarriers.mjs';
 import './transport-carriers.css';
 
-export default function TransportCarriers({providers=[],saveProvider}){
+export default function TransportCarriers({providers=[],saveProvider,deleteProvider}){
   const [query,setQuery]=useState(''),[filter,setFilter]=useState('active'),[editing,setEditing]=useState(null);
+  const [deleting,setDeleting]=useState(''),[deleteError,setDeleteError]=useState('');
+  const remove=async provider=>{if(deleting)return;setDeleting(provider.id);setDeleteError('');try{await deleteProvider(provider)}catch(error){setDeleteError(error.message||'No se pudo eliminar. Reintenta.')}finally{setDeleting('')}};
   const visible=filterCarriers(providers,query,filter);
   return <section className="carrier-directory panel">
     <header><div><h2>Transportistas</h2><p>Empresas proveedoras y personas externas para asignar servicios. No crea usuarios ni concede acceso a la aplicación.</p></div><button className="button primary" onClick={()=>setEditing({tipo:'empresa',activo:true})}><Plus/> Nuevo transportista</button></header>
     <div className="carrier-filters"><label className="field"><span><Search size={15}/> Buscar transportista</span><input value={query} onChange={e=>setQuery(e.target.value)} placeholder="Nombre, teléfono, contacto o zona"/></label><label className="field"><span>Estado</span><select value={filter} onChange={e=>setFilter(e.target.value)}><option value="active">Activos</option><option value="inactive">Inactivos</option><option value="all">Todos</option></select></label></div>
     <p>{visible.length} transportista(s)</p>
-    <div className="carrier-grid">{visible.map(p=><article className="carrier-card" key={p.id} data-carrier-id={p.id}><header>{carrierType(p)==='persona'?<UserRound/>:<Truck/>}<div><small>{carrierType(p)==='persona'?'Persona externa':'Empresa proveedora'}{p.activo===false?' · Inactivo':''}</small><h3>{p.nombre}</h3></div><button className="icon-button" aria-label={`Editar ${p.nombre}`} onClick={()=>setEditing(p)}><PencilLine/></button></header><dl>{[['Contacto',p.contacto],['Teléfono',p.telefono],['Email',p.email],['Zona / puertos',p.zona],['Vehículo',p.vehiculo]].filter(([,v])=>v).map(([k,v])=><div key={k}><dt>{k}</dt><dd>{v}</dd></div>)}</dl>{p.notas&&<p>{p.notas}</p>}</article>)}</div>
+    <p>Eliminar retira el transportista del directorio y de nuevas asignaciones. Sus servicios e historial se conservan.</p>
+    {deleteError&&<p className="carrier-error" role="alert">{deleteError}</p>}
+    <div className="carrier-grid">{visible.map(p=><article className="carrier-card" key={p.id} data-carrier-id={p.id}><header>{carrierType(p)==='persona'?<UserRound/>:<Truck/>}<div><small>{carrierType(p)==='persona'?'Persona externa':'Empresa proveedora'}{p.activo===false?' · Inactivo':''}</small><h3>{p.nombre}</h3></div><button className="icon-button" disabled={Boolean(deleting)} aria-label={`Editar ${p.nombre}`} onClick={()=>setEditing(p)}><PencilLine/></button></header><dl>{[['Contacto',p.contacto],['Teléfono',p.telefono],['Email',p.email],['Zona / puertos',p.zona],['Vehículo',p.vehiculo]].filter(([,v])=>v).map(([k,v])=><div key={k}><dt>{k}</dt><dd>{v}</dd></div>)}</dl>{p.notas&&<p>{p.notas}</p>}<button type="button" className="button tertiary carrier-delete" disabled={Boolean(deleting)} aria-label={`Eliminar ${p.nombre}`} onClick={()=>remove(p)}><Trash2/>{deleting===p.id?'Eliminando…':'Eliminar'}</button></article>)}</div>
     {!visible.length&&<p>No hay transportistas en esta selección. Puedes añadir una empresa o una persona.</p>}
     {editing&&<CarrierEditor item={editing} close={()=>setEditing(null)} saveProvider={saveProvider}/>}
   </section>;

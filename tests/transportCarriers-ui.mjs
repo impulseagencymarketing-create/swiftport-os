@@ -21,7 +21,7 @@ try{
   else if(path==='/api/operational.php'){if(req.method()==='PUT')data={...req.postDataJSON().data,providers:data.providers};body={data};}
   else if(path==='/api/transport-carriers.php'){
    if(failNext){failNext=false;await route.fulfill({status:500,contentType:'application/json',body:JSON.stringify({error:'Error simulado de guardado'})});return;}
-   const p=req.postDataJSON().provider;const saved={...p,id:p.id||'PRV-'+data.providers.length,revision:(p.revision||0)+1};
+   const p=req.postDataJSON().provider;const saved={...p,id:p.id||'PRV-'+data.providers.length,revision:(p.revision||0)+1,...(req.postDataJSON().action==='delete'?{activo:false,deletedAt:'2026-10-31T12:00:00Z'}:{})};
    data.providers=data.providers.some(x=>x.id===saved.id)?data.providers.map(x=>x.id===saved.id?saved:x):[...data.providers,saved];body={ok:true,providers:data.providers,provider:saved};
   }
   else if(path==='/api/users/directory.php')body={users:[{id:'test',fullName:'Test Driver',roles:['operations','driver']}]};
@@ -93,6 +93,24 @@ try{
  await page.setViewportSize({width:390,height:844});
  await page.screenshot({path:'../outputs/transport-carriers-mobile.png',animations:'disabled'});
  assert.ok(await directory.evaluate(el=>el.scrollWidth<=el.clientWidth+1));
+ await page.setViewportSize({width:1440,height:1000});
+ const history=JSON.stringify({calendar:data.calendarEvents,transports:data.transports});
+ failNext=true;
+ await directory.getByRole('button',{name:'Eliminar Transportes Test SA',exact:true}).click();
+ await directory.getByRole('alert').waitFor();assert.equal(await directory.locator('[data-carrier-id]').count(),1);
+ await directory.getByRole('button',{name:'Eliminar Transportes Test SA',exact:true}).click();
+ await page.waitForFunction(()=>document.querySelectorAll('[data-carrier-id]').length===0,{},{timeout:5000});
+ assert.ok(data.providers[0].deletedAt);
+ await page.reload();await goDirectory();assert.equal(await directory.locator('[data-carrier-id]').count(),0);
+ await directory.getByRole('combobox',{name:'Estado',exact:true}).selectOption('all');
+ assert.equal(await directory.locator('[data-carrier-id]').count(),1);
+ await directory.getByRole('button',{name:'Eliminar Persona Test',exact:true}).click();
+ await page.waitForFunction(()=>document.querySelectorAll('[data-carrier-id]').length===0,{},{timeout:5000});
+ assert.equal(JSON.stringify({calendar:data.calendarEvents,transports:data.transports}),history);
+ await page.getByRole('button',{name:'Calendario',exact:true}).click();await dismiss();
+ assert.equal(await card.getByRole('combobox',{name:'Asignar transportista'}).inputValue(),'external:PRV-1');
+ assert.equal(await other.locator('option[value="external:PRV-0"]').count(),0);
+ assert.equal(await other.locator('option[value="external:PRV-1"]').count(),0);
  authRoles=['driver'];await page.reload();await dismiss();
  assert.equal(await page.getByRole('button',{name:'Transportistas',exact:true}).count(),0);
  assert.deepEqual(errors,[]);
