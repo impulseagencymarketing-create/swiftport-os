@@ -1,0 +1,73 @@
+// Mock operational API; never reads or modifies live operational records.
+import {createRequire} from 'node:module';
+import assert from 'node:assert/strict';
+const {chromium}=createRequire(process.env.PLAYWRIGHT_PACKAGE||import.meta.url)('playwright');
+const base='http://127.0.0.1:5187/';
+const cases=Array.from({length:7},(_,i)=>({id:`SW-2026-00${i+10}`,buque:['NO DATE','OLD PENDING','FUTURE PENDING','CONFIRMED','FINISHED','CANCELLED','TIME ONLY'][i],cliente:'WRIST',puerto:'Barcelona',eta:'Por confirmar',estado:i===4?'Completado':i===5?'Cancelado':'En curso',progreso:i===4?100:20,servicios:['Transporte'],autoTransportDisabled:false}));
+const calendarEvents=cases.map((c,i)=>({id:`EV-${i}`,expediente:c.id,transporte:`TR-${i}`,titulo:c.buque,tipoServicio:'Transporte',fecha:['','2026-09-01','2027-02-01','2026-10-31','2026-10-30','2026-10-31',''][i],inicio:i===3?'10:00':i===6?'12:00':'',fin:i===3?'11:00':'',scheduleSource:'manual',scheduleStatus:i===3?'confirmed':'missing_time',asignado:'Test Driver',origen:'ALMACEN',destino:`BUQUE ${c.buque}`,estado:i===4?'Entregado':i===5?'Cancelado':'Pendiente'}));
+let data={cases,calendarEvents,transports:calendarEvents.map(e=>({...e,id:e.transporte,conductor:e.asignado,ruta:`${e.origen} → ${e.destino}`})),warehouseEntries:[],customs:[],providers:[],vessels:[]};
+data.calendarEvents[4]={...data.calendarEvents[4],fecha:'2026-09-01',inicio:'11:00',fin:'12:00',scheduleStatus:'confirmed',asignado:'Moisés Rodríguez'};
+data.calendarEvents[3].asignado='Moisés Rodríguez';
+data.providers=[{id:'P1',nombre:'Transportes Externos',activo:false}];
+data.calendarEvents[1]={...data.calendarEvents[1],proveedorId:'P1',asignado:'Externo · Transportes Externos'};
+data.transports=data.calendarEvents.map(e=>({...e,id:e.transporte,conductor:e.asignado,ruta:e.origen+' → '+e.destino}));
+let authRoles=['admin','operations'],writes=0;
+const browser=await chromium.launch({channel:'msedge',headless:true});
+const errors=[];
+try{
+ const page=await browser.newPage({viewport:{width:1440,height:1000}});
+ page.setDefaultTimeout(5000);
+ await page.clock.install({time:new Date('2026-10-31T12:00:00+01:00')});
+ page.on('pageerror',e=>errors.push(e.message));
+ await page.route('**/*',route=>route.request().url().startsWith(base)?route.continue():route.abort());
+ await page.route('**/src/main.jsx*',async route=>{const response=await route.fetch();await route.fulfill({response,body:(await response.text()).replace(/const LOCAL_DESIGN_MODE = [^;]+;/,'const LOCAL_DESIGN_MODE = false;')});});
+ await page.route('**/api/**',async route=>{
+  const req=route.request(),path=new URL(req.url()).pathname;let body={ok:true};
+  if(path==='/api/auth/me.php')body={authenticated:true,csrfToken:'test',user:{id:'test',fullName:'Test Driver',roles:authRoles}};
+  else if(path==='/api/operational.php'){if(req.method()==='PUT'){writes++;data=req.postDataJSON().data;}body={data};}
+  else if(path==='/api/users/directory.php')body={users:[{id:'test',fullName:'Test Driver',roles:['operations','driver']}]};
+  else if(path==='/api/finance.php')body={caseAmounts:{},clients:[],invoices:[]};
+  else if(path==='/api/clients/directory.php')body={clients:[]};
+  await route.fulfill({contentType:'application/json',body:JSON.stringify(body)});
+ });
+ const dismiss=async()=>{const notice=page.getByRole('button',{name:'Entendido',exact:true});if(await notice.count())await notice.click();};
+ const openCalendar=async()=>{await page.getByRole('button',{name:'Calendario',exact:true}).click();await dismiss();};
+ await page.goto(base);await openCalendar();
+ const search=page.getByRole('region',{name:'Buscador del calendario'});
+ const query=search.getByRole('searchbox',{name:'Buscar buque o servicio'});
+ const assignee=search.getByRole('combobox',{name:'Persona / transportista'});
+ const status=search.getByRole('combobox',{name:'Estado del servicio'});
+ const rows=search.locator('[data-search-event]');
+ const before=JSON.stringify(data),beforeWrites=writes;
+ await query.fill('moises');await page.waitForFunction(()=>document.querySelectorAll('[data-search-event]').length===2,{},{timeout:5000});assert.equal(await rows.count(),2);
+ await status.selectOption('done');assert.equal(await rows.count(),1);assert.match(await rows.innerText(),/FINISHED/);assert.match(await rows.innerText(),/1\/9\/2026/);
+ await search.getByRole('combobox',{name:'Fechas de los resultados'}).selectOption('period');assert.equal(await rows.count(),0);
+ await search.getByRole('combobox',{name:'Fechas de los resultados'}).selectOption('all');assert.equal(await rows.count(),1);
+ await query.fill('');await assignee.selectOption('person:moises rodriguez');assert.equal(await rows.count(),1);
+ await page.getByRole('button',{name:'Periodo siguiente',exact:true}).click();assert.equal(await rows.count(),1);
+ await search.getByRole('button',{name:'Ver en calendario',exact:true}).click();
+ assert.equal(await page.locator('.calendar-event').filter({hasText:'FINISHED'}).count(),1);
+ await search.getByRole('button',{name:'Ver servicio',exact:true}).click();
+ const modal=page.locator('.calendar-event-modal');await modal.waitFor();assert.equal(await modal.locator('[name="fecha"]').inputValue(),'2026-09-01');
+ await modal.getByRole('button',{name:'Cancelar',exact:true}).click();
+ await search.getByRole('button',{name:'Limpiar búsqueda',exact:true}).click();assert.equal(await rows.count(),0);
+ await assignee.selectOption('provider:P1');assert.equal(await rows.count(),1);assert.match(await rows.innerText(),/OLD PENDING/);
+ await assignee.selectOption('');await query.fill('barcelona almacen');assert.equal(await rows.count(),7);
+ await query.fill('nothingmatches');assert.equal(await rows.count(),0);await search.getByRole('status').waitFor();
+ await query.fill('');await status.selectOption('cancelled');assert.equal(await rows.count(),1);assert.match(await rows.innerText(),/CANCELLED/);
+ await status.selectOption('pending');assert.equal(await rows.count(),5);
+ for(const mode of ['Mes','Día','Semana']){await page.getByRole('button',{name:mode,exact:true}).click();assert.equal(await rows.count(),5);}
+ await status.selectOption('done');await assignee.selectOption('person:moises rodriguez');
+ await page.evaluate(()=>{document.documentElement.dataset.theme='dark'});
+ await page.screenshot({path:'../outputs/calendar-search-dark.png',animations:'disabled'});
+ await page.setViewportSize({width:390,height:844});
+ await page.screenshot({path:'../outputs/calendar-search-mobile.png',animations:'disabled'});
+ assert.ok(await search.evaluate(el=>el.scrollWidth<=el.clientWidth+1));
+ assert.equal(JSON.stringify(data),before);assert.equal(writes,beforeWrites);
+ authRoles=['driver'];await page.reload();await dismiss();
+ await search.waitFor();await query.fill('moises');await status.selectOption('done');assert.equal(await rows.count(),1);
+ await search.getByRole('button',{name:'Ver servicio',exact:true}).click();
+ await page.locator('.driver-task-modal').waitFor();
+ assert.deepEqual(errors,[]);
+ console.log('OK: vessel/route/person search, external inactive carrier, completed/pending/cancelled, all dates/current period, week jump, service modal, day/week/month, read-only, dark/mobile and driver search.');
+}finally{await browser.close();}
