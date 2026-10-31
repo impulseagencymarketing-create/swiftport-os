@@ -13,6 +13,7 @@ function described(line,service){
   const block=tripText(service);
   let detail=String(line.detail||'').trim();
   if(!line.transportDetailManual){
+    if(service.sharedCargo)detail=String(service.sharedCargo).trim();
     const previous=String(line.transportDetailBlock||'').trim();
     if(previous&&detail.endsWith(previous))detail=detail.slice(0,-previous.length).trimEnd();
     if(!detail.endsWith(block))detail=[detail,block].filter(Boolean).join('\n');

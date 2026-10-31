@@ -1,3 +1,4 @@
+import {tripStops} from './sharedTrips.mjs';
 export const normalizeCalendarSearch=value=>String(value??'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLocaleLowerCase('es').trim().replace(/\s+/g,' ');
 export const emptyCalendarSearch=()=>({query:'',assignee:'',status:'',scope:'all'});
 export const hasCalendarSearch=filters=>Boolean(filters.query.trim()||filters.assignee||filters.status);
@@ -25,7 +26,8 @@ export function filterCalendarEvents(events,{filters,cases=[],providers=[],statu
     if(selected.startsWith('person:')&&(external(e)||personValue(e.asignado)!==selected))return false;
     const c=byCase.get(e.expediente)||{},p=byProvider.get(e.proveedorId)||{};
     // Use the service assignee, not the current case's driver: one case can have several services.
-    const haystack=normalizeCalendarSearch([e.id,e.transporte,e.expediente,e.titulo,e.tipoServicio,e.origen,e.destino,e.ruta,e.observacion,e.asignado,e.puerto,c.buque,c.puerto,c.purchaseOrder,c.cliente,p.nombre].join(' '));
+    const relatedText=tripStops(e).map(stop=>{const c=byCase.get(stop.expediente)||{};return [stop.expediente,stop.transporte,stop.origen,stop.destino,stop.sharedCargo,c.buque,c.puerto,c.purchaseOrder,c.cliente].join(' ')}).join(' ');
+    const haystack=normalizeCalendarSearch([relatedText,e.id,e.transporte,e.expediente,e.titulo,e.tipoServicio,e.origen,e.destino,e.ruta,e.observacion,e.asignado,e.puerto,c.buque,c.puerto,c.purchaseOrder,c.cliente,p.nombre].join(' '));
     return terms.every(term=>haystack.includes(term));
   });
 }

@@ -63,6 +63,8 @@ jobs:
           node --test tests/transportCarriers.test.mjs
           node --test tests/calendarSearch.test.mjs
           php tests/transport-carriers.test.php
+          php tests/shared-trips.test.php
+          node --test tests/sharedTrips.test.mjs tests/calendarSearch.test.mjs
           php tests/wrist-vat.test.php
           php tests/holded-contacts.test.php
           php tests/invoice-grouping.test.php

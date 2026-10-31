@@ -1,0 +1,71 @@
+// Local, mocked APIs only. No production journeys or invoices are changed.
+import {createRequire} from 'node:module';
+import assert from 'node:assert/strict';
+const {chromium}=createRequire(process.env.PLAYWRIGHT_PACKAGE||import.meta.url)('playwright');
+const base='http://127.0.0.1:5187/';
+const cases=['WASA EXPRESS','MONTE EXPRESS'].map((buque,i)=>({id:`SW-2026-000${i+1}`,buque,cliente:'Limani',puerto:'Barcelona',estado:'En curso',progreso:20,servicios:['Transporte'],autoTransportDisabled:false}));
+const transports=cases.map((c,i)=>({id:`TR-${i}`,expediente:c.id,conductor:'Test Driver',fecha:'2026-10-31',inicio:'10:00',fin:'12:00',scheduleSource:'manual',scheduleStatus:'confirmed',origen:'Warehouse',destino:c.buque,ruta:'Warehouse → '+c.buque,estado:'Asignado',selectedCargo:[{id:`BOX-${i}`,summary:`Cargo ${i}`}]}));
+let data={cases,transports,calendarEvents:transports.map(t=>({...t,id:'EV-'+t.id,transporte:t.id,asignado:t.conductor,tipoServicio:'Transporte',titulo:t.ruta})),warehouseEntries:[],customs:[],providers:[],vessels:[]};
+const originalIds=transports.map(t=>t.id);let failNext=false,roles=['admin','operations'],writes=0;
+const browser=await chromium.launch({channel:'msedge',headless:true});
+try{
+ const page=await browser.newPage({viewport:{width:1440,height:1000}}),errors=[];
+ page.on('pageerror',e=>errors.push(e.message));
+ await page.clock.install({time:new Date('2026-10-31T12:00:00+01:00')});
+ await page.route('**/*',r=>r.request().url().startsWith(base)?r.continue():r.abort());
+ await page.route('**/src/main.jsx*',async r=>{const response=await r.fetch();await r.fulfill({response,body:(await response.text()).replace(/const LOCAL_DESIGN_MODE = [^;]+;/,'const LOCAL_DESIGN_MODE = false;')})});
+ await page.route('**/api/**',async r=>{const req=r.request(),path=new URL(req.url()).pathname;let body={ok:true};
+   if(path==='/api/auth/me.php')body={authenticated:true,csrfToken:'test',user:{id:'test',fullName:'Test Driver',roles}};
+   else if(path==='/api/operational.php'){
+     if(req.method()==='PUT'){if(failNext){failNext=false;await r.fulfill({status:500,contentType:'application/json',body:JSON.stringify({error:'Error simulado'})});return}data=req.postDataJSON().data;writes++}body={ok:true,data};
+   }else if(path==='/api/users/directory.php')body={users:[{id:'test',fullName:'Test Driver',roles:['driver']},{id:'other',fullName:'Other Driver',roles:['driver']}]};
+   else if(path==='/api/finance.php'){assert.equal(req.method(),'GET','No debe escribir facturas al unir viajes');body={caseAmounts:{},clients:[],invoices:[]}}
+   else if(path==='/api/clients/directory.php')body={clients:[]};
+   await r.fulfill({contentType:'application/json',body:JSON.stringify(body)});
+ });
+ const dismiss=async()=>{const b=page.getByRole('button',{name:'Entendido',exact:true});if(await b.count())await b.click()};
+ const calendar=async()=>{await page.getByRole('button',{name:'Calendario',exact:true}).click();await dismiss()};
+ await page.goto(base);await calendar();
+ await page.getByRole('button',{name:'Transporte compartido / unir',exact:true}).click();
+ const modal=page.getByRole('dialog',{name:'Transporte compartido',exact:true});
+ await modal.locator('[data-trip-stop="0"]').getByLabel('Expediente / buque').selectOption(cases[0].id);
+ await modal.locator('[data-trip-stop="0"]').getByLabel('Servicio a vincular').selectOption('TR-0');
+ await modal.locator('[data-trip-stop="0"]').getByLabel('Mercancía de este buque').fill('2 cajas · 80 kg WASA');
+ await modal.getByRole('button',{name:'Añadir buque / expediente'}).click();
+ await modal.locator('[data-trip-stop="1"]').getByLabel('Expediente / buque').selectOption(cases[1].id);
+ await modal.locator('[data-trip-stop="1"]').getByLabel('Servicio a vincular').selectOption('TR-1');
+ await modal.locator('[data-trip-stop="1"]').getByLabel('Mercancía de este buque').fill('1 pallet · 300 kg MONTE');
+ await modal.getByLabel('Coste total EUR').fill('100.01');
+ await page.evaluate(()=>document.documentElement.dataset.theme='dark');
+ await modal.screenshot({path:'../outputs/shared-trip-desktop.png'});
+ failNext=true;await modal.getByRole('button',{name:'Guardar viaje compartido'}).click();await modal.getByRole('alert').waitFor();assert.match(await modal.getByRole('alert').innerText(),/Error simulado/);
+ assert.equal(data.transports.filter(t=>t.sharedTripId).length,0);assert.equal(await modal.locator('[data-trip-stop="1"]').getByLabel('Mercancía de este buque').inputValue(),'1 pallet · 300 kg MONTE');
+ await modal.getByRole('button',{name:'Guardar viaje compartido'}).click();try{await modal.waitFor({state:'detached',timeout:8000})}catch(e){console.log('SAVE DEBUG',await modal.getByRole('alert').allTextContents(),errors);throw e}
+ assert.equal(data.transports.length,2);assert.deepEqual(data.transports.map(t=>t.id),originalIds);
+ assert.equal(data.transports[0].sharedTripId,data.transports[1].sharedTripId);
+ assert.deepEqual(data.cases.map(c=>c.gastos.find(g=>g.source==='shared-trip').importe),[50.01,50]);
+ assert.equal(await page.locator('.calendar-body .calendar-event').count(),1);
+ assert.equal(await page.locator('.calendar-period-summary article').nth(0).locator('b').innerText(),'2');
+ assert.equal(await page.locator('.calendar-period-summary article').nth(1).locator('b').innerText(),'1');
+ await page.reload();await calendar();assert.equal(await page.locator('.calendar-body .calendar-event').count(),1);
+ await page.locator('.calendar-body .calendar-event').getByRole('combobox',{name:'Asignar transportista'}).selectOption('team:Other Driver');
+ await page.waitForFunction(()=>document.querySelector('.calendar-body .calendar-event select')?.value==='team:Other Driver');
+ assert.ok(data.transports.every(t=>t.conductor==='Other Driver'));
+ await page.getByPlaceholder('Buque, expediente, ruta, puerto o persona…').fill('MONTE');
+ assert.equal(await page.locator('[data-search-event]').count(),1);
+ assert.match(await page.locator('[data-search-event] h4').innerText(),/WASA EXPRESS.*MONTE EXPRESS/);
+ await page.getByRole('button',{name:'Ver servicio',exact:true}).click();
+ assert.equal(await modal.locator('[data-trip-stop]').count(),2);
+ await page.setViewportSize({width:390,height:844});await modal.screenshot({path:'../outputs/shared-trip-mobile.png'});
+ assert.ok(await modal.evaluate(el=>el.scrollWidth<=el.clientWidth+1));
+ await modal.getByRole('button',{name:'Cerrar',exact:true}).click();
+ await page.setViewportSize({width:1440,height:1000});roles=['driver'];await page.reload();await page.waitForFunction(()=>document.querySelector('.driver-job-list')?.textContent.includes('WASA EXPRESS'));await dismiss();
+ assert.equal(await page.getByRole('button',{name:'Transporte compartido / unir',exact:true}).count(),0);
+ assert.equal(await page.locator('.driver-job-list>button').count(),1);
+ await page.locator('.driver-job-list>button').click();
+ const delivery=page.getByRole('dialog',{name:'Entregas del viaje compartido'});assert.equal(await delivery.getByRole('button',{name:/Abrir entrega/}).count(),2);
+ await delivery.getByRole('button',{name:'Abrir entrega · '+cases[1].id,exact:true}).click();
+ assert.equal(await delivery.count(),0);assert.match(await page.locator('.modal').last().innerText(),/MONTE EXPRESS/);
+ assert.deepEqual(errors,[]);assert.ok(writes>0);
+ console.log('OK: merge/reload one trip, two vessels, separate costs/cargo, failure retention, shared assignment, second-vessel search, driver independent deliveries, mobile.');
+}finally{await browser.close()}
