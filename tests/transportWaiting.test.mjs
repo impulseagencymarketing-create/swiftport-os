@@ -37,6 +37,7 @@ test('A separate dated/routed charge, no duplicate after reload, manual rows pre
 });
 test('Zero hours, sent invoices, existing legacy charges and price review',()=>{
  const invoice=appendFreshWaiting({estado:'Borrador',lines:[]},[proposal]);
+ assert.equal(invoice.waitingDecisions,undefined,'A fresh template must not mark a saved draft as reviewed');
  assert.equal(appendFreshWaiting(invoice,[proposal]).lines.length,1);
  const zero=waitingProposal({...service,waiting:{hours:0}});
  assert.equal(waitingReview(invoice,[zero]).length,1);

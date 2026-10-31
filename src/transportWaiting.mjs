@@ -41,9 +41,11 @@ export function reviewWaiting(invoice,proposal,include=true){
 
 export function appendFreshWaiting(invoice,proposals){
   if(overtimeLocked(invoice))return invoice;
-  let next=invoice;
   // Legacy case-level waiting must be reconciled by billing, not charged twice automatically.
   if((invoice.lines||[]).some(l=>/WAITING|ESPERA/i.test(l.item||'')&&!l.waitingSourceKey))return invoice;
-  for(const p of waitingReview(invoice,proposals))next=reviewWaiting(next,p);
-  return next;
+  const lines=[...(invoice.lines||[])];
+  for(const p of waitingReview(invoice,proposals))if(p.hours>0&&!lines.some(l=>l.waitingSourceKey===p.key))lines.push({...p.line});
+  // A template is not a human review. Never let its metadata acknowledge waits
+  // when an existing draft keeps its old, manually preserved lines.
+  return {...invoice,lines};
 }
