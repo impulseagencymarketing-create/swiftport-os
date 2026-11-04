@@ -12,3 +12,12 @@ test('message includes real dates and port, and no internal financial data',()=>
  assert.match(limaniPoText(rows),/SAHAR · Barcelona · RECEIPT 03\/11\/26 · SW-1/);
  assert.equal(limaniPoText([]),'');
 });
+test('POA request includes line subtotal and combined total, never supplier cost or margin',()=>{
+ const rows=missingLimaniPOs([{expediente:'SW-1',cliente:'Limani',importe:999,coste:888,lines:[{price:40,units:2},{price:5,units:1}]},{expediente:'SW-2',cliente:'Limani',importe:40}]);
+ const message=limaniPoText(rows);
+ assert.match(message,/85\.00 EUR/);assert.match(message,/40\.00 EUR/);assert.match(message,/Total \(excluding VAT\): 125\.00 EUR/);assert.doesNotMatch(message,/999|888/);
+});
+test('unknown amount is not zero and unreviewed operations are marked provisional',()=>{
+ const rows=missingLimaniPOs([{expediente:'SW-1',cliente:'Limani'},{expediente:'SW-2',cliente:'Limani',importe:40,operationReviewRequired:true}]);
+ const message=limaniPoText(rows);assert.match(message,/Amount pending/);assert.match(message,/provisional/);assert.doesNotMatch(message,/Total \(excluding VAT\)/);
+});
