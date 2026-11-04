@@ -1,0 +1,7 @@
+.billing-search {margin: 0 20px 16px; display:flex; flex-wrap:wrap; align-items:center; gap:10px;}
+.billing-search label {display:flex; flex:1 1 280px; flex-direction:column; gap:6px; font-size:12px; font-weight:700; min-width:0;}
+.billing-search input {width:100%; min-height:42px; box-sizing:border-box; padding:10px 12px; border:1px solid var(--line); border-radius:9px; background:var(--panel,#fff); color:var(--ink);}
+.billing-search input:focus-visible {outline:2px solid var(--blue); outline-offset:2px;}
+.billing-search p {flex-basis:100%; margin:0; font-size:12px; color:var(--ink);}
+:root[data-theme="dark"] .billing-search input {background:#0b1621; color:#f5f8fc;}
+@media(max-width:600px){.billing-search{margin-inline:12px}.billing-search label{flex-basis:100%}}
