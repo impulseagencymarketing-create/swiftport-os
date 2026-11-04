@@ -11,7 +11,7 @@ try {
  const context=await browser.newContext({viewport:{width:1440,height:1000}}),page=await context.newPage();
  page.on('pageerror',error=>errors.push(error.message));
  await page.route('**/*',route=>route.request().url().startsWith(base)?route.continue():route.abort());
- await page.route('**/src/main.jsx*',async route=>{const response=await route.fetch();await route.fulfill({response,body:(await response.text()).replace(/const LOCAL_DESIGN_MODE = [^;]+;/,'const LOCAL_DESIGN_MODE = false;')})});
+ await page.route('**/src/main.jsx*',async route=>{const response=await route.fetch();await route.fulfill({response,body:(await response.text()).replace(/const LOCAL_DESIGN_MODE\s*=\s*[^;]+;/,'const LOCAL_DESIGN_MODE = false;')})});
  await page.route('**/api/**',async route=>{
   const req=route.request(),path=new URL(req.url()).pathname;let body={ok:true},status=200;
   if(path==='/api/auth/me.php')body={authenticated:true,csrfToken:'test',user:{id:'test',fullName:'Local test',roles:['admin','finance','operations']}};
@@ -21,6 +21,7 @@ try {
     const payload=req.postDataJSON(),isGroup=payload.invoices.some(row=>row.sourceInvoiceIds&&!invoices.some(old=>old.id===row.id));
     if(isGroup&&failGroup){failGroup=false;body={error:'Fallo de prueba: nada guardado'};status=503}
     else {
+     if(!isGroup)for(const row of payload.invoices)assert.ok(!invoices.find(old=>old.id===row.id)?.groupedInto,'Automatic sync must never write locked originals');
      // Run the real server validator over the actual UI request, with no production DB.
      if(process.env.TEST_PHP)execFileSync(process.env.TEST_PHP,['-n','-r',`require 'server/api/_invoice_grouping.php'; $p=json_decode(stream_get_contents(STDIN),true); validate_invoice_group_batch($p['incoming'],$p['stored']);`],{input:JSON.stringify({incoming:payload.invoices,stored:invoices})});
      const versions={};for(const row of payload.invoices){const old=invoices.find(item=>item.id===row.id);assert.equal(row.financeRevision,old?.financeRevision||0);versions[row.id]=(old?.financeRevision||0)+1;invoices=[...invoices.filter(item=>item.id!==row.id),{...row,financeRevision:versions[row.id]}]}
@@ -55,14 +56,25 @@ try {
  await editor.getByRole('checkbox').check();
  await editor.getByRole('button',{name:'Guardar borrador',exact:true}).click();await editor.waitFor({state:'hidden'});
  group=invoices.find(row=>row.sourceInvoiceIds);const savedLines=structuredClone(group.lines);assert.equal(group.importe,327.35);
+ const frozenSources=structuredClone(invoices.filter(row=>row.groupedInto));
+ cases[0].eta='2026-11-04'; // Reproduce the operational refresh that previously broke grouped billing.
  await page.reload();await billing();
+ for(let attempt=0;attempt<30&&!invoices.find(row=>row.id===group.id)?.operationReviewRequired;attempt++)await page.waitForTimeout(100);
+ assert.equal(invoices.find(row=>row.id===group.id).operationReviewRequired,true);
+ assert.deepEqual(invoices.filter(row=>row.groupedInto),frozenSources);
  assert.equal(await page.getByRole('button',{name:'Editar BOR-1',exact:true}).count(),0);
  assert.equal(await page.getByRole('button',{name:'Editar BOR-2',exact:true}).count(),0);
  await page.getByRole('button',{name:'Editar '+group.id,exact:true}).click();
  assert.equal(await editor.locator('.invoice-line-row').count(),4);
+ await editor.getByLabel('He revisado mercancía, kilos, servicios y precios.').check();
+ await editor.getByRole('button',{name:'Guardar borrador',exact:true}).click();await editor.waitFor({state:'hidden'});
+ await page.reload();await billing();
+ await page.getByRole('button',{name:'Editar '+group.id,exact:true}).click();
+ assert.equal(await editor.getByLabel('He revisado mercancía, kilos, servicios y precios.').count(),0,'Acknowledged changes must not re-block sending');
  await editor.getByRole('button',{name:'Enviar proforma a Holded',exact:true}).click();await editor.waitFor({state:'hidden'});
  assert.equal(exportCount,1);assert.deepEqual(exported.lines,savedLines);assert.deepEqual(exported.expedientes,cases.slice(0,2).map(row=>row.id));
  assert.ok(exported.lines.every(line=>line.tax==='21%'));
+ assert.deepEqual(invoices.filter(row=>row.groupedInto),frozenSources);
  await page.reload();await billing();await page.getByRole('button',{name:/Unificar expedientes WRIST/,exact:true}).click();
  assert.equal(await dialog.getByRole('checkbox').count(),0);
  assert.deepEqual(errors,[]);

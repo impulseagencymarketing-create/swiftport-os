@@ -1,4 +1,4 @@
-import {syncInvoiceOperation,operationSnapshot} from './invoiceOperationSync.mjs';
+import {syncInvoiceOperation,operationSnapshot,syncGroupedInvoiceOperations} from './invoiceOperationSync.mjs';
 import LimaniPoRequest from './LimaniPoRequest.jsx';
 import {invoiceOperationLabel,refreshInvoiceOperationDate} from './invoiceSchedule.mjs';
 import {applyWristVat,isWristInvoice} from './wristVat.mjs';
@@ -2365,13 +2365,12 @@ function App({auth,finance,onFinanceChange,onLogout}){
       return {...synced,importe,margen:invoiceRevenue(synced)-Number(synced.coste||0)};
     });
     const groups=next.map(invoice=>{
-      if(!invoice.sourceInvoiceIds?.length)return invoice;
-      const affected=next.filter(row=>invoice.sourceInvoiceIds.includes(row.id)&&row.operationChangeNotice);
-      if(!affected.length)return invoice;
-      const notice='Cambios en expedientes de la factura conjunta: '+affected.map(row=>row.expediente).join(', ')+'. Revisa sus líneas antes de facturar o corregir Holded.';
-      if(invoice.operationChangeNotice===notice)return invoice;
-      changed=true;
-      return {...invoice,operationChangeNotice:notice,operationReviewRequired:!billingInvoiceClosed(invoice)};
+      const synced=syncGroupedInvoiceOperations(invoice,next,source=>{
+        const related=cases.find(row=>row.id===source.expediente);
+        return related?baseDraftInvoiceFromCase(related,warehouseEntries,transports,calendarEvents):null;
+      });
+      if(synced!==invoice)changed=true;
+      return synced;
     });
     if(changed)syncInvoices(groups);
   },[operationalLoaded,showFinance,cases,warehouseEntries,transports,calendarEvents,finance.invoices]);
