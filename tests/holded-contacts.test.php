@@ -55,3 +55,26 @@ $source=file_get_contents(__DIR__.'/../server/api/holded/create.php');
 check_contact(strpos($source,'holded_resolve_contact(')<strpos($source,'INSERT INTO app_billing_exports'),'Resolve before export reservation and Holded POST');
 check_contact(!str_contains($source,"'contactName' =>"),'Endpoint cannot send name-only creation requests');
 echo "OK: WRIST issued contact reused; NIF matching; duplicates, supplier, ambiguity, errors; manual prices and IVA preserved; no contact creation\n";
+
+// Vessel owners may differ from the operational client. Only an explicit,
+// invoice-scoped choice can override the global fiscal match.
+$owner=['id'=>'owner-contact','name'=>'Example Vessel Owner Ltd','code'=>'OWNER123','type'=>'client'];
+$selection=holded_contact_option($owner)+['invoiceId'=>'BOR-TEST','forClient'=>'Agency'];
+$lookupCalls=[];
+$lookup=function($path)use(&$lookupCalls,$contacts,$owner){$lookupCalls[]=$path;return array_merge($contacts,[$owner]);};
+$explicit=holded_resolve_selected_contact('unused',$selection,'BOR-TEST','Agency',$lookup);
+check_contact($explicit['contact']['id']==='owner-contact'&&$lookupCalls===['contacts'],'Explicit existing owner revalidated read-only');
+$manualRequest=holded_existing_contact_request($request,$explicit);
+check_contact($manualRequest['items']===$request['items']&&$manualRequest['notes']===$request['notes'],'Explicit bill-to preserves manual invoice');
+rejects_contact(fn()=>holded_resolve_selected_contact('x',$selection,'OTHER','Agency',$lookup),'otro borrador');
+rejects_contact(fn()=>holded_resolve_selected_contact('x',$selection,'BOR-TEST','Other client',$lookup),'otro borrador');
+rejects_contact(fn()=>holded_resolve_selected_contact('x',array_merge($selection,['id'=>'missing']),'BOR-TEST','Agency',$lookup),'ya no existe');
+rejects_contact(fn()=>holded_resolve_selected_contact('x',array_merge($selection,['taxId'=>'WRONG']),'BOR-TEST','Agency',$lookup),'datos fiscales');
+rejects_contact(fn()=>holded_resolve_selected_contact('x',array_merge($selection,['name'=>'Changed']),'BOR-TEST','Agency',$lookup),'datos fiscales');
+rejects_contact(fn()=>holded_resolve_selected_contact('x',$selection,'BOR-TEST','Agency',fn()=>[array_merge($owner,['archived'=>true])]),'ya no está disponible');
+check_contact(holded_contact_option($contacts[1])===null,'Supplier cannot be explicitly billed');
+check_contact(array_keys(holded_contact_option($owner))===['id','name','tradeName','taxId'],'Picker never exposes private contact fields');
+check_contact(str_contains($source,"\$savedInvoice['holdedContactSelection']"),'Export uses persisted selection');
+$endpoint=file_get_contents(__DIR__.'/../server/api/holded/contacts.php');
+check_contact(str_contains($endpoint,"require_roles(['finance','admin'])")&&str_contains($endpoint,"require_method('GET')"),'Contact lookup restricted to finance/admin and read only');
+echo "OK: explicit per-invoice bill-to, client scope, stale identity, missing/archived contacts, privacy and export persistence\n";

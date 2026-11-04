@@ -36,6 +36,31 @@ function holded_invoice_contact_id(array $invoice): string
     return trim((string)(is_array($contact)?($contact['id']??$contact['_id']??''):$contact));
 }
 
+function holded_contact_option(array $contact): ?array
+{
+    $id=trim((string)($contact['id']??''));
+    if ($id==='' || !empty($contact['archived']) || !empty($contact['deleted']) || in_array(strtolower((string)($contact['type']??'')),['supplier','creditor'],true)) return null;
+    return ['id'=>$id,'name'=>trim((string)($contact['name']??'')),
+        'tradeName'=>trim((string)($contact['tradeName']??$contact['commercialName']??'')),
+        'taxId'=>trim((string)($contact['code']??$contact['vatnumber']??$contact['vat_number']??''))];
+}
+
+// An explicit bill-to selection belongs to this invoice, not the global client profile.
+// Re-read Holded at export time; never trust a stale or fabricated fiscal snapshot.
+function holded_resolve_selected_contact(string $apiKey, array $selection, string $invoiceId, string $clientName, ?callable $get=null): array
+{
+    if (($selection['invoiceId']??'')!==$invoiceId || ($selection['forClient']??'')!==$clientName) throw new InvalidArgumentException('El destinatario de Holded pertenece a otro borrador o cliente. Vuelve a seleccionarlo.');
+    $get??=static fn(string $path)=>holded_contact_get($apiKey,$path);
+    foreach (holded_contact_list($get('contacts')) as $contact) {
+        if (($contact['id']??'')!==($selection['id']??'')) continue;
+        $option=holded_contact_option($contact);
+        if (!$option) throw new InvalidArgumentException('El contacto elegido ya no está disponible como cliente en Holded. Selecciona otro contacto existente.');
+        if ($option['name']!==($selection['name']??'') || holded_contact_normalize($option['taxId'])!==holded_contact_normalize((string)($selection['taxId']??''))) throw new InvalidArgumentException('Los datos fiscales del contacto han cambiado en Holded. Vuelve a seleccionarlo y revisar su NIF.');
+        return ['contact'=>$contact,'matchedBy'=>'explicit-invoice-selection'];
+    }
+    throw new InvalidArgumentException('El contacto elegido ya no existe en Holded. Selecciona otro contacto existente.');
+}
+
 function holded_contact_candidates(array $contacts, string $clientName, string $fiscalName, string $taxId): array
 {
     $tax=holded_contact_normalize($taxId);

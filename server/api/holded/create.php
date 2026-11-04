@@ -31,6 +31,7 @@ $find=$pdo->prepare('SELECT * FROM app_invoices WHERE id=?');$find->execute([$in
 if(!$savedRow)respond(['error'=>'Guarda el borrador antes de enviarlo a Holded.'],409);
 $savedInvoice=billing_row($savedRow);
 if (trim((string)($invoice['cliente']??''))!==trim((string)($savedInvoice['cliente']??''))) respond(['error'=>'El cliente del borrador cambió. Guarda y revisa el borrador antes de enviarlo a Holded.'],409);
+if (($invoice['holdedContactSelection']??null)!=($savedInvoice['holdedContactSelection']??null)) respond(['error'=>'Guarda el destinatario de Holded en el borrador antes de enviar.'],409);
 if(!empty($savedInvoice['groupedInto']))respond(['error'=>'Este expediente está incluido en '.$savedInvoice['groupedInto'].'. Envía la factura conjunta, no el borrador individual.'],409);
 $export=$pdo->prepare('SELECT state,result FROM app_billing_exports WHERE invoice_id=?');$export->execute([$invoiceId]);$previousExport=$export->fetch();
 if($previousExport){
@@ -257,10 +258,13 @@ $request = [
     'items' => $holdedItems,
 ];
 try {
-    $contactResolution = holded_resolve_contact($apiKey, $clientName, $clientFiscalName, $clientTaxId);
+    $selection=$savedInvoice['holdedContactSelection']??null;
+    $contactResolution = is_array($selection)&&!empty($selection['id'])
+        ? holded_resolve_selected_contact($apiKey,$selection,$invoiceId,$clientName)
+        : holded_resolve_contact($apiKey, $clientName, $clientFiscalName, $clientTaxId);
     $request = holded_existing_contact_request($request, $contactResolution);
 } catch (InvalidArgumentException $error) {
-    respond(['error'=>$error->getMessage()],422);
+    respond(['error'=>$error->getMessage().' Abre el borrador y elige el destinatario en «Contacto existente de Holded».','code'=>'holded_contact_required'],422);
 } catch (RuntimeException $error) {
     respond(['error'=>$error->getMessage()],502);
 }

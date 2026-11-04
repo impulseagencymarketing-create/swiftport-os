@@ -1,0 +1,9 @@
+.holded-contact-picker{display:grid;gap:12px;min-width:0;padding:18px;border:1px solid var(--line,#dce4ef);border-radius:12px;background:#f4f8fc;color:#172338}
+:root[data-theme="dark"] .holded-contact-picker{background:#132331;color:#e6edf5}
+.holded-contact-picker p{margin:0;line-height:1.5}
+.holded-contact-picker .field{min-width:0}
+.holded-contact-picker input,.holded-contact-picker select{width:100%;min-width:0;max-width:100%}
+.holded-contact-picker>button{justify-self:start;white-space:normal}
+.holded-contact-selected{display:grid;gap:8px;overflow-wrap:anywhere;padding:12px;border-left:3px solid #60a5fa}
+.holded-contact-selected button{justify-self:start;white-space:normal;text-align:left}
+.holded-contact-picker [role=alert]{color:#e6a84a}
