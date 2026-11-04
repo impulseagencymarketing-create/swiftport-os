@@ -56,7 +56,7 @@ jobs:
           node --test tests/invoiceTransportLines.test.mjs
           node --test tests/financeSave.test.mjs
           node --test tests/manualInvoice.test.mjs
-          node --test tests/invoiceDates.test.mjs tests/invoiceSchedule.test.mjs tests/limaniPoMessage.test.mjs
+          node --test tests/invoiceDates.test.mjs tests/invoiceSchedule.test.mjs tests/limaniPoMessage.test.mjs tests/invoiceOperationSync.test.mjs
           node --test tests/invoiceGrouping.test.mjs
           node --test tests/wristVat.test.mjs
           node --test tests/calendarPending.test.mjs

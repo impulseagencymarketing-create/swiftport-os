@@ -18,3 +18,9 @@ try { protect_manual_finance(['lines'=>[]],$manual); throw new RuntimeException(
 catch (FinanceConflict $error) {}
 protect_manual_finance(array_replace($manual,['manualEditedAt'=>'new edit','lines'=>[['price'=>35]]]),$manual);
 echo "OK: server protects manual lines from automatic and old-client rewrites\n";
+$operational=array_replace($manual,['operationSyncVersion'=>1,'operationReviewRequired'=>true,'operationSnapshot'=>['cargo'=>'900 KGS'],'lines'=>[['item'=>'STORAGE','price'=>25,'detail'=>'900 KGS']]]);
+protect_manual_finance($operational,$manual);
+try { protect_manual_finance(array_replace($operational,['lines'=>[['item'=>'STORAGE','price'=>50,'detail'=>'900 KGS']]]),$manual); throw new RuntimeException('Operational price overwrite accepted'); }
+catch (FinanceConflict $error) {}
+try { protect_manual_finance($operational,array_replace($manual,['holdedId'=>'issued'])); throw new RuntimeException('Issued overwrite accepted'); }
+catch (FinanceConflict $error) {}

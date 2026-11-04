@@ -10,6 +10,25 @@ function protect_manual_finance(array $incoming, array $stored): void
         throw new FinanceConflict('Este borrador tiene una edición manual protegida. Actualiza la aplicación antes de guardarlo.');
     }
     if (($incoming['manualEditedAt'] ?? '') !== ($stored['manualEditedAt'] ?? '')) return;
+    // Operational refresh may update descriptions, but never negotiated monetary fields.
+    $operational = ($incoming['operationSyncVersion'] ?? null) === 1
+        && ($incoming['operationReviewRequired'] ?? false) === true
+        && !empty($incoming['operationSnapshot'])
+        && empty($stored['holdedId']) && empty($stored['holdedNumber']) && empty($stored['holdedAt'])
+        && !in_array($stored['estado'] ?? '', ['Enviado a Holded','Facturado','Cobrado','Archivado','Agrupado'], true)
+        && empty($stored['groupedInto']) && empty($stored['sourceInvoiceIds'])
+        && ($incoming['cliente'] ?? null) == ($stored['cliente'] ?? null)
+        && ($incoming['observaciones'] ?? null) == ($stored['observaciones'] ?? null)
+        && ($incoming['importe'] ?? null) == ($stored['importe'] ?? null);
+    if ($operational) {
+        $strip = static function(array $lines): array {
+            return array_map(static function(array $line): array {
+                unset($line['item'], $line['detail']);
+                return $line;
+            }, $lines);
+        };
+        if ($strip($incoming['lines'] ?? []) == $strip($stored['lines'] ?? [])) return;
+    }
     foreach (['lines', 'concepto', 'cliente', 'observaciones'] as $field) {
         // MySQL JSON may reorder object keys; compare values, not PHP key order.
         if (($incoming[$field] ?? null) != ($stored[$field] ?? null)) {
