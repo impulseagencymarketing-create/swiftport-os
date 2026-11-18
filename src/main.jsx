@@ -1,6 +1,7 @@
 import {syncInvoiceOperation,operationSnapshot,syncGroupedInvoiceOperations} from './invoiceOperationSync.mjs';
 import LimaniPoRequest from './LimaniPoRequest.jsx';
 import HoldedContactPicker from './HoldedContactPicker.jsx';
+import {AUTOMATIC_ALERTS_ENABLED} from './notificationPolicy.mjs';
 import {invoiceSearchText,invoiceMatchesSearch} from './invoiceSearch.mjs';
 import './billing-search.css';
 import {invoiceOperationLabel,refreshInvoiceOperationDate} from './invoiceSchedule.mjs';
@@ -1332,6 +1333,7 @@ async function api(path,options={}){
   return body;
 }
 async function showDeviceNotification(title,body,tag){
+  if(!AUTOMATIC_ALERTS_ENABLED)return false;
   if(!('Notification' in window)||Notification.permission!=='granted')return false;
   const options={body,tag,renotify:true,icon:'/swiftport-icon.svg',badge:'/swiftport-icon.svg',data:{url:'/'}};
   if('serviceWorker' in navigator){
@@ -1352,12 +1354,12 @@ const ALERT_SOUND_OPTIONS=[
   {id:'radio',label:'Radio discreta'},
   {id:'ship',label:'Bocina de barco suave'}
 ];
-const DEFAULT_ALERT_SOUND_SETTINGS={enabled:true,sound:'message',volume:.45};
+const DEFAULT_ALERT_SOUND_SETTINGS={enabled:AUTOMATIC_ALERTS_ENABLED,sound:'message',volume:.45};
 const normalizeAlertSoundSettings=settings=>{
   const raw=settings&&typeof settings==='object'?settings:{};
   const sound=ALERT_SOUND_OPTIONS.some(option=>option.id===raw.sound)?raw.sound:DEFAULT_ALERT_SOUND_SETTINGS.sound;
   const volume=Math.min(ALERT_SOUND_MAX_VOLUME,Math.max(0,Number.isFinite(Number(raw.volume))?Number(raw.volume):DEFAULT_ALERT_SOUND_SETTINGS.volume));
-  return {enabled:raw.enabled!==false,sound,volume};
+  return {enabled:AUTOMATIC_ALERTS_ENABLED&&raw.enabled!==false,sound,volume};
 };
 const loadAlertSoundSettings=()=>{
   try{
@@ -1906,7 +1908,7 @@ function App({auth,finance,onFinanceChange,onLogout}){
     return saved;
   };
   useEffect(()=>{
-    if(!operationalLoaded)return;
+    if(!AUTOMATIC_ALERTS_ENABLED||!operationalLoaded)return;
     const storageKey=`swiftport-ais-alerts-${user.id}`;
     let previous=aisAlertSnapshotRef.current;
     let hadSnapshot=previous!==null;
@@ -1954,7 +1956,7 @@ function App({auth,finance,onFinanceChange,onLogout}){
   };
   const acknowledgeOperationalAlert=alert=>alert?.type==='billing'?acknowledgeBillingAlert(alert):acknowledgeDeliveryAlert(alert);
   useEffect(()=>{
-    if(!operationalLoaded||!deliveryAlerts.length)return;
+    if(!AUTOMATIC_ALERTS_ENABLED||!operationalLoaded||!deliveryAlerts.length)return;
     const storageKey=`swiftport-delivery-alerts-${user.id}`;
     let sent={};
     try{sent=JSON.parse(localStorage.getItem(storageKey)||'{}')||{}}catch{sent={}}
@@ -1977,7 +1979,7 @@ function App({auth,finance,onFinanceChange,onLogout}){
     }
   },[deliveryAlerts,operationalLoaded,user.id,alertSoundSettings]);
   useEffect(()=>{
-    if(!operationalLoaded||!billingAlerts.length)return;
+    if(!AUTOMATIC_ALERTS_ENABLED||!operationalLoaded||!billingAlerts.length)return;
     const storageKey=`swiftport-billing-alerts-${user.id}`;
     let sent={};
     try{sent=JSON.parse(localStorage.getItem(storageKey)||'{}')||{}}catch{sent={}}
@@ -2711,7 +2713,7 @@ No se borrarán documentos ni fotos. El expediente volverá a este punto para co
         </div>
         <div className="topbar-actions">
           <button className="icon-button theme-toggle" aria-label={colorTheme==='dark'?'Activar modo claro':'Activar modo oscuro'} title={colorTheme==='dark'?'Modo claro':'Modo oscuro'} onClick={()=>setColorTheme(current=>current==='dark'?'light':'dark')}>{colorTheme==='dark'?<Sun/>:<Moon/>}</button>
-          <button className="icon-button notification" aria-label="Notificaciones" onClick={openNotificationCenter}><Bell/>{notificationCount>0&&<i>{notificationCount}</i>}</button>
+          <button className="icon-button notification" aria-label="Notificaciones" onClick={openNotificationCenter}><Bell/>{AUTOMATIC_ALERTS_ENABLED&&notificationCount>0&&<i>{notificationCount}</i>}</button>
           {!driverOnly&&<button className="button primary" aria-label="Nuevo expediente" onClick={()=>setNewOpen(true)}><Plus/> <span>Nuevo expediente</span></button>}
           <div className="avatar" title={visibleUser.fullName+'  -  '+roleLabel(visibleUser)}>{initials(visibleUser.fullName)}</div>
         </div>
@@ -2739,7 +2741,7 @@ No se borrarán documentos ni fotos. El expediente volverá a este punto para co
     <MobileNav tab={tab} navigate={navigate} more={()=>setMenuOpen(true)} nav={availableNav}/>
     {newOpen&&<NewCaseModal clientOptions={clientOptions} vessels={vessels} team={operationalTeam} close={()=>setNewOpen(false)} submit={createCase}/>}
     {notificationOpen&&<NotificationDrawer alerts={activeNotifications} history={notificationLog} acknowledge={acknowledgeOperationalAlert} close={()=>setNotificationOpen(false)} clear={clearNotificationLog} openCalendar={()=>{setNotificationOpen(false);navigate('calendario')}} openBilling={()=>{setNotificationOpen(false);navigate('facturacion')}} soundSettings={alertSoundSettings} updateSoundSettings={updateAlertSoundSettings}/>}
-    {deliveryPopup&&<DeliveryPopup alert={deliveryPopup} close={()=>acknowledgeOperationalAlert(deliveryPopup)} openHistory={()=>{setDeliveryPopup(null);setNotificationOpen(true)}} soundSettings={alertSoundSettings} updateSoundSettings={updateAlertSoundSettings}/>}
+    {AUTOMATIC_ALERTS_ENABLED&&deliveryPopup&&<DeliveryPopup alert={deliveryPopup} close={()=>acknowledgeOperationalAlert(deliveryPopup)} openHistory={()=>{setDeliveryPopup(null);setNotificationOpen(true)}} soundSettings={alertSoundSettings} updateSoundSettings={updateAlertSoundSettings}/>}
     {toast&&<div className="toast" role="status"><CheckCircle2/>{toast}</div>}
   </div>;
 }
@@ -2767,19 +2769,20 @@ const volumeLabel=`Volumen ${Math.round(settings.volume*100)}%${settings.volume>
       <section className="notification-drawer-actions">
         <button className="button secondary" onClick={openCalendar}><CalendarDays/> Abrir calendario</button>
         <button className="button secondary" onClick={openBilling}><ReceiptText/> Abrir facturación</button>
-        <button className="button secondary" onClick={testSound}><Bell/> Probar sonido</button>
+        {AUTOMATIC_ALERTS_ENABLED&&<button className="button secondary" onClick={testSound}><Bell/> Probar sonido</button>}
         <button className="button tertiary" onClick={clear}>Limpiar historial</button>
       </section>
-      <section className="notification-sound-settings" aria-label="Configuracion del sonido de alertas">
+      {!AUTOMATIC_ALERTS_ENABLED&&<p className="notification-empty">Avisos automáticos desactivados: sin ventanas emergentes, sonidos ni notificaciones del dispositivo. Puedes consultar los pendientes aquí cuando lo necesites.</p>}
+      {AUTOMATIC_ALERTS_ENABLED&&<section className="notification-sound-settings" aria-label="Configuracion del sonido de alertas">
         <label><span>Sonido de alerta</span><select value={settings.sound} onChange={event=>updateSettings({sound:event.target.value})}>{ALERT_SOUND_OPTIONS.map(option=><option key={option.id} value={option.id}>{option.label}</option>)}</select></label>
         <label><span>{volumeLabel}</span><input type="range" min="0" max={ALERT_SOUND_MAX_VOLUME} step="0.05" value={settings.volume} onChange={event=>updateSettings({volume:Number(event.target.value)})}/></label>
         <label className="sound-toggle"><input type="checkbox" checked={settings.enabled} onChange={event=>updateSettings({enabled:event.target.checked})}/> Sonido activo</label>
-      </section>
+      </section>}
       <section>
-        <h3>Ahora requiere atención</h3>
+        <h3>Pendientes para consultar</h3>
         {alerts.length?alerts.map(alert=><article className={`notification-card active ${alert.type==='billing'?'billing':''}`} key={alert.key}>
           <span>{alert.type==='billing'?<ReceiptText/>:<Timer/>}</span>
-          <div><b>{alert.type==='billing'?'Facturación':alert.case?.buque||alert.event?.titulo||'Entrega'}</b><p>{alert.message}</p><small>{alert.rule?.label||'Aviso operativo'}  -  repetirá hasta gestionar</small><button className="button secondary notification-ack" onClick={()=>acknowledge?.(alert)}>Entendido</button></div>
+          <div><b>{alert.type==='billing'?'Facturación':alert.case?.buque||alert.event?.titulo||'Entrega'}</b><p>{alert.message}</p><small>{AUTOMATIC_ALERTS_ENABLED?(alert.rule?.label||'Aviso operativo'):'Pendiente'}  -  consulta sin recordatorios automáticos</small><button className="button secondary notification-ack" onClick={()=>acknowledge?.(alert)}>Entendido</button></div>
         </article>):<p className="notification-empty">No hay avisos activos ahora mismo.</p>}
       </section>
       <section>
@@ -2900,6 +2903,7 @@ function VesselFinderMap({item}){
     finally{setRefreshing(false)}
   };
   const enableDeviceAlerts=async()=>{
+    if(!AUTOMATIC_ALERTS_ENABLED)return;
     if(!('Notification' in window)){notify('Este navegador no admite avisos. En iPhone, añade Swiftport a la pantalla de inicio.');return}
     const permission=await Notification.requestPermission();
     if(permission!=='granted'){notify('Debes permitir las notificaciones de Swiftport en el teléfono.');return}
@@ -2909,7 +2913,7 @@ function VesselFinderMap({item}){
     notify('Avisos de aproximación activados en este teléfono');
   };
   const refreshButton=<button className="button secondary ais-refresh" onClick={refresh} disabled={refreshing}><RefreshCw className={refreshing?'spinning':''}/>{refreshing?'Buscando señal AIS…':'Actualizar posición ahora'}</button>;
-  const alertButton=<button className={'button '+(deviceAlerts?'device-alert-enabled':'tertiary')} onClick={enableDeviceAlerts} disabled={deviceAlerts}><Bell/>{deviceAlerts?'Avisos activos':'Activar avisos en este móvil'}</button>;
+  const alertButton=AUTOMATIC_ALERTS_ENABLED&&<button className={'button '+(deviceAlerts?'device-alert-enabled':'tertiary')} onClick={enableDeviceAlerts} disabled={deviceAlerts}><Bell/>{deviceAlerts?'Avisos activos':'Activar avisos en este móvil'}</button>;
   if(!hasIdentifier)return <section className="ais-panel ais-empty"><Navigation/><div><small>SEGUIMIENTO DEL BUQUE</small><b>Añade el IMO o MMSI para localizarlo</b><p>Edita el expediente e introduce el IMO de 7 dígitos o el MMSI de 9 dígitos.</p></div></section>;
   if(!tracking)return <section className="ais-panel"><VesselFinderMap item={item}/><div className="ais-info"><span className="overline"><Navigation/> MAPA OFICIAL VESSELFINDER</span><div className="ais-status"><i className="stale"/><span><small>DATOS DE SWIFTPORT</small><b>Esperando señal propia</b></span></div><p>El mapa oficial de VesselFinder permanece dentro de Swiftport y muestra el puerto y la última posición pública disponible. Swiftport seguirá consultando AISStream para calcular métricas y alertas.</p><div className="ais-actions">{item.mmsi?refreshButton:<p>Añade también el MMSI para activar la actualización automática de Swiftport.</p>}{alertButton}</div></div></section>;
   const last=tracking.sourceTimestamp||tracking.receivedAt;
