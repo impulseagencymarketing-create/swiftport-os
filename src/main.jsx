@@ -1862,6 +1862,7 @@ function App({auth,finance,onFinanceChange,onLogout}){
   const [operationalLoaded,setOperationalLoaded]=useState(false);
   const [toast,setToast]=useState('');
   const operationalSaveInFlight=useRef(false);
+  const operationalSaveRevision=useRef(0);
   const aisAlertSnapshotRef=useRef(null);
   const [alertTick,setAlertTick]=useState(Date.now());
   const [notificationOpen,setNotificationOpen]=useState(false);
@@ -1882,7 +1883,11 @@ function App({auth,finance,onFinanceChange,onLogout}){
   useEffect(()=>{try{setAcknowledgedBillingAlerts(JSON.parse(localStorage.getItem(`swiftport-billing-alert-ack-${user.id}`)||'{}')||{})}catch{setAcknowledgedBillingAlerts({})}},[user.id]);
   useEffect(()=>{const timer=window.setInterval(()=>setAlertTick(Date.now()),300000);return()=>window.clearInterval(timer)},[]);
   const loadTeam=()=>api('/api/users/directory.php').then(result=>setTeam(result.users)).catch(reason=>notify(reason.message));
-  const loadOperational=()=>operationalSaveInFlight.current?Promise.resolve():api('/api/operational.php').then(result=>{
+  const loadOperational=()=>{
+    if(operationalSaveInFlight.current)return Promise.resolve();
+    const revision=operationalSaveRevision.current;
+    return api('/api/operational.php').then(result=>{
+    if(operationalSaveInFlight.current||revision!==operationalSaveRevision.current)return;
     if(result.data){
       const loadedCases=result.data.cases.map(normalizeMerchandise);
       const relatedLoadedCase=reference=>loadedCases.find(item=>sameCaseReference(item.id,reference));
@@ -1894,6 +1899,7 @@ function App({auth,finance,onFinanceChange,onLogout}){
     }
     setOperationalLoaded(true)
   }).catch(reason=>{setOperationalLoaded(true);notify(reason.message)});
+  };
   useEffect(()=>{const baseClientOptions=mergeClientProfiles(clientNames.map(nombre=>({nombre}))).map(item=>item.nombre);if(auth.demo){setTeam(DEMO_TEAM);setClientOptions(baseClientOptions);setOperationalLoaded(true);return}loadTeam();api('/api/clients/directory.php').then(result=>setClientOptions([...new Set([...baseClientOptions,...result.clients.map(item=>item.name)])])).catch(()=>setClientOptions(baseClientOptions));loadOperational();const timer=window.setInterval(loadOperational,45000);window.addEventListener('focus',loadOperational);return()=>{window.clearInterval(timer);window.removeEventListener('focus',loadOperational)}},[]);
   const ensureClientOption=async name=>{
     const client=String(name||'').trim();
@@ -1999,6 +2005,7 @@ function App({auth,finance,onFinanceChange,onLogout}){
   const persistOperational=async(nextCases=cases,nextTransports=transports,nextWarehouse=warehouseEntries,nextCustoms=customs,nextCalendar=calendarEvents,nextProviders=providers,nextVessels=vessels,nextDeletedVesselKeys=deletedVesselKeys,auditEvent=null)=>{
     nextWarehouse=reconcileWarehouseArchive(nextWarehouse,nextCases);
     operationalSaveInFlight.current=true;
+    operationalSaveRevision.current+=1;
     try{
       if(auth.demo)return {ok:true};
       return await api('/api/operational.php',{method:'PUT',headers:{'X-CSRF-Token':auth.csrfToken},body:jsonBody({data:{cases:nextCases,transports:nextTransports,warehouseEntries:nextWarehouse,customs:nextCustoms,calendarEvents:nextCalendar,providers:nextProviders,vessels:nextVessels,deletedVesselKeys:nextDeletedVesselKeys},audit:auditEvent})});
@@ -2159,7 +2166,7 @@ function App({auth,finance,onFinanceChange,onLogout}){
     notify(cancelled?'Servicio cancelado, retirado de los choferes y guardado en el expediente':'Ruta, transporte y calendario actualizados');
     return true;
   };
-  const updateCase=async updated=>{
+  const updateCase=async (updated,{confirmedSave=false}={})=>{
     const {importe,...rawCase}=updated;
     const previousCase=cases.find(item=>item.id===rawCase.id)||{};
     const known=findKnownVessel(vessels,rawCase.buque)||{};
@@ -2229,12 +2236,17 @@ function App({auth,finance,onFinanceChange,onLogout}){
       scheduleNote:item.scheduleNote||scheduleNote
     }));
     const nextCalendar=[...syncedCalendar,...missingCalendarEvents].filter(isTransportCalendarEvent);
-    setCases(next);setVessels(nextVessels);setWarehouseEntries(nextWarehouse);setTransports(nextTransports);setCalendarEvents(nextCalendar);
+    const applyUpdatedCase=()=>{setCases(next);setVessels(nextVessels);setWarehouseEntries(nextWarehouse);setTransports(nextTransports);setCalendarEvents(nextCalendar)};
+    if(!confirmedSave)applyUpdatedCase();
     try{
-      await persistOperational(next,nextTransports,nextWarehouse,customs,nextCalendar,providers,nextVessels,deletedVesselKeys,{action:'case.update',details:{caseRef:operationalCase.id,vessel:operationalCase.buque,client:operationalCase.cliente,port:operationalCase.puerto,purchaseOrder:operationalCase.purchaseOrder||'',eta:operationalCase.eta,etb:portCallMoment(normalizedPortCall.etbDate,normalizedPortCall.etbTime),etd:portCallMoment(normalizedPortCall.etdDate,normalizedPortCall.etdTime)}});
+      const result=await persistOperational(next,nextTransports,nextWarehouse,customs,nextCalendar,providers,nextVessels,deletedVesselKeys,{action:'case.update',details:{caseRef:operationalCase.id,vessel:operationalCase.buque,client:operationalCase.cliente,port:operationalCase.puerto,purchaseOrder:operationalCase.purchaseOrder||'',eta:operationalCase.eta,etb:portCallMoment(normalizedPortCall.etbDate,normalizedPortCall.etbTime),etd:portCallMoment(normalizedPortCall.etdDate,normalizedPortCall.etdTime)}});
+      if(confirmedSave&&result?.ok!==true)throw new Error('El servidor no confirmó el guardado.');
+      if(confirmedSave)applyUpdatedCase();
       notify(slot.date?'Expediente, buque, almacén y calendario actualizados':(activeEntries.length===1?'Expediente, buque y almacén actualizados':'Expediente y buque actualizados'));
+      return true;
     }catch(reason){
       notify('No se pudo guardar el expediente: '+reason.message);
+      return false;
     }
   };
   const deleteCaseAttachment=(caseId,scope,file,receptionRef='')=>{
@@ -3751,7 +3763,7 @@ function CaseCancellationModal({item,close,submit}){
   const filtered=cases.filter(item=>(filterStatus==='Todos'||item.estado===filterStatus)&&[item.buque,item.id,item.cliente,item.puerto,item.purchaseOrder].join(' ').toLowerCase().includes(search.toLowerCase())).sort(newestFirst);
   return <div className={'case-layout '+(mobileDetail?'mobile-detail-open':'')}>
     <section className={'panel case-list '+(selected?'has-selection':'')}><div className="list-toolbar"><label className="search-box"><Search/><input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Buscar número, buque, PO, ETA o puerto…"/></label><div className="filter-chips">{['Todos','En curso','Cancelados','Completados'].map(value=><button key={value} className={filter===value?'active':''} onClick={()=>setFilter(value)}>{value}</button>)}</div></div><div className="case-count">{filtered.length} expedientes</div>{filtered.length?filtered.map(item=><button key={item.id} className={'case-card port-'+portTone(item.puerto)+' '+(selected.id===item.id?'selected':'')} onClick={()=>{select(item.id);setMobileDetail(true)}}><div className="case-card-top"><span className="ship-icon"><Ship/></span><span><b>{caseLabel(item)}</b><small>{item.cliente}</small></span><Badge>{item.estado}</Badge></div><span className={'service-type-badge '+serviceTypeOf(item)}>{serviceTypeMeta(item).short}</span><div className="case-card-meta"><span><MapPin/>{item.puerto}</span><span><CalendarDays/>{item.eta}</span>{item.purchaseOrder&&<span><ReceiptText/>{item.purchaseOrder}</span>}</div><div className="case-progress"><span><i style={{width:item.progreso+'%'}}/></span><small>{item.progreso}%</small></div><p><b>Siguiente:</b> {item.siguiente}</p></button>):<Empty text="Prueba con otro término o estado."/>}</section>
-    <section className="panel case-detail"><button className="mobile-detail-back" onClick={()=>setMobileDetail(false)}><ArrowLeft/> Expedientes</button><div className="detail-hero"><div><div className="detail-id">{selected.id} <Badge>{selected.estado}</Badge></div><h2>{selected.buque}</h2><p>{selected.cliente}  -  {selected.puerto}</p>{selected.purchaseOrder&&<p><b>PO / Purchase Order: {selected.purchaseOrder}</b></p>}<span className={'service-type-badge large '+serviceTypeOf(selected)}>{serviceTypeMeta(selected).label}</span></div><div className="detail-actions"><button className="icon-button" aria-label="Editar expediente" onClick={()=>setEditOpen(true)}><PencilLine/></button>{(hasRole(currentUser,'operations')||hasRole(currentUser,'admin'))&&selected.estado!=='Cancelado'&&<button className="button tertiary danger compact" onClick={()=>setCancelOpen(true)}><CircleAlert/> Cancelar expediente</button>}{(hasRole(currentUser,'operations')||hasRole(currentUser,'admin'))&&<button className="icon-button danger" aria-label="Borrar expediente" onClick={()=>deleteCase(selected.id)}><Trash2/></button>}</div></div><div className={'detail-stats '+(!showFinance?'detail-stats-three':'')}><Stat label="ETA" value={selected.eta} icon={Clock3}/><Stat label="Mercancía" value={selected.bultos+' bultos  -  '+selected.peso} icon={Box}/><Stat label="Conductor" value={selected.conductor} icon={UserRound}/>{showFinance&&<Stat label="Importe previsto" value={money(selected.importe)} icon={BadgeEuro}/>}</div><PortCallPanel item={selected}/>{isSupplyService(selected)&&<SupplyOrderPanel item={selected} updateCase={updateCase} notify={notify}/>}<OperationChecklist item={selected} csrfToken={csrfToken} reloadOperational={reloadOperational} notify={notify} currentRoles={currentUser} onStepSelect={openFlowStep}/><CaseStepReopenPanel item={selected} reopen={key=>reopenCaseStep?.(selected.id,key)}/><ShipmentDocuments item={selected} onDelete={(file,scope)=>deleteAttachment?.(selected.id,scope||'shipment',file,(selected.recepciones||[]).find(record=>(record.documentos||[]).some(stored=>sameAttachment(stored,file)))?.ref)} onUpload={files=>attachCaseFiles('shipment',files)} uploading={postUpload==='shipment'}/><DocumentAutomationPanel item={selected} updateCase={updateCase} onUpload={files=>attachCaseFiles('shipment',files)} notify={notify}/><div className="detail-columns"><div><h3>Línea temporal real</h3><ActualTimeline item={selected}/></div><aside className="detail-side"><div className={'next-action '+(operationFlow(selected).billingReady?'complete':'')}><span>{selected.caseCancellation?.sentToBilling?'Expediente cancelado':operationFlow(selected).billingReady?'Operativa completada':'Próxima acción'}</span><b>{selected.siguiente}</b><p>{selected.caseCancellation?.sentToBilling?'La operativa está cerrada. Facturación decidirá qué gastos o conceptos se cobran.':operationFlow(selected).billingReady?'El POD está registrado y el expediente ha pasado a facturación.':'Sigue el paso indicado para que todo el equipo trabaje igual.'}</p><button className="button primary full" disabled={operationFlow(selected).billingReady} onClick={()=>openFlowStep(null)}><ClipboardCheck/> {selected.caseCancellation?.sentToBilling?'Pendiente en Facturación':operationFlow(selected).billingReady?'Listo para facturar':'Registrar siguiente paso'}</button></div><PodDocuments item={selected} notify={notify} onDelete={(file,scope)=>deleteAttachment?.(selected.id,scope,file)} onUploadPod={files=>attachCaseFiles('pod',files)} onUploadDeliveryPhoto={files=>attachCaseFiles('delivery-photo',files)} uploading={postUpload}/>{(hasRole(currentUser,'operations')||hasRole(currentUser,'admin'))&&<button className="button danger full" onClick={()=>deleteCase(selected.id)}><Trash2/> Borrar expediente</button>}</aside></div></section>
+    <section className="panel case-detail"><button className="mobile-detail-back" onClick={()=>setMobileDetail(false)}><ArrowLeft/> Expedientes</button><div className="detail-hero"><div><div className="detail-id">{selected.id} <Badge>{selected.estado}</Badge></div><h2>{selected.buque}</h2><p>{selected.cliente}  -  {selected.puerto}</p>{selected.purchaseOrder&&<p><b>PO / Purchase Order: {selected.purchaseOrder}</b></p>}<span className={'service-type-badge large '+serviceTypeOf(selected)}>{serviceTypeMeta(selected).label}</span></div><div className="detail-actions"><button className="icon-button" aria-label="Editar expediente" onClick={()=>setEditOpen(true)}><PencilLine/></button>{(hasRole(currentUser,'operations')||hasRole(currentUser,'admin'))&&selected.estado!=='Cancelado'&&<button className="button tertiary danger compact" onClick={()=>setCancelOpen(true)}><CircleAlert/> Cancelar expediente</button>}{(hasRole(currentUser,'operations')||hasRole(currentUser,'admin'))&&<button className="icon-button danger" aria-label="Borrar expediente" onClick={()=>deleteCase(selected.id)}><Trash2/></button>}</div></div><div className={'detail-stats '+(!showFinance?'detail-stats-three':'')}><Stat label="ETA" value={selected.eta} icon={Clock3}/><Stat label="Mercancía" value={selected.bultos+' bultos  -  '+selected.peso} icon={Box}/><Stat label="Conductor" value={selected.conductor} icon={UserRound}/>{showFinance&&<Stat label="Importe previsto" value={money(selected.importe)} icon={BadgeEuro}/>}</div><PortCallPanel item={selected}/>{isSupplyService(selected)&&<SupplyOrderPanel key={selected.id} item={selected} updateCase={updateCase} notify={notify}/>}<OperationChecklist item={selected} csrfToken={csrfToken} reloadOperational={reloadOperational} notify={notify} currentRoles={currentUser} onStepSelect={openFlowStep}/><CaseStepReopenPanel item={selected} reopen={key=>reopenCaseStep?.(selected.id,key)}/><ShipmentDocuments item={selected} onDelete={(file,scope)=>deleteAttachment?.(selected.id,scope||'shipment',file,(selected.recepciones||[]).find(record=>(record.documentos||[]).some(stored=>sameAttachment(stored,file)))?.ref)} onUpload={files=>attachCaseFiles('shipment',files)} uploading={postUpload==='shipment'}/><DocumentAutomationPanel item={selected} updateCase={updateCase} onUpload={files=>attachCaseFiles('shipment',files)} notify={notify}/><div className="detail-columns"><div><h3>Línea temporal real</h3><ActualTimeline item={selected}/></div><aside className="detail-side"><div className={'next-action '+(operationFlow(selected).billingReady?'complete':'')}><span>{selected.caseCancellation?.sentToBilling?'Expediente cancelado':operationFlow(selected).billingReady?'Operativa completada':'Próxima acción'}</span><b>{selected.siguiente}</b><p>{selected.caseCancellation?.sentToBilling?'La operativa está cerrada. Facturación decidirá qué gastos o conceptos se cobran.':operationFlow(selected).billingReady?'El POD está registrado y el expediente ha pasado a facturación.':'Sigue el paso indicado para que todo el equipo trabaje igual.'}</p><button className="button primary full" disabled={operationFlow(selected).billingReady} onClick={()=>openFlowStep(null)}><ClipboardCheck/> {selected.caseCancellation?.sentToBilling?'Pendiente en Facturación':operationFlow(selected).billingReady?'Listo para facturar':'Registrar siguiente paso'}</button></div><PodDocuments item={selected} notify={notify} onDelete={(file,scope)=>deleteAttachment?.(selected.id,scope,file)} onUploadPod={files=>attachCaseFiles('pod',files)} onUploadDeliveryPhoto={files=>attachCaseFiles('delivery-photo',files)} uploading={postUpload}/>{(hasRole(currentUser,'operations')||hasRole(currentUser,'admin'))&&<button className="button danger full" onClick={()=>deleteCase(selected.id)}><Trash2/> Borrar expediente</button>}</aside></div></section>
     {(hasRole(currentUser,'operations')||hasRole(currentUser,'admin'))&&<section className="panel case-mails-panel"><CaseEmailsPanel item={selected} csrfToken={csrfToken} notify={notify}/></section>}
     <section className="panel case-services-panel"><CaseServicesPanel item={selected} events={calendarEvents} cases={cases} transports={transports} team={team} providers={providers} warehouseEntries={warehouseEntries} saveEvent={saveEvent} updateTransport={updateTransport}/></section>
     <section className="panel case-load-panel"><CaseLoadPanel item={selected} warehouseEntries={warehouseEntries} events={calendarEvents}/></section>
@@ -3895,9 +3907,23 @@ function ActualTimeline({item}){
 function SupplyOrderPanel({item,updateCase,notify}){
   const blankLine=()=>({id:`SUP-${Date.now()}-${Math.random().toString(16).slice(2)}`,description:'',requested:1,unit:'UD',supplier:'',ordered:0,received:0,prepared:0,unitCost:0,unitPrice:0,notes:''});
   const initial=()=>({mode:'warehouse',deadline:'',contact:'',notes:'',lines:[],...(item.supplyOrder||{})});
-  const [draft,setDraft]=useState(initial);
+  const [draft,setDraftState]=useState(initial);
+  const draftRef=useRef(draft);
+  const dirtyRef=useRef(false);
+  const orderSignature=JSON.stringify(item.supplyOrder||{});
+  const setDraft=change=>{
+    const next=typeof change==='function'?change(draftRef.current):change;
+    dirtyRef.current=true;
+    draftRef.current=next;
+    setDraftState(next);
+  };
   const [saving,setSaving]=useState(false);
-  useEffect(()=>setDraft(initial()),[item.id,item.supplyOrder]);
+  useEffect(()=>{
+    if(dirtyRef.current)return;
+    const next=initial();
+    draftRef.current=next;
+    setDraftState(next);
+  },[item.id,orderSignature]);
   const lines=Array.isArray(draft.lines)?draft.lines:[];
   const changeLine=(id,key,value)=>setDraft(current=>({...current,lines:(current.lines||[]).map(line=>line.id===id?{...line,[key]:value}:line)}));
   const numberValue=value=>Math.max(0,Number(value)||0);
@@ -3908,6 +3934,8 @@ function SupplyOrderPanel({item,updateCase,notify}){
   const sale=lines.reduce((sum,line)=>sum+numberValue(line.unitPrice)*numberValue(line.requested),0);
   const statusOf=line=>numberValue(line.prepared)>=numberValue(line.requested)?'Preparado':numberValue(line.received)>=numberValue(line.requested)?'Recibido':numberValue(line.received)>0?'Recepción parcial':numberValue(line.ordered)>=numberValue(line.requested)?'Comprado':numberValue(line.ordered)>0?'Compra parcial':'Solicitado';
   const save=async()=>{
+    if(saving)return;
+    if(lines.some(line=>!String(line.description||'').trim())){notify('Escribe la descripción de todos los productos antes de guardar');return}
     const clean=lines.filter(line=>String(line.description||'').trim()).map(line=>({...line,description:String(line.description).trim(),requested:numberValue(line.requested),ordered:numberValue(line.ordered),received:numberValue(line.received),prepared:numberValue(line.prepared),unitCost:numberValue(line.unitCost),unitPrice:numberValue(line.unitPrice),status:statusOf(line)}));
     if(!clean.length){notify('Añade al menos un producto al pedido Supply');return}
     setSaving(true);
@@ -3916,9 +3944,17 @@ function SupplyOrderPanel({item,updateCase,notify}){
       clean.filter(line=>line.unitPrice>0&&line.requested>0).forEach(line=>adjustments.push({id:`supply-sale-${line.id}`,item:'SUPPLY',detail:`${line.description.toUpperCase()} · ${line.unit||'UD'}${line.notes?` · ${line.notes.toUpperCase()}`:''}`,price:line.unitPrice,units:line.requested,tax:'0%'}));
       const expenses=(item.gastos||[]).filter(expense=>!String(expense.id||'').startsWith('SUPPLY-COST-'));
       clean.filter(line=>line.unitCost>0).forEach(line=>expenses.push({id:`SUPPLY-COST-${line.id}`,fecha:new Date().toISOString().slice(0,10),proveedor:line.supplier||'Proveedor Supply pendiente',concepto:`Compra Supply · ${line.description}`,importe:Number((line.unitCost*(line.ordered||line.requested)).toFixed(2)),nota:`${line.ordered||line.requested} ${line.unit||'UD'} · ${statusOf(line)}`,source:'supply-order',supplyLineId:line.id}));
-      await updateCase({...item,supplyOrder:{...draft,lines:clean,updatedAt:new Date().toISOString()},billingAdjustments:adjustments,gastos:expenses});
+      const savedOrder={...draft,lines:clean,updatedAt:new Date().toISOString()};
+      const saved=await updateCase({...item,supplyOrder:savedOrder,billingAdjustments:adjustments,gastos:expenses},{confirmedSave:true});
+      if(saved===false)return;
+      // Keep edits made while the request was pending; only acknowledge the submitted draft.
+      if(draftRef.current===draft){
+        dirtyRef.current=false;
+        draftRef.current=savedOrder;
+        setDraftState(savedOrder);
+      }
       notify('Pedido Supply, costes y venta guardados');
-    }finally{setSaving(false)}
+    }catch(reason){notify('No se pudo guardar el pedido Supply: '+reason.message)}finally{setSaving(false)}
   };
   return <section className="supply-control" id={`supply-control-${item.id}`}><div className="supply-head"><div><span className="overline"><PackageCheck/> Control Supply</span><h3>Pedido de aprovisionamiento</h3><p>Controla solicitud, compras, recepción, preparación, venta y margen antes de entregar al buque.</p></div><button type="button" className="button primary" disabled={saving} onClick={save}><Save/> {saving?'Guardando…':'Guardar pedido'}</button></div><div className="supply-summary"><span><small>Solicitado</small><b>{requested} uds.</b></span><span><small>Recibido</small><b>{received} / {requested}</b></span><span><small>Preparado</small><b>{prepared} / {requested}</b></span><span><small>Coste</small><b>{moneyExact(cost)}</b></span><span><small>Venta</small><b>{moneyExact(sale)}</b></span><span className={sale-cost>=0?'positive':'negative'}><small>Margen productos</small><b>{moneyExact(sale-cost)}</b></span></div><div className="supply-settings"><label className="field"><span>Modalidad logística</span><select value={draft.mode||'warehouse'} onChange={event=>setDraft({...draft,mode:event.target.value})}><option value="warehouse">Recepción y preparación en almacén</option><option value="direct">Recogida y entrega directa</option></select></label><label className="field"><span>Fecha límite de entrega</span><input type="datetime-local" value={draft.deadline||''} onChange={event=>setDraft({...draft,deadline:event.target.value})}/></label><label className="field"><span>Contacto / consignatario</span><input value={draft.contact||''} onChange={event=>setDraft({...draft,contact:event.target.value})} placeholder="Nombre, teléfono, acceso…"/></label><label className="field"><span>Instrucciones generales</span><input value={draft.notes||''} onChange={event=>setDraft({...draft,notes:event.target.value})} placeholder="Marcas, temperatura, sustituciones…"/></label></div><div className="supply-lines-head"><div><b>Productos del pedido</b><small>Las cantidades pueden recibirse y prepararse parcialmente.</small></div><button type="button" className="button secondary" onClick={()=>setDraft(current=>({...current,lines:[...(current.lines||[]),blankLine()]}))}><Plus/> Añadir producto</button></div>{lines.length?<div className="supply-lines">{lines.map((line,index)=><article key={line.id||index}><div className="supply-line-title"><span><small>PRODUCTO {index+1}</small><b>{line.description||'Sin descripción'}</b></span><em className={'supply-status '+statusOf(line).toLowerCase().replace(/\s/g,'-')}>{statusOf(line)}</em><button type="button" className="icon-button danger" aria-label="Eliminar producto" onClick={()=>setDraft(current=>({...current,lines:current.lines.filter(entry=>entry.id!==line.id)}))}><Trash2/></button></div><div className="supply-line-fields"><label className="field product"><span>Descripción *</span><input value={line.description||''} onChange={event=>changeLine(line.id,'description',event.target.value)} placeholder="Ej. Agua mineral 1,5 L"/></label><label className="field"><span>Unidad</span><select value={line.unit||'UD'} onChange={event=>changeLine(line.id,'unit',event.target.value)}>{['UD','CAJA','PACK','KG','L','PALLET'].map(unit=><option key={unit}>{unit}</option>)}</select></label><label className="field"><span>Solicitado</span><input type="number" min="0" step="0.01" value={line.requested??0} onChange={event=>changeLine(line.id,'requested',event.target.value)}/></label><label className="field"><span>Comprado</span><input type="number" min="0" step="0.01" value={line.ordered??0} onChange={event=>changeLine(line.id,'ordered',event.target.value)}/></label><label className="field"><span>Recibido</span><input type="number" min="0" step="0.01" value={line.received??0} onChange={event=>changeLine(line.id,'received',event.target.value)}/></label><label className="field"><span>Preparado</span><input type="number" min="0" step="0.01" value={line.prepared??0} onChange={event=>changeLine(line.id,'prepared',event.target.value)}/></label><label className="field supplier"><span>Proveedor</span><input value={line.supplier||''} onChange={event=>changeLine(line.id,'supplier',event.target.value)} placeholder="Proveedor / tienda"/></label><label className="field"><span>Coste unitario €</span><input type="number" min="0" step="0.01" value={line.unitCost??0} onChange={event=>changeLine(line.id,'unitCost',event.target.value)}/></label><label className="field"><span>Venta unitaria €</span><input type="number" min="0" step="0.01" value={line.unitPrice??0} onChange={event=>changeLine(line.id,'unitPrice',event.target.value)}/></label><label className="field notes"><span>Nota / sustitución</span><input value={line.notes||''} onChange={event=>changeLine(line.id,'notes',event.target.value)} placeholder="Marca, formato, incidencia…"/></label></div></article>)}</div>:<div className="supply-empty"><PackageCheck/><span><b>Añade los productos solicitados</b><small>Cada producto conservará proveedor, cantidades, coste y precio de venta.</small></span></div>}</section>;
 }function CaseStepReopenPanel({item,reopen}){
