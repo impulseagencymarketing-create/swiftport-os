@@ -12,4 +12,7 @@
 
 <IfModule mod_headers.c>
   Header set X-Content-Type-Options "nosniff"
+  <FilesMatch "^(index\.html|sw\.js)$">
+    Header always set Cache-Control "no-store, max-age=0"
+  </FilesMatch>
 </IfModule>

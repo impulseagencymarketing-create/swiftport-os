@@ -5,7 +5,8 @@ import {AUTOMATIC_ALERTS_ENABLED} from '../src/notificationPolicy.mjs';
 const source=readFileSync(new URL('../src/main.jsx',import.meta.url),'utf8');
 test('quiet policy blocks automatic reminders even with legacy preferences',()=>{
  assert.equal(AUTOMATIC_ALERTS_ENABLED,false);
- for(const guard of ['if(!AUTOMATIC_ALERTS_ENABLED||!operationalLoaded)return;','if(!AUTOMATIC_ALERTS_ENABLED||!operationalLoaded||!deliveryAlerts.length)return;','if(!AUTOMATIC_ALERTS_ENABLED||!operationalLoaded||!billingAlerts.length)return;','enabled:AUTOMATIC_ALERTS_ENABLED&&raw.enabled!==false','{AUTOMATIC_ALERTS_ENABLED&&deliveryPopup&&','{AUTOMATIC_ALERTS_ENABLED&&notificationCount>0&&'])assert.ok(source.includes(guard),guard);
+ for(const guard of ['if(!AUTOMATIC_ALERTS_ENABLED||!operationalLoaded)return;','if(!AUTOMATIC_ALERTS_ENABLED||!operationalLoaded||!deliveryAlerts.length)return;','if(!AUTOMATIC_ALERTS_ENABLED||!operationalLoaded||!billingAlerts.length)return;','enabled:AUTOMATIC_ALERTS_ENABLED&&raw.enabled!==false','{AUTOMATIC_ALERTS_ENABLED&&notificationCount>0&&'])assert.ok(source.includes(guard),guard);
+ assert.doesNotMatch(source,/DeliveryPopup|setDeliveryPopup|className="delivery-popup"/);
  assert.match(source,/async function showDeviceNotification\([^]*?if\(!AUTOMATIC_ALERTS_ENABLED\)return false;/);
  assert.match(source,/const enableDeviceAlerts=async\(\)=>\{\s*if\(!AUTOMATIC_ALERTS_ENABLED\)return;/);
 });

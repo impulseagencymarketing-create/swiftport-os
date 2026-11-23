@@ -1866,7 +1866,6 @@ function App({auth,finance,onFinanceChange,onLogout}){
   const [alertTick,setAlertTick]=useState(Date.now());
   const [notificationOpen,setNotificationOpen]=useState(false);
   const [notificationLog,setNotificationLog]=useState([]);
-  const [deliveryPopup,setDeliveryPopup]=useState(null);
   const [alertSoundSettings,setAlertSoundSettings]=useState(()=>loadAlertSoundSettings());
   const updateAlertSoundSettings=patch=>{
     setAlertSoundSettings(previous=>saveAlertSoundSettings({...previous,...patch}));
@@ -1943,7 +1942,6 @@ function App({auth,finance,onFinanceChange,onLogout}){
       try{localStorage.setItem(`swiftport-delivery-alert-ack-${user.id}`,JSON.stringify(next))}catch{}
       return next;
     });
-    setDeliveryPopup(current=>current?.key===alert.key?null:current);
   };
   const acknowledgeBillingAlert=alert=>{
     if(!alert?.key)return;
@@ -1952,7 +1950,6 @@ function App({auth,finance,onFinanceChange,onLogout}){
       try{localStorage.setItem(`swiftport-billing-alert-ack-${user.id}`,JSON.stringify(next))}catch{}
       return next;
     });
-    setDeliveryPopup(current=>current?.key===alert.key?null:current);
   };
   const acknowledgeOperationalAlert=alert=>alert?.type==='billing'?acknowledgeBillingAlert(alert):acknowledgeDeliveryAlert(alert);
   useEffect(()=>{
@@ -1971,7 +1968,6 @@ function App({auth,finance,onFinanceChange,onLogout}){
     try{localStorage.setItem(storageKey,JSON.stringify(sent))}catch{}
     const entries=fresh.map(alert=>({id:`${alert.key}-${now.getTime()}`,alertKey:alert.key,type:'delivery',title:wasAlreadySent[alert.key]?'Recordatorio pendiente':'Aviso de entrega',message:alert.message,createdAt:now.toISOString(),caseId:alert.case?.id||alert.event?.expediente||'',vessel:alert.case?.buque||alert.event?.titulo||'',rule:alert.rule?.label||''}));
     setNotificationLog(previous=>{const next=[...entries,...previous].slice(0,100);try{localStorage.setItem(`swiftport-notification-log-${user.id}`,JSON.stringify(next))}catch{}return next});
-    setDeliveryPopup(fresh[0]);
     playAlertSound(alertSoundSettings).catch(()=>{});
     notify(fresh.length===1?fresh[0].message:`${fresh.length} avisos de entrega activos. Revisa el calendario.`);
     if(localStorage.getItem('swiftport-device-alerts')==='1'){
@@ -1994,7 +1990,6 @@ function App({auth,finance,onFinanceChange,onLogout}){
     try{localStorage.setItem(storageKey,JSON.stringify(sent))}catch{}
     const entries=fresh.map(alert=>({id:`${alert.key}-${now.getTime()}`,alertKey:alert.key,type:'billing',title:wasAlreadySent[alert.key]?'Recordatorio facturación':'Listo para facturar',message:alert.message,createdAt:now.toISOString(),caseId:alert.case?.id||'',vessel:alert.case?.buque||'',rule:alert.rule?.label||''}));
     setNotificationLog(previous=>{const next=[...entries,...previous].slice(0,100);try{localStorage.setItem(`swiftport-notification-log-${user.id}`,JSON.stringify(next))}catch{}return next});
-    setDeliveryPopup(fresh[0]);
     playAlertSound(alertSoundSettings).catch(()=>{});
     notify(fresh.length===1?fresh[0].message:`${fresh.length} expedientes listos para facturar.`);
     if(localStorage.getItem('swiftport-device-alerts')==='1'){
@@ -2741,7 +2736,6 @@ No se borrarán documentos ni fotos. El expediente volverá a este punto para co
     <MobileNav tab={tab} navigate={navigate} more={()=>setMenuOpen(true)} nav={availableNav}/>
     {newOpen&&<NewCaseModal clientOptions={clientOptions} vessels={vessels} team={operationalTeam} close={()=>setNewOpen(false)} submit={createCase}/>}
     {notificationOpen&&<NotificationDrawer alerts={activeNotifications} history={notificationLog} acknowledge={acknowledgeOperationalAlert} close={()=>setNotificationOpen(false)} clear={clearNotificationLog} openCalendar={()=>{setNotificationOpen(false);navigate('calendario')}} openBilling={()=>{setNotificationOpen(false);navigate('facturacion')}} soundSettings={alertSoundSettings} updateSoundSettings={updateAlertSoundSettings}/>}
-    {AUTOMATIC_ALERTS_ENABLED&&deliveryPopup&&<DeliveryPopup alert={deliveryPopup} close={()=>acknowledgeOperationalAlert(deliveryPopup)} openHistory={()=>{setDeliveryPopup(null);setNotificationOpen(true)}} soundSettings={alertSoundSettings} updateSoundSettings={updateAlertSoundSettings}/>}
     {toast&&<div className="toast" role="status"><CheckCircle2/>{toast}</div>}
   </div>;
 }
@@ -2794,37 +2788,6 @@ const volumeLabel=`Volumen ${Math.round(settings.volume*100)}%${settings.volume>
       </section>
     </aside>
   </>;
-}
-function DeliveryPopup({alert,close,openHistory,soundSettings,updateSoundSettings}){
-  const settings=normalizeAlertSoundSettings(soundSettings);
-const volumeLabel=`Volumen ${Math.round(settings.volume*100)}%${settings.volume>1?' - potenciado':''}`;
-  const updateSettings=patch=>{
-    const next=saveAlertSoundSettings({...settings,...patch});
-    updateSoundSettings?.(next);
-  };
-  const testSound=()=>{
-    const next=saveAlertSoundSettings({...settings,enabled:true});
-    updateSoundSettings?.(next);
-    playAlertSound(next).catch(()=>{});
-  };
-  return <div className="delivery-popup" role="alertdialog" aria-label="Aviso de entrega">
-    <div className="delivery-popup-icon"><Bell/></div>
-    <div>
-      <small>{alert.type==='billing'?'Facturación pendiente':alert.rule?.followUp?'Seguimiento operativo':'Aviso de entrega'}</small>
-      <b>{alert.case?.buque||alert.event?.titulo||'Entrega programada'}</b>
-      <p>{alert.message}</p>
-      <div className="delivery-popup-sound">
-        <label><span>Sonido</span><select value={settings.sound} onChange={event=>updateSettings({sound:event.target.value})}>{ALERT_SOUND_OPTIONS.map(option=><option key={option.id} value={option.id}>{option.label}</option>)}</select></label>
-        <label><span>{volumeLabel}</span><input type="range" min="0" max={ALERT_SOUND_MAX_VOLUME} step="0.05" value={settings.volume} onChange={event=>updateSettings({volume:Number(event.target.value)})}/></label>
-        <label className="sound-toggle"><input type="checkbox" checked={settings.enabled} onChange={event=>updateSettings({enabled:event.target.checked})}/> Sonido activo</label>
-      </div>
-      <div className="delivery-popup-actions">
-        <button className="button tertiary" onClick={testSound}>Probar sonido</button>
-        <button className="button secondary" onClick={openHistory}>Ver historial</button>
-        <button className="button primary" onClick={close}>Entendido</button>
-      </div>
-    </div>
-  </div>;
 }
 function Sidebar({tab,open,navigate,close,nav,user,onLogout}){
   return <aside className={'sidebar '+(open?'open':'')}>
